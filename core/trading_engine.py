@@ -40,6 +40,34 @@ class StrategyConfig:
     MIN_INST_NET_BUY_AMT = 1_000_000_000     # 기관 순매수 금액 최소 10억
     MIN_FRGN_NET_BUY_AMT = 1_000_000_000
     SUPPLY_CHECK_DAYS = 5
+    SUPPLY_RECENCY_WEIGHTS = [0.3, 0.5, 0.8, 1.4, 3.0]
+    SUPPLY_DOUBLE_BUY_BASE_SCORE = 12
+    SUPPLY_DOUBLE_BUY_AMOUNT_SCORE = 4
+    SUPPLY_INST_BUY_BASE_SCORE = 8
+    SUPPLY_INST_BUY_AMOUNT_SCORE = 3
+    SUPPLY_FRGN_BUY_BASE_SCORE = 5
+    SUPPLY_FRGN_BUY_AMOUNT_SCORE = 2
+    SUPPLY_PERSONAL_SELL_SCORE = 3
+    SUPPLY_PERSONAL_BUY_PENALTY = 3
+    SUPPLY_SMART_PERSONAL_SELL_SCORE = 5
+    SUPPLY_SMART_PERSONAL_BUY_PENALTY = 8
+    SUPPLY_DOUBLE_STREAK_BONUS = [0, 0, 8, 15, 22, 30]
+    SUPPLY_INST_STREAK_BONUS = [0, 0, 5, 10, 16, 22]
+    SUPPLY_FRGN_STREAK_BONUS = [0, 0, 3, 6, 9, 12]
+    SUPPLY_CUMULATIVE_FRGN_INST_SCORE = 20
+    SUPPLY_CUMULATIVE_INST_SCORE = 12
+    SUPPLY_CUMULATIVE_SMART_PERSONAL_SELL_SCORE = 15
+    SUPPLY_CUMULATIVE_SMART_PERSONAL_BUY_PENALTY = 20
+    SUPPLY_RECENT_DOUBLE_BUY_SCORE = 20
+    SUPPLY_TODAY_DOUBLE_BUY_SCORE = 15
+    SUPPLY_TODAY_INST_BUY_SCORE = 8
+    SUPPLY_TODAY_SMART_PERSONAL_SELL_SCORE = 8
+    SUPPLY_TODAY_DOUBLE_SELL_PENALTY = 20
+    SUPPLY_GRADE_S_THRESHOLD = 85
+    SUPPLY_GRADE_A_THRESHOLD = 70
+    SUPPLY_GRADE_B_THRESHOLD = 55
+    SUPPLY_GRADE_C_THRESHOLD = 40
+    SUPPLY_FOREIGN_SIGNAL_BOOST_MARGIN = 5
 
     # ---- 관심 섹터 (API 동적 로드, ka90001 + ka90002) ----
     WATCHLIST_SECTORS: dict[str, list[str]] = {}
@@ -257,12 +285,19 @@ class AnalysisEngine:
             return 1
         return 0
 
-    @classmethod
-    def calculate_supply_score(cls, history: list[dict]) -> float:
+    @staticmethod
+    def _bonus_by_streak(bonuses: list[int | float], streak_days: int) -> float:
+        if streak_days < 0:
+            return 0.0
+        if streak_days < len(bonuses):
+            return float(bonuses[streak_days])
+        return float(bonuses[-1]) if bonuses else 0.0
+
+    def calculate_supply_score(self, history: list[dict]) -> float:
         """최근 5거래일 개인/외국인/기관 순매수를 종합해 0~100점으로 환산.
 
         history는 ka10059 응답 그대로(최신→과거). 내부에서 과거→최신 순으로 뒤집어
-        오래된 날에 낮은 가중치(1.0), 최신일에 높은 가중치(1.6)를 적용한다.
+        오래된 날에는 낮은 가중치, 최신일에는 강한 가중치를 적용한다.
 
         우선순위: 외국인+기관 양매수 > 기관 단독 > 외국인 단독 > 개인 매도 동반
         """
@@ -270,12 +305,28 @@ class AnalysisEngine:
             return 0.0
 
         days = list(reversed(history[:5]))  # 과거 → 최신
-        base_weights = [1.0, 1.1, 1.2, 1.4, 1.6]
+        base_weights = list(self.cfg.SUPPLY_RECENCY_WEIGHTS) or [1.0]
+        if len(base_weights) < len(days):
+            base_weights = [base_weights[0]] * (len(days) - len(base_weights)) + base_weights
         weights = base_weights[-len(days):]
 
-        score = 0.0
+        double_streak_bonus = self.cfg.SUPPLY_DOUBLE_STREAK_BONUS
+        inst_streak_bonus = self.cfg.SUPPLY_INST_STREAK_BONUS
+        frgn_streak_bonus = self.cfg.SUPPLY_FRGN_STREAK_BONUS
+
+        max_daily_raw = (
+            self.cfg.SUPPLY_DOUBLE_BUY_BASE_SCORE
+            + self.cfg.SUPPLY_DOUBLE_BUY_AMOUNT_SCORE * 5
+            + self.cfg.SUPPLY_INST_BUY_BASE_SCORE
+            + self.cfg.SUPPLY_INST_BUY_AMOUNT_SCORE * 5
+            + self.cfg.SUPPLY_FRGN_BUY_BASE_SCORE
+            + self.cfg.SUPPLY_FRGN_BUY_AMOUNT_SCORE * 5
+            + self.cfg.SUPPLY_PERSONAL_SELL_SCORE
+            + self.cfg.SUPPLY_SMART_PERSONAL_SELL_SCORE
+        )
+
+        daily_raw = 0.0
         consec_double = consec_inst = consec_frgn = 0
-        max_consec_double = max_consec_inst = max_consec_frgn = 0
         total_personal = total_frgn = total_inst = 0
 
         for day, weight in zip(days, weights):
@@ -290,93 +341,124 @@ class AnalysisEngine:
             # 1. 외국인 + 기관 양매수 (1순위)
             if foreigner > 0 and institution > 0:
                 consec_double += 1
-                score += 12 * weight
-                score += cls._normalize_supply_amount(foreigner + institution) * 4 * weight
+                daily_raw += self.cfg.SUPPLY_DOUBLE_BUY_BASE_SCORE * weight
+                daily_raw += (
+                    self._normalize_supply_amount(foreigner + institution)
+                    * self.cfg.SUPPLY_DOUBLE_BUY_AMOUNT_SCORE
+                    * weight
+                )
             else:
                 consec_double = 0
 
             # 2. 기관 순매수 (2순위)
             if institution > 0:
                 consec_inst += 1
-                score += 8 * weight
-                score += cls._normalize_supply_amount(institution) * 3 * weight
+                daily_raw += self.cfg.SUPPLY_INST_BUY_BASE_SCORE * weight
+                daily_raw += (
+                    self._normalize_supply_amount(institution)
+                    * self.cfg.SUPPLY_INST_BUY_AMOUNT_SCORE
+                    * weight
+                )
             else:
                 consec_inst = 0
 
             # 3. 외국인 순매수
             if foreigner > 0:
                 consec_frgn += 1
-                score += 5 * weight
-                score += cls._normalize_supply_amount(foreigner) * 2 * weight
+                daily_raw += self.cfg.SUPPLY_FRGN_BUY_BASE_SCORE * weight
+                daily_raw += (
+                    self._normalize_supply_amount(foreigner)
+                    * self.cfg.SUPPLY_FRGN_BUY_AMOUNT_SCORE
+                    * weight
+                )
             else:
                 consec_frgn = 0
 
             # 4. 개인 매도/매수 (개인 매수는 종가베팅 관점 감점)
             # personal == 0 은 ka10059 잠정치 미반영 가능성이 있어 중립 처리(가감점 없음)
             if personal < 0:
-                score += 3 * weight
+                daily_raw += self.cfg.SUPPLY_PERSONAL_SELL_SCORE * weight
             elif personal > 0:
-                score -= 3 * weight
+                daily_raw -= self.cfg.SUPPLY_PERSONAL_BUY_PENALTY * weight
 
             # 5. 당일 수급 구조
             smart = foreigner + institution
             if smart > 0 and personal < 0:
-                score += 5 * weight
+                daily_raw += self.cfg.SUPPLY_SMART_PERSONAL_SELL_SCORE * weight
             if smart < 0 and personal > 0:
-                score -= 8 * weight
+                daily_raw -= self.cfg.SUPPLY_SMART_PERSONAL_BUY_PENALTY * weight
 
-            max_consec_double = max(max_consec_double, consec_double)
-            max_consec_inst = max(max_consec_inst, consec_inst)
-            max_consec_frgn = max(max_consec_frgn, consec_frgn)
+        score_raw = daily_raw
+        max_score_raw = max(max_daily_raw, 1.0) * sum(weights)
 
-        # 6. 연속 양매수 보너스
-        score += {5: 30, 4: 22, 3: 15, 2: 8}.get(min(max_consec_double, 5), 0)
-        # 7. 기관 연속 순매수 보너스
-        score += {5: 22, 4: 16, 3: 10, 2: 5}.get(min(max_consec_inst, 5), 0)
-        # 8. 외국인 연속 순매수 보너스
-        score += {5: 12, 4: 9, 3: 6, 2: 3}.get(min(max_consec_frgn, 5), 0)
+        # 6. 최신일까지 이어진 연속 매수에만 보너스를 부여한다.
+        streak_raw = 0
+        streak_raw += self._bonus_by_streak(double_streak_bonus, consec_double)
+        streak_raw += self._bonus_by_streak(inst_streak_bonus, consec_inst)
+        streak_raw += self._bonus_by_streak(frgn_streak_bonus, consec_frgn)
+        score_raw += streak_raw
 
-        # 9. 5일 누적 수급 구조
+        max_streak_days = min(len(days), 5)
+        max_score_raw += self._bonus_by_streak(double_streak_bonus, max_streak_days)
+        max_score_raw += self._bonus_by_streak(inst_streak_bonus, max_streak_days)
+        max_score_raw += self._bonus_by_streak(frgn_streak_bonus, max_streak_days)
+
+        # 7. 5일 누적 수급 구조
+        cumulative_raw = 0
         total_smart = total_frgn + total_inst
         if total_frgn > 0 and total_inst > 0:
-            score += 20
+            cumulative_raw += self.cfg.SUPPLY_CUMULATIVE_FRGN_INST_SCORE
         if total_inst > 0:
-            score += 12
+            cumulative_raw += self.cfg.SUPPLY_CUMULATIVE_INST_SCORE
         if total_smart > 0 and total_personal < 0:
-            score += 15
+            cumulative_raw += self.cfg.SUPPLY_CUMULATIVE_SMART_PERSONAL_SELL_SCORE
         if total_smart < 0 and total_personal > 0:
-            score -= 20
+            cumulative_raw -= self.cfg.SUPPLY_CUMULATIVE_SMART_PERSONAL_BUY_PENALTY
+        score_raw += cumulative_raw
+        max_score_raw += (
+            self.cfg.SUPPLY_CUMULATIVE_FRGN_INST_SCORE
+            + self.cfg.SUPPLY_CUMULATIVE_INST_SCORE
+            + self.cfg.SUPPLY_CUMULATIVE_SMART_PERSONAL_SELL_SCORE
+        )
 
-        # 10. 최근 2일 강조 (종가베팅은 최신 수급이 핵심)
+        # 8. 최근 2일과 최신일 강조 (종가베팅은 최신 수급이 핵심)
+        recent_raw = 0
         if len(days) >= 2:
             d4, d5 = days[-2], days[-1]
             if (d4.get("frgn_net_buy", 0) > 0 and d4.get("inst_net_buy", 0) > 0 and
                     d5.get("frgn_net_buy", 0) > 0 and d5.get("inst_net_buy", 0) > 0):
-                score += 20
+                recent_raw += self.cfg.SUPPLY_RECENT_DOUBLE_BUY_SCORE
+            max_score_raw += self.cfg.SUPPLY_RECENT_DOUBLE_BUY_SCORE
         d5 = days[-1]
         f5 = d5.get("frgn_net_buy", 0)
         i5 = d5.get("inst_net_buy", 0)
         p5 = d5.get("indv_net_buy", 0)
         if f5 > 0 and i5 > 0:
-            score += 15
+            recent_raw += self.cfg.SUPPLY_TODAY_DOUBLE_BUY_SCORE
         if i5 > 0:
-            score += 8
+            recent_raw += self.cfg.SUPPLY_TODAY_INST_BUY_SCORE
         if (f5 + i5) > 0 and p5 < 0:
-            score += 8
+            recent_raw += self.cfg.SUPPLY_TODAY_SMART_PERSONAL_SELL_SCORE
         if f5 < 0 and i5 < 0:
-            score -= 20
+            recent_raw -= self.cfg.SUPPLY_TODAY_DOUBLE_SELL_PENALTY
+        score_raw += recent_raw
+        max_score_raw += (
+            self.cfg.SUPPLY_TODAY_DOUBLE_BUY_SCORE
+            + self.cfg.SUPPLY_TODAY_INST_BUY_SCORE
+            + self.cfg.SUPPLY_TODAY_SMART_PERSONAL_SELL_SCORE
+        )
 
+        score = score_raw / max_score_raw * 100
         return max(0.0, min(100.0, score))
 
-    @staticmethod
-    def classify_supply_score(score: float) -> SupplyGrade:
-        if score >= 85:
+    def classify_supply_score(self, score: float) -> SupplyGrade:
+        if score >= self.cfg.SUPPLY_GRADE_S_THRESHOLD:
             return SupplyGrade.S
-        if score >= 70:
+        if score >= self.cfg.SUPPLY_GRADE_A_THRESHOLD:
             return SupplyGrade.A
-        if score >= 55:
+        if score >= self.cfg.SUPPLY_GRADE_B_THRESHOLD:
             return SupplyGrade.B
-        if score >= 40:
+        if score >= self.cfg.SUPPLY_GRADE_C_THRESHOLD:
             return SupplyGrade.C
         return SupplyGrade.D
 
@@ -479,7 +561,14 @@ class AnalysisEngine:
 
         foreign_signal = result["foreign_brokers_buying"] or result["prog_net_buy"] > 0
         if foreign_signal:
-            for low, high in [(80, 85), (65, 70), (50, 55), (35, 40)]:
+            thresholds = [
+                self.cfg.SUPPLY_GRADE_S_THRESHOLD,
+                self.cfg.SUPPLY_GRADE_A_THRESHOLD,
+                self.cfg.SUPPLY_GRADE_B_THRESHOLD,
+                self.cfg.SUPPLY_GRADE_C_THRESHOLD,
+            ]
+            for high in sorted(thresholds, reverse=True):
+                low = max(0, high - self.cfg.SUPPLY_FOREIGN_SIGNAL_BOOST_MARGIN)
                 if low <= score < high:
                     score = high
                     break

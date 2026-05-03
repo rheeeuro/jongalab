@@ -13,6 +13,34 @@ interface StrategyConfig {
   MIN_INST_NET_BUY_AMT: number;
   MIN_FRGN_NET_BUY_AMT: number;
   SUPPLY_CHECK_DAYS: number;
+  SUPPLY_RECENCY_WEIGHTS: number[];
+  SUPPLY_DOUBLE_BUY_BASE_SCORE: number;
+  SUPPLY_DOUBLE_BUY_AMOUNT_SCORE: number;
+  SUPPLY_INST_BUY_BASE_SCORE: number;
+  SUPPLY_INST_BUY_AMOUNT_SCORE: number;
+  SUPPLY_FRGN_BUY_BASE_SCORE: number;
+  SUPPLY_FRGN_BUY_AMOUNT_SCORE: number;
+  SUPPLY_PERSONAL_SELL_SCORE: number;
+  SUPPLY_PERSONAL_BUY_PENALTY: number;
+  SUPPLY_SMART_PERSONAL_SELL_SCORE: number;
+  SUPPLY_SMART_PERSONAL_BUY_PENALTY: number;
+  SUPPLY_DOUBLE_STREAK_BONUS: number[];
+  SUPPLY_INST_STREAK_BONUS: number[];
+  SUPPLY_FRGN_STREAK_BONUS: number[];
+  SUPPLY_CUMULATIVE_FRGN_INST_SCORE: number;
+  SUPPLY_CUMULATIVE_INST_SCORE: number;
+  SUPPLY_CUMULATIVE_SMART_PERSONAL_SELL_SCORE: number;
+  SUPPLY_CUMULATIVE_SMART_PERSONAL_BUY_PENALTY: number;
+  SUPPLY_RECENT_DOUBLE_BUY_SCORE: number;
+  SUPPLY_TODAY_DOUBLE_BUY_SCORE: number;
+  SUPPLY_TODAY_INST_BUY_SCORE: number;
+  SUPPLY_TODAY_SMART_PERSONAL_SELL_SCORE: number;
+  SUPPLY_TODAY_DOUBLE_SELL_PENALTY: number;
+  SUPPLY_GRADE_S_THRESHOLD: number;
+  SUPPLY_GRADE_A_THRESHOLD: number;
+  SUPPLY_GRADE_B_THRESHOLD: number;
+  SUPPLY_GRADE_C_THRESHOLD: number;
+  SUPPLY_FOREIGN_SIGNAL_BOOST_MARGIN: number;
   TOP_THEME_COUNT: number;
   THEME_PERIOD_DAYS: string;
   THEME_STOCK_BONUS: number;
@@ -42,6 +70,49 @@ const SECTIONS = [
       { key: "MIN_INST_NET_BUY_AMT", label: "기관 순매수 최소 금액", unit: "원", type: "currency" as const },
       { key: "MIN_FRGN_NET_BUY_AMT", label: "외국인 순매수 최소 금액", unit: "원", type: "currency" as const },
       { key: "SUPPLY_CHECK_DAYS", label: "수급 확인 기간", unit: "일", type: "number" as const },
+      { key: "SUPPLY_RECENCY_WEIGHTS", label: "수급 최신 가중치", unit: "과거→최신", type: "array" as const },
+    ],
+  },
+  {
+    title: "수급 점수 - 일별",
+    fields: [
+      { key: "SUPPLY_DOUBLE_BUY_BASE_SCORE", label: "외국인+기관 양매수 기본점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_DOUBLE_BUY_AMOUNT_SCORE", label: "외국인+기관 금액점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_INST_BUY_BASE_SCORE", label: "기관 순매수 기본점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_INST_BUY_AMOUNT_SCORE", label: "기관 순매수 금액점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_FRGN_BUY_BASE_SCORE", label: "외국인 순매수 기본점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_FRGN_BUY_AMOUNT_SCORE", label: "외국인 순매수 금액점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_PERSONAL_SELL_SCORE", label: "개인 순매도 가점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_PERSONAL_BUY_PENALTY", label: "개인 순매수 감점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_SMART_PERSONAL_SELL_SCORE", label: "스마트머니+개인매도 가점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_SMART_PERSONAL_BUY_PENALTY", label: "스마트머니매도+개인매수 감점", unit: "점", type: "number" as const },
+    ],
+  },
+  {
+    title: "수급 점수 - 연속/누적",
+    fields: [
+      { key: "SUPPLY_DOUBLE_STREAK_BONUS", label: "양매수 연속 보너스", unit: "0~5일", type: "array" as const },
+      { key: "SUPPLY_INST_STREAK_BONUS", label: "기관 연속 보너스", unit: "0~5일", type: "array" as const },
+      { key: "SUPPLY_FRGN_STREAK_BONUS", label: "외국인 연속 보너스", unit: "0~5일", type: "array" as const },
+      { key: "SUPPLY_CUMULATIVE_FRGN_INST_SCORE", label: "누적 외국인+기관 양수 가점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_CUMULATIVE_INST_SCORE", label: "누적 기관 양수 가점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_CUMULATIVE_SMART_PERSONAL_SELL_SCORE", label: "누적 스마트머니+개인매도 가점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_CUMULATIVE_SMART_PERSONAL_BUY_PENALTY", label: "누적 스마트머니매도+개인매수 감점", unit: "점", type: "number" as const },
+    ],
+  },
+  {
+    title: "수급 점수 - 최신/등급",
+    fields: [
+      { key: "SUPPLY_RECENT_DOUBLE_BUY_SCORE", label: "최근 2일 양매수 가점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_TODAY_DOUBLE_BUY_SCORE", label: "오늘 양매수 가점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_TODAY_INST_BUY_SCORE", label: "오늘 기관 순매수 가점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_TODAY_SMART_PERSONAL_SELL_SCORE", label: "오늘 스마트머니+개인매도 가점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_TODAY_DOUBLE_SELL_PENALTY", label: "오늘 외국인+기관 동반매도 감점", unit: "점", type: "number" as const },
+      { key: "SUPPLY_GRADE_S_THRESHOLD", label: "S등급 기준", unit: "점 이상", type: "number" as const },
+      { key: "SUPPLY_GRADE_A_THRESHOLD", label: "A등급 기준", unit: "점 이상", type: "number" as const },
+      { key: "SUPPLY_GRADE_B_THRESHOLD", label: "B등급 기준", unit: "점 이상", type: "number" as const },
+      { key: "SUPPLY_GRADE_C_THRESHOLD", label: "C등급 기준", unit: "점 이상", type: "number" as const },
+      { key: "SUPPLY_FOREIGN_SIGNAL_BOOST_MARGIN", label: "외국계 신호 등급 보정폭", unit: "점", type: "number" as const },
     ],
   },
   {
