@@ -137,7 +137,7 @@ class ClosingBetStrategy:
     # ── Phase 2: 수급 분석 ──
     def _phase2_supply_analysis(self, candidates: list[StockCandidate]) -> list[StockCandidate]:
         filtered = []
-
+        
         for c in candidates:
             is_aligned, near_high = self.engine.check_ma_alignment(c.code)
             if not is_aligned and not near_high:
@@ -155,10 +155,6 @@ class ClosingBetStrategy:
             c.supply_score = supply.get("supply_score", 0.0)
             c.supply_days = supply["supply_days"]
             c.supply_history = supply.get("supply_history", [])
-
-            if c.supply_grade == SupplyGrade.D:
-                logger.debug(f"수급 D등급(score={c.supply_score:.1f}) → 제외: {c.name}")
-                continue
 
             # 1시간봉 캔들 데이터 조회
             c.hourly_candles = self.engine.fetch_hourly_candles(c.code)
