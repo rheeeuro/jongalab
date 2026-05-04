@@ -7,14 +7,15 @@ import { Globe, Landmark, Gem } from "lucide-react";
 
 const CACHE_KEY = "market-indices-cache";
 const POLL_INTERVAL = 60_000; // 1분
+const EMPTY_INDICES: MarketIndices = { US: [], KR: [], COMMODITIES: [] };
 
-function readCachedMarketIndices(fallback: MarketIndices): MarketIndices {
-  if (typeof window === "undefined") return fallback;
+function readCachedMarketIndices(): MarketIndices | null {
+  if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(CACHE_KEY);
-    return raw ? JSON.parse(raw) : fallback;
+    return raw ? JSON.parse(raw) : null;
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -39,24 +40,20 @@ function Section({
 }
 
 export function MarketIndicesSection({
-  freshData,
   showUS,
   showKR,
 }: {
-  freshData: MarketIndices;
   showUS: boolean;
   showKR: boolean;
 }) {
-  const [displayData, setDisplayData] = useState<MarketIndices>(() =>
-    readCachedMarketIndices(freshData)
-  );
+  const [displayData, setDisplayData] = useState<MarketIndices>(() => {
+    const cached = readCachedMarketIndices();
+    return cached ?? EMPTY_INDICES;
+  });
   const [animate, setAnimate] = useState(false);
-  const initialized = useRef(false);
-  const startedFromCache = useRef(displayData !== freshData);
-  const latestData = useRef(freshData);
+  const hasCache = useRef(displayData !== EMPTY_INDICES);
 
   const animateTo = useCallback((next: MarketIndices) => {
-    latestData.current = next;
     setAnimate(false);
     // 1프레임: 현재 값 고정 → 2프레임: 새 값으로 전환
     requestAnimationFrame(() => {
@@ -72,35 +69,38 @@ export function MarketIndicesSection({
     }
   }, []);
 
-  // 캐시가 있으면 캐시값 먼저 보여주고 슬롯머신 애니메이션으로 전환
-  useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-    if (startedFromCache.current) {
-      // 캐시가 있으면 paint 후 슬롯머신 애니메이션으로 전환
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          setDisplayData(freshData);
-          setAnimate(true);
-        });
-      });
+  const fetchLatest = useCallback(async () => {
+    try {
+      const res = await fetch("/api/market-indices", { cache: "no-store" });
+      if (!res.ok) return;
+      const data: MarketIndices = await res.json();
+      if (hasCache.current) {
+        animateTo(data);
+      } else {
+        setDisplayData(data);
+        hasCache.current = true;
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        } catch {
+          // localStorage 용량 초과 또는 사용 불가
+        }
+      }
+    } catch {
+      // 네트워크 에러 무시, 다음 폴링에서 재시도
     }
-  }, [freshData]);
+  }, [animateTo]);
+
+  // 캐시값을 먼저 보여주고, API 조회 결과는 슬롯머신 애니메이션으로 반영한다.
+  useEffect(() => {
+    const id = window.setTimeout(fetchLatest, 0);
+    return () => window.clearTimeout(id);
+  }, [fetchLatest]);
 
   // 1분마다 지표 API 폴링
   useEffect(() => {
-    const id = setInterval(async () => {
-      try {
-        const res = await fetch("/api/market-indices");
-        if (!res.ok) return;
-        const data: MarketIndices = await res.json();
-        animateTo(data);
-      } catch {
-        // 네트워크 에러 무시, 다음 폴링에서 재시도
-      }
-    }, POLL_INTERVAL);
+    const id = setInterval(fetchLatest, POLL_INTERVAL);
     return () => clearInterval(id);
-  }, [animateTo]);
+  }, [fetchLatest]);
 
   return (
     <>
