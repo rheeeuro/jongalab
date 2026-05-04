@@ -1,14 +1,19 @@
-// src/app/robots.ts
+import { MetadataRoute } from "next";
 
-import { MetadataRoute } from 'next';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://stock.rheeeuro.com";
 
 export default function robots(): MetadataRoute.Robots {
+  const baseUrl = SITE_URL.replace(/\/$/, "");
+
   return {
-    rules: {
-      userAgent: '*', // 모든 검색 엔진 봇 허용 (구글, 네이버, 빙 등)
-      allow: '/',     // 모든 경로 접근 허용
-    },
-    // 방금 만든 사이트맵의 절대 경로 명시
-    sitemap: 'https://stock.rheeeuro.com/sitemap.xml',
+    rules: [
+      {
+        userAgent: "*",
+        allow: "/",
+        // 관리자 화면과 내부 API는 검색 색인 대상에서 제외
+        disallow: ["/admin/", "/api/"],
+      },
+    ],
+    sitemap: `${baseUrl}/sitemap.xml`,
   };
 }

@@ -1,71 +1,108 @@
-// src/app/sitemap.ts
+import { MetadataRoute } from "next";
+import { API_BASE } from "@/lib/api";
+import { DailySummary, StockReport, TickerDictionary } from "@/types";
 
-import { MetadataRoute } from 'next';
-import { DailySummary, TickerDictionary } from '@/types';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://stock.rheeeuro.com";
+const REVALIDATE_SECONDS = 3600;
+
+function parseLastModified(date?: string) {
+  if (!date) return new Date();
+
+  const parsedDate = new Date(date);
+  return Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+}
+
+async function fetchJson<T>(path: string, fallback: T): Promise<T> {
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      next: { revalidate: REVALIDATE_SECONDS },
+    });
+
+    if (!res.ok) return fallback;
+
+    return res.json();
+  } catch (error) {
+    console.error(`사이트맵 데이터 조회 실패 (${path}):`, error);
+    return fallback;
+  }
+}
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = 'https://stock.rheeeuro.com';
+  const baseUrl = SITE_URL.replace(/\/$/, "");
+  const now = new Date();
 
-  // 1. 고정된 페이지
+  // 검색 노출 대상이 되는 고정 공개 페이지
   const routes: MetadataRoute.Sitemap = [
     {
       url: baseUrl,
-      lastModified: new Date(),
-      changeFrequency: 'always',
+      lastModified: now,
+      changeFrequency: "always",
       priority: 1.0,
     },
     {
       url: `${baseUrl}/dashboard`,
-      lastModified: new Date(),
-      changeFrequency: 'daily',
+      lastModified: now,
+      changeFrequency: "daily",
       priority: 0.9,
     },
   ];
 
-  // 2. 동적 페이지 (과거 AI 투자 리포트들)
-  try {
-    // limit=100으로 넉넉하게 최근 100일치 데이터를 가져옵니다.
-    const res = await fetch('http://127.0.0.1:8000/api/daily-summary-list?limit=100', {
-      next: { revalidate: 3600 }, // 1시간(3600초)마다 사이트맵 갱신
-    });
+  const reports = await fetchJson<DailySummary[]>(
+    "/api/daily-summary-list?limit=100",
+    []
+  );
 
-    if (res.ok) {
-      const reports: DailySummary[] = await res.json();
-      
-      const dynamicRoutes = reports.map((report) => ({
-        url: `${baseUrl}/report/${report.report_date}`,
-        lastModified: new Date(), // DB에 created_at이 있다면 그걸 써도 좋습니다.
-        changeFrequency: 'never' as const, // 과거 리포트는 내용이 안 바뀌므로 never
-        priority: 0.8, // 세부 페이지는 중요도 0.8 정도 할당
-      }));
-
-      routes.push(...dynamicRoutes);
+  const reportMap = new Map<string, DailySummary>();
+  reports.forEach((report) => {
+    if (!reportMap.has(report.report_date)) {
+      reportMap.set(report.report_date, report);
     }
-  } catch (error) {
-    console.error('사이트맵 생성 중 에러 발생 (리포트):', error);
-  }
+  });
 
-  // 3. 동적 페이지 — 개별 종목
-  try {
-    const res = await fetch('http://127.0.0.1:8000/api/ticker-dictionary?status=ACTIVE', {
-      next: { revalidate: 3600 },
-    });
+  const reportRoutes: MetadataRoute.Sitemap = Array.from(reportMap.values()).map(
+    (report) => ({
+      url: `${baseUrl}/report/${encodeURIComponent(report.report_date)}`,
+      lastModified: parseLastModified(report.created_at ?? report.report_date),
+      changeFrequency: "never",
+      priority: 0.8,
+    })
+  );
 
-    if (res.ok) {
-      const tickers: TickerDictionary[] = await res.json();
+  routes.push(...reportRoutes);
 
-      const stockRoutes = tickers.map((ticker) => ({
-        url: `${baseUrl}/stock/${ticker.ticker_symbol}`,
-        lastModified: new Date(ticker.updated_at),
-        changeFrequency: 'daily' as const,
-        priority: 0.7,
-      }));
+  // 날짜별 종목 리포트 상세 페이지
+  const stockReportsByDate = await Promise.all(
+    Array.from(reportMap.keys()).map((date) =>
+      fetchJson<StockReport[]>(`/api/stock-report/${encodeURIComponent(date)}`, [])
+    )
+  );
 
-      routes.push(...stockRoutes);
-    }
-  } catch (error) {
-    console.error('사이트맵 생성 중 에러 발생 (종목):', error);
-  }
+  const stockReportRoutes: MetadataRoute.Sitemap = stockReportsByDate
+    .flat()
+    .map((report) => ({
+      url: `${baseUrl}/report/${encodeURIComponent(
+        report.report_date
+      )}/${encodeURIComponent(report.stock_code)}`,
+      lastModified: parseLastModified(report.created_at ?? report.report_date),
+      changeFrequency: "never",
+      priority: 0.7,
+    }));
+
+  routes.push(...stockReportRoutes);
+
+  const tickers = await fetchJson<TickerDictionary[]>(
+    "/api/ticker-dictionary?status=ACTIVE",
+    []
+  );
+
+  const stockRoutes: MetadataRoute.Sitemap = tickers.map((ticker) => ({
+    url: `${baseUrl}/stock/${encodeURIComponent(ticker.ticker_symbol)}`,
+    lastModified: parseLastModified(ticker.updated_at),
+    changeFrequency: "daily",
+    priority: 0.7,
+  }));
+
+  routes.push(...stockRoutes);
 
   return routes;
 }
