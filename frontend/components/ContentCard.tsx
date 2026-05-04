@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import type { ComponentProps } from "react";
 import Link from "next/link";
 import { ContentAnalysis } from "@/types";
 import {
@@ -26,6 +26,21 @@ const MARKET_ICONS: Record<string, string> = {
 
 interface Props {
   item: ContentAnalysis;
+}
+
+type MarkdownCodeProps = ComponentProps<"code"> & {
+  inline?: boolean;
+  node?: unknown;
+};
+
+type MarkdownNodeProps<T extends keyof HTMLElementTagNameMap> = ComponentProps<T> & {
+  node?: unknown;
+};
+
+function withoutNode<T extends { node?: unknown }>(props: T): Omit<T, "node"> {
+  const { node, ...rest } = props;
+  void node;
+  return rest;
 }
 
 function CardBody({ item }: { item: ContentAnalysis }) {
@@ -123,16 +138,11 @@ function CardBody({ item }: { item: ContentAnalysis }) {
 }
 
 export function ContentCard({ item }: Props) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
   const card = (
     <Card className="flex flex-col gap-2 h-full overflow-hidden hover:shadow-lg transition-shadow border-slate-200 dark:border-slate-800 cursor-pointer group">
       <CardBody item={item} />
     </Card>
   );
-
-  if (!mounted) return card;
 
   return (
     <Dialog>
@@ -202,22 +212,24 @@ export function ContentCard({ item }: Props) {
             <article className="prose prose-slate dark:prose-invert prose-sm w-full max-w-none break-words overflow-x-hidden">
               <ReactMarkdown 
                 components={{
-                  h2: ({node, ...props}) => <h2 className="text-xl font-bold mt-8 mb-4 text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-700 pb-2 break-words" {...props} />,
-                  h3: ({node, ...props}) => <h3 className="text-lg font-semibold mt-6 mb-3 text-slate-800 dark:text-slate-200 break-words" {...props} />,
-                  p: ({node, ...props}) => <p className="mb-4 leading-7 text-slate-700 dark:text-slate-300 break-words overflow-wrap-anywhere" {...props} />,
-                  ul: ({node, ...props}) => <ul className="list-disc list-inside mb-4 space-y-2 text-slate-700 dark:text-slate-300 break-words" {...props} />,
-                  ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-4 space-y-2 text-slate-700 dark:text-slate-300 break-words" {...props} />,
-                  li: ({node, ...props}) => <li className="mb-2 leading-7 ml-4 break-words overflow-wrap-anywhere" {...props} />,
-                  strong: ({node, ...props}) => <strong className="font-bold text-slate-900 dark:text-slate-100" {...props} />,
-                  em: ({node, ...props}) => <em className="italic text-slate-800 dark:text-slate-200" {...props} />,
-                  blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-blue-500 pl-4 py-2 my-4 bg-blue-50 dark:bg-blue-900/20 italic text-slate-700 dark:text-slate-300 break-words overflow-wrap-anywhere" {...props} />,
-                  code: ({node, inline, ...props}: any) => 
-                    inline ? (
-                      <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-sm font-mono text-slate-800 dark:text-slate-200 break-all" {...props} />
+                  h2: (props: MarkdownNodeProps<"h2">) => <h2 className="text-xl font-bold mt-8 mb-4 text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-700 pb-2 break-words" {...withoutNode(props)} />,
+                  h3: (props: MarkdownNodeProps<"h3">) => <h3 className="text-lg font-semibold mt-6 mb-3 text-slate-800 dark:text-slate-200 break-words" {...withoutNode(props)} />,
+                  p: (props: MarkdownNodeProps<"p">) => <p className="mb-4 leading-7 text-slate-700 dark:text-slate-300 break-words overflow-wrap-anywhere" {...withoutNode(props)} />,
+                  ul: (props: MarkdownNodeProps<"ul">) => <ul className="list-disc list-inside mb-4 space-y-2 text-slate-700 dark:text-slate-300 break-words" {...withoutNode(props)} />,
+                  ol: (props: MarkdownNodeProps<"ol">) => <ol className="list-decimal list-inside mb-4 space-y-2 text-slate-700 dark:text-slate-300 break-words" {...withoutNode(props)} />,
+                  li: (props: MarkdownNodeProps<"li">) => <li className="mb-2 leading-7 ml-4 break-words overflow-wrap-anywhere" {...withoutNode(props)} />,
+                  strong: (props: MarkdownNodeProps<"strong">) => <strong className="font-bold text-slate-900 dark:text-slate-100" {...withoutNode(props)} />,
+                  em: (props: MarkdownNodeProps<"em">) => <em className="italic text-slate-800 dark:text-slate-200" {...withoutNode(props)} />,
+                  blockquote: (props: MarkdownNodeProps<"blockquote">) => <blockquote className="border-l-4 border-blue-500 pl-4 py-2 my-4 bg-blue-50 dark:bg-blue-900/20 italic text-slate-700 dark:text-slate-300 break-words overflow-wrap-anywhere" {...withoutNode(props)} />,
+                  code: (props: MarkdownCodeProps) => {
+                    const { inline, ...codeProps } = withoutNode(props);
+                    return inline ? (
+                      <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-sm font-mono text-slate-800 dark:text-slate-200 break-all" {...codeProps} />
                     ) : (
-                      <code className="block bg-slate-100 dark:bg-slate-800 p-4 rounded-lg text-sm font-mono text-slate-800 dark:text-slate-200 overflow-x-auto max-w-full" {...props} />
-                    ),
-                  pre: ({node, ...props}) => <pre className="bg-slate-100 dark:bg-slate-800 p-4 rounded-lg overflow-x-auto mb-4 max-w-full" {...props} />,
+                      <code className="block bg-slate-100 dark:bg-slate-800 p-4 rounded-lg text-sm font-mono text-slate-800 dark:text-slate-200 overflow-x-auto max-w-full" {...codeProps} />
+                    );
+                  },
+                  pre: (props: MarkdownNodeProps<"pre">) => <pre className="bg-slate-100 dark:bg-slate-800 p-4 rounded-lg overflow-x-auto mb-4 max-w-full" {...withoutNode(props)} />,
                 }} 
                 remarkPlugins={[remarkBreaks]}
               >    

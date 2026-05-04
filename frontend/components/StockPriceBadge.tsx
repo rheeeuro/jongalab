@@ -12,13 +12,10 @@ interface PriceData {
 
 export function StockPriceBadge({ ticker }: { ticker: string }) {
   const [data, setData] = useState<PriceData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(ticker));
 
   useEffect(() => {
-    if (!ticker) {
-      setLoading(false);
-      return;
-    }
+    if (!ticker) return;
     
     // 백엔드 API 호출하여 실시간 주가 가져오기
     fetch(`/api/stock-price/${ticker}`)

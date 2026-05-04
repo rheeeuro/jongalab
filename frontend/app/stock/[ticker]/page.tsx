@@ -17,7 +17,12 @@ async function getStockName(ticker: string): Promise<string> {
   return data.name;
 }
 
-async function getStockHistory(ticker: string): Promise<any[]> {
+interface StockHistoryItem {
+  date: string;
+  price: number;
+}
+
+async function getStockHistory(ticker: string): Promise<StockHistoryItem[]> {
   return apiFetch(`/api/stock-history/${ticker}`, []);
 }
 

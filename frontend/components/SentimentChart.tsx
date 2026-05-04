@@ -19,8 +19,31 @@ interface HistoryData {
   price: number;
 }
 
+interface ChartPoint {
+  dateKey?: string;
+  displayDate?: string;
+  score?: number;
+  price?: number;
+  title?: string;
+  count?: number;
+  firstTitle?: string;
+}
+
+interface TooltipPayloadItem {
+  name?: string;
+  value?: number | string;
+  color?: string;
+  payload: ChartPoint;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: TooltipPayloadItem[];
+  label?: string;
+}
+
 // 🎨 우리가 만든 예쁜 커스텀 툴팁 (메인/상세 공통 사용)
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload; 
     
@@ -28,13 +51,21 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       <div className="bg-white dark:bg-slate-800 p-3 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50">
         <p className="font-bold text-slate-800 dark:text-slate-200 mb-2">{label}</p>
         
-        {payload.map((entry: any, index: number) => (
+        {payload.map((entry, index) => {
+          const value = entry.value ?? "";
+          const displayValue =
+            entry.name === "실제 주가" && typeof value === "number"
+              ? value.toLocaleString()
+              : value;
+
+          return (
           <p key={index} style={{ color: entry.color }} className="text-sm font-bold flex justify-between gap-4 mb-1">
             <span>{entry.name}</span>
             {/* 주가일 경우 $ 기호 추가, 점수일 경우 그냥 숫자 표시 */}
-            <span>{entry.name === "실제 주가" ? entry.value.toLocaleString() : entry.value}</span>
+            <span>{displayValue}</span>
           </p>
-        ))}
+          );
+        })}
         
         {/* 뉴스 제목이 있으면 하단에 표시 */}
         {data.title && (
@@ -78,7 +109,7 @@ export function SentimentChart({
     }
 
     // 📍 2. 상세 페이지 모드 (날짜별 병합 + 제목 요약)
-    const dateMap = new Map<string, any>();
+    const dateMap = new Map<string, ChartPoint>();
 
     // 주가 뼈대 잡기
     history.forEach((h) => {
@@ -105,6 +136,7 @@ export function SentimentChart({
         });
       } else {
         const existing = dateMap.get(dateKey);
+        if (!existing) return;
         if (existing.score === undefined) {
           existing.score = currentScore;
           existing.count = 1;

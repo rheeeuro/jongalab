@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { API_BASE } from '@/lib/api';
 
+type RouteContext = {
+  params: Promise<{ id: string }> | { id: string };
+};
+
 // PUT /api/telegram-users/[id] — 텔레그램 유저 수정 프록시
-export async function PUT(request: NextRequest, context: any) {
+export async function PUT(request: NextRequest, context: RouteContext) {
   try {
     const resolvedParams = await Promise.resolve(context.params);
     const id = resolvedParams.id;
@@ -27,7 +31,7 @@ export async function PUT(request: NextRequest, context: any) {
 }
 
 // DELETE /api/telegram-users/[id] — 텔레그램 유저 삭제 프록시
-export async function DELETE(_request: NextRequest, context: any) {
+export async function DELETE(_request: NextRequest, context: RouteContext) {
   try {
     const resolvedParams = await Promise.resolve(context.params);
     const id = resolvedParams.id;

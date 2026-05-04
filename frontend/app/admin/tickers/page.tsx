@@ -19,7 +19,6 @@ import {
   Edit2,
   Search,
   Trash2,
-  X,
   BookOpen,
 } from "lucide-react";
 

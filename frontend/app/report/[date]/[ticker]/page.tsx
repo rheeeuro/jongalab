@@ -1,4 +1,4 @@
-import { StockReportDetail, SupplyHistoryItem, ContentAnalysisItem } from "@/types";
+import { StockReportDetail, SupplyHistoryItem } from "@/types";
 import { StockPriceBadge } from "@/components/StockPriceBadge";
 import { CandlestickChart } from "@/components/CandlestickChart";
 import { apiFetch } from "@/lib/api";

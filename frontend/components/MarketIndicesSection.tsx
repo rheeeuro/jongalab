@@ -8,6 +8,16 @@ import { Globe, Landmark, Gem } from "lucide-react";
 const CACHE_KEY = "market-indices-cache";
 const POLL_INTERVAL = 60_000; // 1분
 
+function readCachedMarketIndices(fallback: MarketIndices): MarketIndices {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function Section({
   icon,
   title,
@@ -37,9 +47,12 @@ export function MarketIndicesSection({
   showUS: boolean;
   showKR: boolean;
 }) {
-  const [displayData, setDisplayData] = useState<MarketIndices>(freshData);
+  const [displayData, setDisplayData] = useState<MarketIndices>(() =>
+    readCachedMarketIndices(freshData)
+  );
   const [animate, setAnimate] = useState(false);
   const initialized = useRef(false);
+  const startedFromCache = useRef(displayData !== freshData);
   const latestData = useRef(freshData);
 
   const animateTo = useCallback((next: MarketIndices) => {
@@ -55,7 +68,7 @@ export function MarketIndicesSection({
     try {
       localStorage.setItem(CACHE_KEY, JSON.stringify(next));
     } catch {
-      // localStorage full or unavailable
+      // localStorage 용량 초과 또는 사용 불가
     }
   }, []);
 
@@ -63,17 +76,7 @@ export function MarketIndicesSection({
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-
-    let cached: MarketIndices | null = null;
-    try {
-      const raw = localStorage.getItem(CACHE_KEY);
-      if (raw) cached = JSON.parse(raw);
-    } catch {
-      // no valid cache
-    }
-
-    if (cached) {
-      setDisplayData(cached);
+    if (startedFromCache.current) {
       // 캐시가 있으면 paint 후 슬롯머신 애니메이션으로 전환
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {

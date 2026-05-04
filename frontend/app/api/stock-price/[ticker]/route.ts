@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { API_BASE } from '@/lib/api';
 
+type RouteContext = {
+  params: Promise<{ ticker: string }> | { ticker: string };
+};
+
 // 브라우저 대신 Next.js 서버가 파이썬 백엔드를 찔러주는 역할
-export async function GET(request: Request, context: any) {
+export async function GET(_request: Request, context: RouteContext) {
   try {
     // Next.js 15+ 대응을 위해 params를 안전하게 가져옵니다
     const resolvedParams = await Promise.resolve(context.params);

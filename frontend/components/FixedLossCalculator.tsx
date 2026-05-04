@@ -17,17 +17,15 @@ const LS_KEY_FIXED_LOSS = "fixedLossCalc_fixedLoss";
 export function FixedLossCalculator({ ticker }: { ticker: string }) {
   const [open, setOpen] = useState(false);
   const [price, setPrice] = useState("");
-  const [stopLossPct, setStopLossPct] = useState("");
-  const [fixedLoss, setFixedLoss] = useState("");
+  const [stopLossPct, setStopLossPct] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem(LS_KEY_STOP_LOSS_PCT) ?? "";
+  });
+  const [fixedLoss, setFixedLoss] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem(LS_KEY_FIXED_LOSS) ?? "";
+  });
   const [priceLoaded, setPriceLoaded] = useState(false);
-
-  // localStorage에서 이전 값 복원
-  useEffect(() => {
-    const savedPct = localStorage.getItem(LS_KEY_STOP_LOSS_PCT);
-    const savedLoss = localStorage.getItem(LS_KEY_FIXED_LOSS);
-    if (savedPct) setStopLossPct(savedPct);
-    if (savedLoss) setFixedLoss(savedLoss);
-  }, []);
 
   // 모달 열릴 때 실시간 가격 조회
   useEffect(() => {
@@ -42,11 +40,6 @@ export function FixedLossCalculator({ ticker }: { ticker: string }) {
       })
       .catch(() => setPriceLoaded(true));
   }, [open, ticker, priceLoaded]);
-
-  // 모달 닫힐 때 가격 로드 상태 리셋
-  useEffect(() => {
-    if (!open) setPriceLoaded(false);
-  }, [open]);
 
   // localStorage 저장
   useEffect(() => {
@@ -67,8 +60,13 @@ export function FixedLossCalculator({ ticker }: { ticker: string }) {
   const totalCost = isValid ? shares * priceNum : 0;
   const actualLoss = isValid ? shares * lossPerShare : 0;
 
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen);
+    if (!nextOpen) setPriceLoaded(false);
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button
           variant="outline"
