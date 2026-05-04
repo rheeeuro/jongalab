@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DailySummary } from "@/types";
-import { TrendingUp, TrendingDown, Calendar } from "lucide-react";
+import { TrendingUp, TrendingDown, Calendar, ArrowRight, FileText } from "lucide-react";
 import { StockPriceBadge } from "./StockPriceBadge";
 import Link from "next/link";
 
@@ -18,6 +18,8 @@ const MARKET_STYLE: Record<string, string> = {
 export function DailySummaryCard({ summary, disableLink }: Props) {
   if (!summary) return null;
 
+  const reportHref = `/report/${summary.report_date}`;
+
   const titleContent = (
     <CardTitle className={`flex items-center gap-2 text-xl ${!disableLink ? "group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors" : ""}`}>
       🤖 오늘의 AI 투자 전략
@@ -30,18 +32,37 @@ export function DailySummaryCard({ summary, disableLink }: Props) {
   );
 
   const dateContent = (
-    <div className={`flex items-center text-sm text-slate-500 bg-slate-100 px-3 py-1 rounded-full dark:bg-slate-800 shrink-0 w-fit ${!disableLink ? "hover:bg-indigo-100 hover:text-indigo-600 dark:hover:bg-indigo-900/40 dark:hover:text-indigo-400 transition-colors" : ""}`}>
+    <div className="flex items-center text-sm text-slate-500 bg-slate-100 px-3 py-1 rounded-full dark:bg-slate-800 shrink-0 w-fit">
       <Calendar className="w-4 h-4 mr-1" />
       {summary.report_date}
     </div>
   );
 
   return (
-    <Card className="border-2 border-slate-200 dark:border-slate-800">
+    <Card className={`border-2 border-slate-200 dark:border-slate-800 ${!disableLink ? "transition-all hover:border-indigo-200 hover:shadow-md dark:hover:border-indigo-900/70" : ""}`}>
       <CardHeader className="pb-2">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          {disableLink ? titleContent : <Link href={`/report/${summary.report_date}`} className="group">{titleContent}</Link>}
-          {disableLink ? dateContent : <Link href={`/report/${summary.report_date}`}>{dateContent}</Link>}
+          {disableLink ? (
+            <>
+              {titleContent}
+              {dateContent}
+            </>
+          ) : (
+            <>
+              <Link href={reportHref} className="group inline-block">
+                {titleContent}
+              </Link>
+              <Link
+                href={reportHref}
+                aria-label={`${summary.report_date} AI 투자 리포트 보기`}
+                className="group inline-flex w-fit items-center gap-1.5 rounded-full bg-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition-all hover:bg-indigo-700 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950"
+              >
+                <FileText className="h-4 w-4" />
+                오늘 리포트 보기
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            </>
+          )}
         </div>
       </CardHeader>
       <CardContent>
