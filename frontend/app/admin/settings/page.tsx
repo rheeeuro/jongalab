@@ -36,10 +36,6 @@ interface StrategyConfig {
   SUPPLY_TODAY_INST_BUY_SCORE: number;
   SUPPLY_TODAY_SMART_PERSONAL_SELL_SCORE: number;
   SUPPLY_TODAY_DOUBLE_SELL_PENALTY: number;
-  SUPPLY_GRADE_S_THRESHOLD: number;
-  SUPPLY_GRADE_A_THRESHOLD: number;
-  SUPPLY_GRADE_B_THRESHOLD: number;
-  SUPPLY_GRADE_C_THRESHOLD: number;
   SUPPLY_FOREIGN_SIGNAL_BOOST_MARGIN: number;
   TOP_THEME_COUNT: number;
   THEME_PERIOD_DAYS: string;
@@ -101,17 +97,13 @@ const SECTIONS = [
     ],
   },
   {
-    title: "수급 점수 - 최신/등급",
+    title: "수급 점수 - 최신/보정",
     fields: [
       { key: "SUPPLY_RECENT_DOUBLE_BUY_SCORE", label: "최근 2일 양매수 가점", unit: "점", type: "number" as const },
       { key: "SUPPLY_TODAY_DOUBLE_BUY_SCORE", label: "오늘 양매수 가점", unit: "점", type: "number" as const },
       { key: "SUPPLY_TODAY_INST_BUY_SCORE", label: "오늘 기관 순매수 가점", unit: "점", type: "number" as const },
       { key: "SUPPLY_TODAY_SMART_PERSONAL_SELL_SCORE", label: "오늘 스마트머니+개인매도 가점", unit: "점", type: "number" as const },
       { key: "SUPPLY_TODAY_DOUBLE_SELL_PENALTY", label: "오늘 외국인+기관 동반매도 감점", unit: "점", type: "number" as const },
-      { key: "SUPPLY_GRADE_S_THRESHOLD", label: "S등급 기준", unit: "점 이상", type: "number" as const },
-      { key: "SUPPLY_GRADE_A_THRESHOLD", label: "A등급 기준", unit: "점 이상", type: "number" as const },
-      { key: "SUPPLY_GRADE_B_THRESHOLD", label: "B등급 기준", unit: "점 이상", type: "number" as const },
-      { key: "SUPPLY_GRADE_C_THRESHOLD", label: "C등급 기준", unit: "점 이상", type: "number" as const },
       { key: "SUPPLY_FOREIGN_SIGNAL_BOOST_MARGIN", label: "외국계 신호 등급 보정폭", unit: "점", type: "number" as const },
     ],
   },

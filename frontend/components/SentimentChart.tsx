@@ -142,14 +142,17 @@ export function SentimentChart({
           existing.count = 1;
           existing.firstTitle = item.title;
         } else {
-          existing.score = Math.round((existing.score * existing.count + currentScore) / (existing.count + 1));
-          existing.count += 1; // 🚀 뉴스가 추가될 때마다 카운트 증가
+          const previousCount = existing.count ?? 1;
+          existing.score = Math.round((existing.score * previousCount + currentScore) / (previousCount + 1));
+          existing.count = previousCount + 1; // 🚀 뉴스가 추가될 때마다 카운트 증가
         }
       }
     });
 
     // 정렬 후 화면에 뿌릴 포맷으로 정리
-    const sorted = Array.from(dateMap.values()).sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+    const sorted = Array.from(dateMap.values()).sort((a, b) =>
+      (a.dateKey ?? "").localeCompare(b.dateKey ?? "")
+    );
     return sorted.map(item => {
       const parts = item.dateKey ? item.dateKey.split('-') : [];
       const displayDate = parts.length === 3 ? `${parseInt(parts[1])}/${parseInt(parts[2])}` : item.displayDate;
@@ -157,9 +160,10 @@ export function SentimentChart({
       // 🚀 핵심: 그날 뉴스가 여러 개면 "첫번째 기사 제목... 외 N건" 형태로 요약!
       let finalTitle = "";
       if (item.firstTitle) {
+        const count = item.count ?? 1;
         finalTitle = item.firstTitle.length > 25 ? item.firstTitle.substring(0, 25) + "..." : item.firstTitle;
-        if (item.count > 1) {
-          finalTitle += ` (외 ${item.count - 1}건)`;
+        if (count > 1) {
+          finalTitle += ` (외 ${count - 1}건)`;
         }
       }
 

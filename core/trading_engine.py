@@ -63,10 +63,6 @@ class StrategyConfig:
     SUPPLY_TODAY_INST_BUY_SCORE = 8
     SUPPLY_TODAY_SMART_PERSONAL_SELL_SCORE = 8
     SUPPLY_TODAY_DOUBLE_SELL_PENALTY = 20
-    SUPPLY_GRADE_S_THRESHOLD = 85
-    SUPPLY_GRADE_A_THRESHOLD = 70
-    SUPPLY_GRADE_B_THRESHOLD = 55
-    SUPPLY_GRADE_C_THRESHOLD = 40
     SUPPLY_FOREIGN_SIGNAL_BOOST_MARGIN = 5
 
     # ---- 관심 섹터 (API 동적 로드, ka90001 + ka90002) ----
@@ -101,6 +97,14 @@ class SupplyGrade(Enum):
     B = "B급 수급 - 조건부 관찰"            # score >= 55
     C = "C급 수급 - 수급 약함"              # score >= 40
     D = "D급 수급 - 제외"                  # score <  40
+
+
+SUPPLY_GRADE_THRESHOLDS = {
+    SupplyGrade.S: 85,
+    SupplyGrade.A: 70,
+    SupplyGrade.B: 55,
+    SupplyGrade.C: 40,
+}
 
 
 @dataclass
@@ -452,13 +456,13 @@ class AnalysisEngine:
         return max(0.0, min(100.0, score))
 
     def classify_supply_score(self, score: float) -> SupplyGrade:
-        if score >= self.cfg.SUPPLY_GRADE_S_THRESHOLD:
+        if score >= SUPPLY_GRADE_THRESHOLDS[SupplyGrade.S]:
             return SupplyGrade.S
-        if score >= self.cfg.SUPPLY_GRADE_A_THRESHOLD:
+        if score >= SUPPLY_GRADE_THRESHOLDS[SupplyGrade.A]:
             return SupplyGrade.A
-        if score >= self.cfg.SUPPLY_GRADE_B_THRESHOLD:
+        if score >= SUPPLY_GRADE_THRESHOLDS[SupplyGrade.B]:
             return SupplyGrade.B
-        if score >= self.cfg.SUPPLY_GRADE_C_THRESHOLD:
+        if score >= SUPPLY_GRADE_THRESHOLDS[SupplyGrade.C]:
             return SupplyGrade.C
         return SupplyGrade.D
 
@@ -561,12 +565,7 @@ class AnalysisEngine:
 
         foreign_signal = result["foreign_brokers_buying"] or result["prog_net_buy"] > 0
         if foreign_signal:
-            thresholds = [
-                self.cfg.SUPPLY_GRADE_S_THRESHOLD,
-                self.cfg.SUPPLY_GRADE_A_THRESHOLD,
-                self.cfg.SUPPLY_GRADE_B_THRESHOLD,
-                self.cfg.SUPPLY_GRADE_C_THRESHOLD,
-            ]
+            thresholds = list(SUPPLY_GRADE_THRESHOLDS.values())
             for high in sorted(thresholds, reverse=True):
                 low = max(0, high - self.cfg.SUPPLY_FOREIGN_SIGNAL_BOOST_MARGIN)
                 if low <= score < high:
