@@ -41,30 +41,26 @@ class ClosingBetStrategy:
         logger.info("종가베팅 알고리즘 v2.0 (키움 REST API)")
         logger.info("=" * 60)
 
-        # 0. 인증 (au10001)
-        self.api.get_access_token()
+        # 0. 인증 — DB 공유 토큰 사용 (없거나 만료 임박이면 자동 갱신)
+        self.api.ensure_token()
 
-        try:
-            # 0-1. 관심 섹터 동적 로드 (ka90001 + ka90002)
-            self._fetch_watchlist_sectors()
+        # 0-1. 관심 섹터 동적 로드 (ka90001 + ka90002)
+        self._fetch_watchlist_sectors()
 
-            # 1. Phase 1 — 사전 스크리닝 (13:00~)
-            candidates = self._phase1_screening()
-            logger.info(f"Phase 1 완료: {len(candidates)}개 후보")
-            logger.info("Phase 1 상위 후보:")
-            for i, c in enumerate(candidates[:10], 1):
-                logger.info(
-                    f"  {i:2d}. {c.name:10s} "
-                    f"등락={c.change_pct:+.1f}%  "
-                    f"거래대금={c.trading_value/1e8:,.0f}억  섹터={c.sector}"
-                )
+        # 1. Phase 1 — 사전 스크리닝 (13:00~)
+        candidates = self._phase1_screening()
+        logger.info(f"Phase 1 완료: {len(candidates)}개 후보")
+        logger.info("Phase 1 상위 후보:")
+        for i, c in enumerate(candidates[:10], 1):
+            logger.info(
+                f"  {i:2d}. {c.name:10s} "
+                f"등락={c.change_pct:+.1f}%  "
+                f"거래대금={c.trading_value/1e8:,.0f}억  섹터={c.sector}"
+            )
 
-            # 2. Phase 2 — 수급 정밀 분석 (14:30~)
-            candidates = self._phase2_supply_analysis(candidates)
-            logger.info(f"Phase 2 완료: {len(candidates)}개 후보")
-
-        finally:
-            self.api.revoke_access_token()
+        # 2. Phase 2 — 수급 정밀 분석 (14:30~)
+        candidates = self._phase2_supply_analysis(candidates)
+        logger.info(f"Phase 2 완료: {len(candidates)}개 후보")
 
     # ── Phase 1: 스크리닝 ──
     def _phase1_screening(self) -> list[StockCandidate]:

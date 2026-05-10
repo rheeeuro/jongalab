@@ -32,8 +32,10 @@ import os
 import time
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
+
+from core.repository import kiwoom_token as token_repo
 
 load_dotenv()
 
@@ -69,6 +71,23 @@ class KiwoomConfig:
 
 
 # ============================================================
+# 토큰 만료 판정 (5분 마진)
+# ============================================================
+_EXPIRY_MARGIN = timedelta(minutes=5)
+
+
+def _is_token_expired(expires_dt: str | None) -> bool:
+    """expires_dt(YYYYMMDDHHMMSS)가 현재시각 + 5분 이내이면 만료."""
+    if not expires_dt:
+        return True
+    try:
+        exp = datetime.strptime(expires_dt, "%Y%m%d%H%M%S")
+    except ValueError:
+        return True
+    return datetime.now() + _EXPIRY_MARGIN >= exp
+
+
+# ============================================================
 # 키움 REST API 클라이언트
 # ============================================================
 
@@ -93,7 +112,7 @@ class KiwoomRestAPI:
     # 인증
     # ────────────────────────────────────────────
     def get_access_token(self):
-        """au10001 — 접근토큰 발급"""
+        """au10001 — 접근토큰 발급 + DB 저장"""
         url = f"{self.base_url}{self.cfg.URL_TOKEN}"
         body = {
             "grant_type": "client_credentials",
@@ -104,7 +123,12 @@ class KiwoomRestAPI:
         resp.raise_for_status()
         data = resp.json()
         self.cfg.ACCESS_TOKEN = data["token"]
-        logger.info(f"토큰 발급 완료 (만료: {data.get('expires_dt', 'N/A')})")
+        expires_dt = data.get("expires_dt")
+        try:
+            token_repo.save_token(self.cfg.ACCESS_TOKEN, expires_dt)
+        except Exception as e:
+            logger.warning(f"토큰 DB 저장 실패: {e}")
+        logger.info(f"토큰 발급 완료 (만료: {expires_dt or 'N/A'})")
 
     def revoke_access_token(self):
         """au10002 — 접근토큰 폐기"""
@@ -118,9 +142,28 @@ class KiwoomRestAPI:
             resp = self.session.post(url, json=body, headers={"api-id": "au10002"})
             resp.raise_for_status()
             self.cfg.ACCESS_TOKEN = ""
+            try:
+                token_repo.clear_token()
+            except Exception as e:
+                logger.warning(f"토큰 DB 정리 실패: {e}")
             logger.info("토큰 폐기 완료")
         except Exception as e:
             logger.warning(f"토큰 폐기 실패: {e}")
+
+    def ensure_token(self):
+        """DB에서 유효 토큰을 로드. 없거나 만료 임박이면 새로 발급."""
+        try:
+            row = token_repo.get_token()
+        except Exception as e:
+            logger.warning(f"토큰 DB 조회 실패: {e}")
+            row = None
+
+        if row and row.get("access_token") and not _is_token_expired(row.get("expires_dt")):
+            self.cfg.ACCESS_TOKEN = row["access_token"]
+            logger.info(f"DB 토큰 사용 (만료: {row.get('expires_dt') or 'N/A'})")
+            return
+
+        self.get_access_token()
 
     # ────────────────────────────────────────────
     # 공통 요청 메서드

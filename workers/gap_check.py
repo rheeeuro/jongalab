@@ -44,43 +44,40 @@ def _query_stocks(
     detect_pending=True면 조회 실패/빈값을 pending으로 분류 (09:10 재조회 대상)
     """
     api = KiwoomRestAPI(KiwoomConfig())
-    api.get_access_token()
+    api.ensure_token()
     rows = []
-    try:
-        for r in reports:
-            rank = r["rank_no"]
-            name = r["stock_name"]
-            code = r["stock_code"]
-            stk_cd = code.split(".")[0] + stk_postfix
-            report_price = abs(int(r.get("current_price") or 0))
-            score = int(r.get("score") or 0)
-            base = {"rank": rank, "name": name, "score": score}
-            try:
-                info = api.get_stock_basic_info(stk_cd)
-                now_price = abs(AnalysisEngine.parse_price(info.get("cur_prc", "0")))
-                if report_price <= 0:
-                    rows.append({**base, "error": True})
-                    continue
-                if now_price <= 0:
-                    if detect_pending:
-                        rows.append({**base, "code": code, "report_price": report_price, "pending": True})
-                    else:
-                        rows.append({**base, "error": True})
-                    continue
-                pct = (now_price - report_price) / report_price * 100
-                rows.append({
-                    **base,
-                    "report_price": report_price, "now_price": now_price,
-                    "pct": pct,
-                })
-            except Exception as e:
-                logger.warning(f"{name}({stk_cd}) 조회 실패: {e}")
+    for r in reports:
+        rank = r["rank_no"]
+        name = r["stock_name"]
+        code = r["stock_code"]
+        stk_cd = code.split(".")[0] + stk_postfix
+        report_price = abs(int(r.get("current_price") or 0))
+        score = int(r.get("score") or 0)
+        base = {"rank": rank, "name": name, "score": score}
+        try:
+            info = api.get_stock_basic_info(stk_cd)
+            now_price = abs(AnalysisEngine.parse_price(info.get("cur_prc", "0")))
+            if report_price <= 0:
+                rows.append({**base, "error": True})
+                continue
+            if now_price <= 0:
                 if detect_pending:
                     rows.append({**base, "code": code, "report_price": report_price, "pending": True})
                 else:
                     rows.append({**base, "error": True})
-    finally:
-        api.revoke_access_token()
+                continue
+            pct = (now_price - report_price) / report_price * 100
+            rows.append({
+                **base,
+                "report_price": report_price, "now_price": now_price,
+                "pct": pct,
+            })
+        except Exception as e:
+            logger.warning(f"{name}({stk_cd}) 조회 실패: {e}")
+            if detect_pending:
+                rows.append({**base, "code": code, "report_price": report_price, "pending": True})
+            else:
+                rows.append({**base, "error": True})
     return rows
 
 

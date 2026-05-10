@@ -107,18 +107,32 @@ def save_content_analysis(
     platform: str,
     market: str,
 ):
-    """콘텐츠 분석 결과 저장 (telegram / youtube 공통)"""
+    """콘텐츠 분석 결과 저장 (telegram / youtube 공통).
+    related_tickers의 종목별 섹터를 동기 조회해 ticker_sectors에 함께 저장.
+    조회 실패는 sector=None으로 채워 콘텐츠 저장 자체는 막지 않음.
+    """
     content = remove_markdown_code_blocks(content)
+
+    ticker_sectors_json: str | None = None
+    try:
+        from core.sector_resolver import resolve_sectors  # 지연 import: 순환참조 방지
+        sectors = resolve_sectors(related_tickers or [], market)
+        if sectors:
+            ticker_sectors_json = json.dumps(sectors, ensure_ascii=False)
+    except Exception as e:
+        logging.warning(f"섹터 enrich 실패 (계속 진행): {e}")
+
     with get_db() as (conn, cursor):
         query = """
             INSERT INTO content_analysis
             (external_id, source_name, title, analysis_content, sentiment_score,
-             source_url, related_tickers, platform, market)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             source_url, related_tickers, platform, market, ticker_sectors)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         cursor.execute(query, (
             external_id, source_name, title, content, score,
             source_url, json.dumps(related_tickers), platform, market,
+            ticker_sectors_json,
         ))
         conn.commit()
     logging.info(f"DB 저장 완료: [{market}] {title} (점수: {score}, 티커: {related_tickers})")
@@ -192,3 +206,102 @@ def get_recent_analyses(hours: int = 24, market: str | None = None) -> list[dict
 
         cursor.execute(query, tuple(params))
         return cursor.fetchall()
+
+
+def get_mention_stats(market: str = "ALL", hours: int = 12) -> dict:
+    """최근 N시간 콘텐츠의 섹터/티커 언급 통계 (트리맵용).
+    sector=None인 ticker는 통계에서 제외 (이전 합의).
+    한 콘텐츠 내 동일 ticker는 1회만 카운트.
+    """
+    where = "WHERE created_at >= NOW() - INTERVAL %s HOUR"
+    params: list = [hours]
+    if market in ("US", "KR"):
+        where += " AND market = %s"
+        params.append(market)
+
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"SELECT COUNT(*) AS cnt FROM content_analysis {where}",
+            tuple(params),
+        )
+        total_contents = cursor.fetchone()["cnt"]
+
+        cursor.execute(
+            f"""
+            SELECT id, related_tickers, ticker_sectors, sentiment_score
+            FROM content_analysis
+            {where}
+              AND related_tickers IS NOT NULL
+              AND ticker_sectors IS NOT NULL
+            """,
+            tuple(params),
+        )
+        rows = cursor.fetchall()
+
+    # 집계: (sector, ticker) -> {mention_count, sentiments[], name}
+    sector_ticker: dict[tuple[str, str], dict] = {}
+    name_lookup: dict[str, str] = {}
+    total_mentions = 0
+    dropped = 0
+
+    for row in rows:
+        try:
+            tickers = json.loads(row["related_tickers"]) if isinstance(row["related_tickers"], str) else (row["related_tickers"] or [])
+            sector_map_list = json.loads(row["ticker_sectors"]) if isinstance(row["ticker_sectors"], str) else (row["ticker_sectors"] or [])
+        except Exception:
+            continue
+
+        # ticker -> name 룩업
+        for t in tickers:
+            tk = (t.get("ticker") or "").strip()
+            if tk and tk not in name_lookup:
+                name_lookup[tk] = (t.get("name") or "").strip()
+
+        # ticker -> sector 매핑
+        sector_by_ticker = {
+            (s.get("ticker") or "").strip(): (s.get("sector") or None)
+            for s in sector_map_list
+        }
+
+        seen_in_content: set[str] = set()
+        for tk, sector in sector_by_ticker.items():
+            if not tk or tk in seen_in_content:
+                continue
+            seen_in_content.add(tk)
+            if not sector:
+                dropped += 1
+                continue
+            key = (sector, tk)
+            entry = sector_ticker.setdefault(key, {"count": 0, "sent_sum": 0, "sent_n": 0})
+            entry["count"] += 1
+            score = row.get("sentiment_score")
+            if score is not None:
+                entry["sent_sum"] += int(score)
+                entry["sent_n"] += 1
+            total_mentions += 1
+
+    # 섹터 단위로 묶기
+    sectors_agg: dict[str, dict] = {}
+    for (sector, ticker), e in sector_ticker.items():
+        sec = sectors_agg.setdefault(sector, {"sector": sector, "mention_count": 0, "tickers": []})
+        sec["mention_count"] += e["count"]
+        avg_sent = round(e["sent_sum"] / e["sent_n"]) if e["sent_n"] > 0 else None
+        sec["tickers"].append({
+            "ticker": ticker,
+            "name": name_lookup.get(ticker, ""),
+            "mention_count": e["count"],
+            "avg_sentiment": avg_sent,
+        })
+
+    sectors_list = sorted(sectors_agg.values(), key=lambda s: s["mention_count"], reverse=True)
+    for sec in sectors_list:
+        sec["tickers"].sort(key=lambda x: (-x["mention_count"], x["name"]))
+
+    return {
+        "window_hours": hours,
+        "market": market,
+        "total_contents": total_contents,
+        "total_mentions": total_mentions,
+        "dropped_unmapped_count": dropped,
+        "sectors": sectors_list,
+    }

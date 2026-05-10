@@ -1,6 +1,7 @@
-import { ContentAnalysis, DailySummary, PaginatedResponse } from "@/types";
+import { ContentAnalysis, DailySummary, MentionStats, PaginatedResponse } from "@/types";
 import { ContentCard } from "@/components/ContentCard";
 import { DailySummaryCard } from "@/components/DailySummaryCard";
+import { MentionTreemapCard } from "@/components/MentionTreemapCard";
 import { apiFetch } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
@@ -20,6 +21,14 @@ async function getDailySummaryList(market: string): Promise<DailySummary[]> {
   return apiFetch(`/api/daily-summary-list?limit=5&market=${market}`, []);
 }
 
+async function getMentionStats(market: string): Promise<MentionStats | null> {
+  const res = await apiFetch<{ success: boolean; data: MentionStats } | null>(
+    `/api/contents/mention-stats?market=${market}`,
+    null,
+  );
+  return res?.success ? res.data : null;
+}
+
 export const dynamic = 'force-dynamic';
 
 export default async function Home(props: {
@@ -31,10 +40,11 @@ export default async function Home(props: {
   const currentPage = Number(params?.page) || 1;
   const limit = 12;
 
-  const [contentsRes, summary, summaryList] = await Promise.all([
+  const [contentsRes, summary, summaryList, mentionStats] = await Promise.all([
     getContents(currentPage, limit, currentMarket),
     getDailySummary(currentMarket),
-    getDailySummaryList(currentMarket)
+    getDailySummaryList(currentMarket),
+    getMentionStats(currentMarket),
   ]);
 
   // 백엔드 응답에서 실제 데이터 배열과 페이지네이션 정보를 분리
@@ -63,6 +73,9 @@ export default async function Home(props: {
 
         {/* 요약 카드 */}
         <DailySummaryCard summary={summary} />
+
+        {/* 섹터·기업 언급 트리맵 (최근 12시간) */}
+        <MentionTreemapCard stats={mentionStats} />
 
         {summaryList.length > 0 && (
           <div className="mt-12 mb-8 bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">

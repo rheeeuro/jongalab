@@ -163,3 +163,25 @@ export interface SectorReport {
   stocks: SectorStock[];
   created_at?: string;
 }
+
+export interface MentionTicker {
+  ticker: string;
+  name: string;
+  mention_count: number;
+  avg_sentiment: number | null;
+}
+
+export interface MentionSector {
+  sector: string;
+  mention_count: number;
+  tickers: MentionTicker[];
+}
+
+export interface MentionStats {
+  window_hours: number;
+  market: string;
+  total_contents: number;
+  total_mentions: number;
+  dropped_unmapped_count: number;
+  sectors: MentionSector[];
+}
