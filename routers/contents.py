@@ -36,7 +36,7 @@ def get_contents(
 @router.get("/contents/mention-stats")
 def get_contents_mention_stats(
     market: str = Query("ALL", description="시장 필터 (ALL, US, KR)"),
-    hours: int = Query(12, ge=1, le=168, description="집계 윈도우 (시간)"),
+    hours: int = Query(24, ge=1, le=168, description="집계 윈도우 (시간)"),
 ):
     """최근 N시간 콘텐츠 분석에서 언급된 섹터/기업 통계 (트리맵용).
     sector=None인 ticker는 통계에서 제외.

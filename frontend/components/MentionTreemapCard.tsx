@@ -241,7 +241,7 @@ export function MentionTreemapCard({ stats }: { stats: MentionStats | null }) {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold flex items-center gap-2 text-slate-800 dark:text-slate-100">
           <Flame className="w-5 h-5 text-orange-500" />
-          지금 뜨는 기업 · 최근 {stats?.window_hours ?? 12}시간
+          지금 뜨는 기업 · 최근 {stats?.window_hours ?? 24}시간
         </h2>
         {stats && (
           <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -255,7 +255,7 @@ export function MentionTreemapCard({ stats }: { stats: MentionStats | null }) {
 
       {!stats || treemapData.length === 0 ? (
         <div className="h-40 flex items-center justify-center text-sm text-slate-400">
-          최근 12시간 동안 분류 가능한 콘텐츠가 없습니다.
+          최근 24시간 동안 분류 가능한 콘텐츠가 없습니다.
         </div>
       ) : (
         <>

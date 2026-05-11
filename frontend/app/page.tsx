@@ -74,7 +74,7 @@ export default async function Home(props: {
         {/* 요약 카드 */}
         <DailySummaryCard summary={summary} />
 
-        {/* 섹터·기업 언급 트리맵 (최근 12시간) */}
+        {/* 섹터·기업 언급 트리맵 (최근 24시간) */}
         <MentionTreemapCard stats={mentionStats} />
 
         {summaryList.length > 0 && (

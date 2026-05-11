@@ -69,6 +69,7 @@ def _query_stocks(
             pct = (now_price - report_price) / report_price * 100
             rows.append({
                 **base,
+                "code": code,
                 "report_price": report_price, "now_price": now_price,
                 "pct": pct,
             })
@@ -149,10 +150,15 @@ def run_retry():
 
     logger.info(f"{report_date} 종목 {len(candidates)}개 KRX 재조회 중...")
 
+    code_by_rank = {
+        r["rank_no"]: r["stock_code"]
+        for r in get_stock_reports_by_date(report_date)[:10]
+    }
+
     krx_inputs = [{
         "rank_no": r["rank"],
         "stock_name": r["name"],
-        "stock_code": r["code"],
+        "stock_code": r.get("code") or code_by_rank.get(r["rank"]),
         "current_price": r["report_price"],
         "score": r["score"],
     } for r in candidates]
