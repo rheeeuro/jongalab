@@ -237,10 +237,10 @@ export function MentionTreemapCard({ stats }: { stats: MentionStats | null }) {
   }, [stats]);
 
   return (
-    <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-bold flex items-center gap-2 text-slate-800 dark:text-slate-100">
-          <Flame className="w-5 h-5 text-orange-500" />
+    <div className="rounded-3xl bg-white p-5 dark:bg-slate-900/60 sm:p-6">
+      <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+        <h2 className="flex items-center gap-2 text-lg font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+          <Flame className="h-5 w-5 text-orange-500" />
           지금 뜨는 기업 · 최근 {stats?.window_hours ?? 24}시간
         </h2>
         {stats && (

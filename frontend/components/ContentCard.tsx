@@ -139,7 +139,7 @@ function CardBody({ item }: { item: ContentAnalysis }) {
 
 export function ContentCard({ item }: Props) {
   const card = (
-    <Card className="flex flex-col gap-2 h-full overflow-hidden hover:shadow-lg transition-shadow border-slate-200 dark:border-slate-800 cursor-pointer group">
+    <Card className="group flex h-full cursor-pointer flex-col gap-2 overflow-hidden rounded-2xl border-0 bg-white shadow-none transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-slate-900/60">
       <CardBody item={item} />
     </Card>
   );
@@ -181,7 +181,7 @@ export function ContentCard({ item }: Props) {
           <DialogDescription className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 items-start w-full">
             <div className="order-2 sm:order-1 flex flex-wrap gap-1 w-full sm:w-auto mt-1 sm:mt-0">
               {item.related_tickers && item.related_tickers.length > 0 && item.related_tickers.map((t) => (
-                <Link href={`/stock/${t.ticker}`} key={t.ticker} className="block group/ticker transition-opacity hover:opacity-80">
+                <Link href={`/stocks/${t.ticker}`} key={t.ticker} className="block group/ticker transition-opacity hover:opacity-80">
                   <Badge variant="outline" className="text-xs bg-slate-100 dark:bg-slate-800 border-[1px] border-slate-300 dark:border-slate-600 cursor-pointer">
                     {t.name}
                   </Badge>

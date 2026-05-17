@@ -59,7 +59,7 @@ export async function generateMetadata({
     openGraph: {
       title,
       description,
-      url: `https://stock.rheeeuro.com/report/${resolvedParams.date}/${resolvedParams.ticker}`,
+      url: `https://stock.rheeeuro.com/reports/${resolvedParams.date}/${resolvedParams.ticker}`,
       siteName: "주식 AI 에이전트",
       type: "article",
     },
@@ -182,46 +182,45 @@ export default async function StockReportPage({
       : 0;
 
   return (
-    <main className="min-h-screen bg-slate-50 p-4 sm:p-8 dark:bg-slate-950">
-      <div className="mx-auto max-w-5xl space-y-6">
+    <main className="min-h-screen">
+      <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6 sm:py-10">
         {/* 네비게이션 */}
         <div className="flex items-center gap-3">
           <Link
-            href={`/report/${date}`}
-            className="p-2 bg-white dark:bg-slate-900 rounded-full shadow hover:bg-slate-100 transition-colors"
+            href={`/reports/${date}`}
+            className="inline-flex items-center gap-1 text-sm font-bold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
           >
-            <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+            <ArrowLeft className="h-4 w-4" />
+            {date} 리포트
           </Link>
-          <span className="text-sm text-slate-500">{date} 종목 리포트</span>
           <div className="ml-auto">
             <FixedLossCalculator ticker={r.stock_code} />
           </div>
         </div>
 
         {/* 헤더 */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-          <div className="flex flex-col items-start sm:flex-row sm:items-center gap-2 sm:gap-3">
-            <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100">
-                {r.stock_name}
-              </h1>
-              <span className="text-lg text-slate-400 font-mono">{r.stock_code}</span>
-            </div>
+        <header>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
+            <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-slate-100 sm:text-4xl">
+              {r.stock_name}
+            </h1>
+            <span className="font-mono text-base font-bold text-slate-400">
+              {r.stock_code}
+            </span>
             <StockPriceBadge ticker={r.stock_code} />
           </div>
-          <div className="flex items-center gap-2 sm:ml-auto">
-            <span className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
-              {r.score.toFixed(0)}점
-            </span>
-            <span className="text-sm text-slate-500">/ 100</span>
-            <span className="ml-2 px-2.5 py-0.5 rounded-full text-sm font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-indigo-100 px-3 py-1 text-sm font-extrabold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
               #{r.rank_no}위
             </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-extrabold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              {r.score.toFixed(0)}점 / 100
+            </span>
           </div>
-        </div>
+        </header>
 
         {/* 1. 종목 기본 정보 카드 */}
-        <Card className="border-slate-200 dark:border-slate-800">
+        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-lg">
               <Building2 className="w-5 h-5 text-slate-500" />
@@ -271,7 +270,7 @@ export default async function StockReportPage({
 
         {/* 2. 거래대금 & 수급등급 */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Card className="border-slate-200 dark:border-slate-800">
+          <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <BarChart3 className="w-5 h-5 text-slate-500" />
@@ -293,7 +292,7 @@ export default async function StockReportPage({
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200 dark:border-slate-800">
+          <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Activity className="w-5 h-5 text-slate-500" />
@@ -310,7 +309,7 @@ export default async function StockReportPage({
         </div>
 
         {/* 3. 최근 5일 수급 동향 */}
-        <Card className="border-slate-200 dark:border-slate-800">
+        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-lg">
               <TrendingUp className="w-5 h-5 text-slate-500" />
@@ -383,7 +382,7 @@ export default async function StockReportPage({
         </Card>
 
         {/* 4. 차트 분석 (캔들차트 + 이평선 정배열) */}
-        <Card className="border-slate-200 dark:border-slate-800">
+        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-lg">
               <Activity className="w-5 h-5 text-slate-500" />
@@ -427,7 +426,7 @@ export default async function StockReportPage({
 
         {/* 5. 콘텐츠 분석 (유튜브/텔레그램) */}
         {contentCount > 0 && (
-        <Card className="border-slate-200 dark:border-slate-800">
+        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-lg">
               <Newspaper className="w-5 h-5 text-slate-500" />
@@ -509,7 +508,7 @@ export default async function StockReportPage({
         )}
 
         {/* 6. 점수 상세 (점수 브레이크다운) */}
-        <Card className="border-slate-200 dark:border-slate-800">
+        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-lg">
               <Crown className="w-5 h-5 text-slate-500" />

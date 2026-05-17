@@ -40,7 +40,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 1.0,
     },
     {
-      url: `${baseUrl}/dashboard`,
+      url: `${baseUrl}/market`,
       lastModified: now,
       changeFrequency: "daily",
       priority: 0.9,
@@ -61,7 +61,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const reportRoutes: MetadataRoute.Sitemap = Array.from(reportMap.values()).map(
     (report) => ({
-      url: `${baseUrl}/report/${encodeURIComponent(report.report_date)}`,
+      url: `${baseUrl}/reports/${encodeURIComponent(report.report_date)}`,
       lastModified: parseLastModified(report.created_at ?? report.report_date),
       changeFrequency: "never",
       priority: 0.8,
@@ -80,7 +80,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const stockReportRoutes: MetadataRoute.Sitemap = stockReportsByDate
     .flat()
     .map((report) => ({
-      url: `${baseUrl}/report/${encodeURIComponent(
+      url: `${baseUrl}/reports/${encodeURIComponent(
         report.report_date
       )}/${encodeURIComponent(report.stock_code)}`,
       lastModified: parseLastModified(report.created_at ?? report.report_date),
@@ -96,7 +96,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   );
 
   const stockRoutes: MetadataRoute.Sitemap = tickers.map((ticker) => ({
-    url: `${baseUrl}/stock/${encodeURIComponent(ticker.ticker_symbol)}`,
+    url: `${baseUrl}/stocks/${encodeURIComponent(ticker.ticker_symbol)}`,
     lastModified: parseLastModified(ticker.updated_at),
     changeFrequency: "daily",
     priority: 0.7,

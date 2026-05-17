@@ -26,8 +26,8 @@ export function AnimatedMarketIndexCard({
 }) {
   if (item.price === null) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-        <p className="text-sm font-medium text-slate-500">{item.name}</p>
+      <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/40">
+        <p className="text-sm font-bold text-slate-500 dark:text-slate-400">{item.name}</p>
         <p className="mt-1 text-xs text-slate-400">데이터 없음</p>
       </div>
     );
@@ -38,36 +38,28 @@ export function AnimatedMarketIndexCard({
 
   const Icon = isUp ? TrendingUp : isDown ? TrendingDown : Minus;
   const changeColor = isUp
-    ? "text-red-600 dark:text-red-400"
+    ? "text-rose-600 dark:text-rose-400"
     : isDown
     ? "text-blue-600 dark:text-blue-400"
     : "text-slate-500 dark:text-slate-400";
-
-  const bgAccent = isUp
-    ? "border-red-100 dark:border-red-900/40"
-    : isDown
-    ? "border-blue-100 dark:border-blue-900/40"
-    : "border-slate-200 dark:border-slate-800";
 
   const priceStr = formatPrice(item.price, item.symbol);
   const changeStr = `${isUp ? "+" : ""}${item.change?.toFixed(2)}`;
   const pctStr = `(${isUp ? "+" : ""}${item.change_percent?.toFixed(2)}%)`;
 
   return (
-    <div
-      className={`rounded-xl border bg-white p-4 transition-shadow hover:shadow-md dark:bg-slate-900 ${bgAccent}`}
-    >
+    <div className="rounded-2xl bg-slate-50 p-4 transition-all hover:-translate-y-0.5 dark:bg-slate-800/40">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+        <p className="truncate text-sm font-bold text-slate-500 dark:text-slate-400">
           {item.name}
         </p>
         <Icon className={`h-4 w-4 ${changeColor}`} />
       </div>
-      <div className="mt-1 text-xl font-bold text-slate-900 dark:text-slate-100">
+      <div className="mt-1.5 text-xl font-extrabold tabular-nums tracking-tight text-slate-900 dark:text-slate-100">
         <SlotNumber value={priceStr} animate={animate} />
       </div>
       <div
-        className={`mt-1 flex items-center gap-2 text-sm font-semibold ${changeColor}`}
+        className={`mt-1 flex items-center gap-2 text-sm font-bold tabular-nums ${changeColor}`}
       >
         <SlotNumber value={changeStr} animate={animate} />
         <SlotNumber value={pctStr} animate={animate} />
