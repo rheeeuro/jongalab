@@ -207,7 +207,7 @@ export default async function StockReportPage({
             <span className="font-mono text-base font-bold text-slate-400">
               {r.stock_code}
             </span>
-            <StockPriceBadge ticker={r.stock_code} />
+            <StockPriceBadge ticker={r.stock_code} date={date} />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-indigo-100 px-3 py-1 text-sm font-extrabold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">

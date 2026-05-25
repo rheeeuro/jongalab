@@ -14,10 +14,10 @@ router = APIRouter(prefix="/api", tags=["market"])
 
 
 @router.get("/stock-price/{ticker}")
-def get_stock_price(ticker: str):
-    """야후 파이낸스를 통해 실시간 주가 및 등락률 조회"""
+def get_stock_price(ticker: str, date: str | None = None):
+    """야후 파이낸스를 통해 주가 및 등락률 조회 (date 지정 시 해당일 종가 기준)"""
     try:
-        return fetch_stock_price(ticker)
+        return fetch_stock_price(ticker, date)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

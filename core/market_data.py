@@ -4,6 +4,7 @@
 import math
 import re
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 
 import yfinance as yf
 from pykrx import stock as pykrx_stock
@@ -93,10 +94,24 @@ def _fetch_quote(item: dict) -> dict:
         return empty
 
 
-def fetch_stock_price(ticker: str) -> dict:
-    """개별 종목 실시간 주가 및 등락률 조회"""
+def fetch_stock_price(ticker: str, date: str | None = None) -> dict:
+    """개별 종목 주가 및 등락률 조회.
+
+    date 미지정 시 실시간 가격, 지정 시 해당 일자 종가와 전 거래일 대비 등락률.
+    """
     stock = yf.Ticker(ticker)
-    hist = stock.history(period="2d")
+
+    if date:
+        try:
+            target = datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            return {"error": "잘못된 날짜 형식입니다."}
+        # 휴장일을 고려해 2주치를 가져온 뒤 target까지 슬라이싱
+        start = (target - timedelta(days=14)).strftime("%Y-%m-%d")
+        end = (target + timedelta(days=1)).strftime("%Y-%m-%d")
+        hist = stock.history(start=start, end=end)
+    else:
+        hist = stock.history(period="2d")
 
     if hist.empty or len(hist) < 1:
         return {"error": "데이터를 찾을 수 없습니다."}

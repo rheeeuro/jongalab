@@ -10,25 +10,32 @@ interface PriceData {
   change_percent: number;
 }
 
-export function StockPriceBadge({ ticker }: { ticker: string }) {
+export function StockPriceBadge({ ticker, date }: { ticker: string; date?: string }) {
   const [data, setData] = useState<PriceData | null>(null);
   const [loading, setLoading] = useState(Boolean(ticker));
 
+  // 오늘 날짜와 같거나 미래면 실시간 가격, 과거면 해당일 종가 기준
+  const today = new Date().toLocaleDateString("en-CA");
+  const isPast = Boolean(date) && date! < today;
+
   useEffect(() => {
     if (!ticker) return;
-    
-    // 백엔드 API 호출하여 실시간 주가 가져오기
-    fetch(`/api/stock-price/${ticker}`)
+
+    const url = isPast
+      ? `/api/stock-price/${ticker}?date=${encodeURIComponent(date!)}`
+      : `/api/stock-price/${ticker}`;
+
+    fetch(url)
       .then((res) => res.json())
       .then((json) => {
         if (!json.error) setData(json);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [ticker]);
+  }, [ticker, date, isPast]);
 
   if (!ticker) return null;
-  if (loading) return <span className="ml-3 text-xs text-slate-400 animate-pulse">실시간 가격 조회 중...</span>;
+  if (loading) return <span className="ml-3 text-xs text-slate-400 animate-pulse">{isPast ? `${date} 종가 조회 중...` : "실시간 가격 조회 중..."}</span>;
   if (!data) return null;
 
   const formatPrice = (price: number, currentTicker: string) => {
