@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { StockReport } from "@/types";
 import { Search, Crown, TrendingUp, TrendingDown } from "lucide-react";
+import { SeedAllocator } from "./SeedAllocator";
 
 const GRADE_TONE: Record<string, string> = {
   S: "bg-rose-500 text-white",
@@ -54,6 +55,8 @@ export function StocksBrowser({
 
   return (
     <div className="space-y-4">
+      <SeedAllocator reports={filtered} />
+
       {/* 검색 + 정렬 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
