@@ -25,3 +25,14 @@ ALTER TABLE content_analysis
 ALTER TABLE ticker_dictionary
     ADD COLUMN sector VARCHAR(100) DEFAULT NULL,
     ADD COLUMN sector_updated_at TIMESTAMP NULL DEFAULT NULL;
+
+-- ============================================================
+-- daily_stock_report: 갭 체크(다음날 아침) 결과 영구 보존
+-- 08:10 NXT, 09:10 KRX 재조회 결과를 Top 10 종목에 업데이트
+-- ============================================================
+ALTER TABLE daily_stock_report
+    ADD COLUMN gap_nxt_price INT DEFAULT NULL COMMENT '갭 체크 NXT 가격(08:10)',
+    ADD COLUMN gap_nxt_pct FLOAT DEFAULT NULL COMMENT '리포트가 → NXT 등락률(%)',
+    ADD COLUMN gap_krx_price INT DEFAULT NULL COMMENT '갭 체크 KRX 가격(09:10)',
+    ADD COLUMN gap_krx_pct FLOAT DEFAULT NULL COMMENT '리포트가 → KRX 등락률(%)',
+    ADD COLUMN gap_checked_at TIMESTAMP NULL DEFAULT NULL;

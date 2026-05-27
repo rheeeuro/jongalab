@@ -39,6 +39,8 @@ from core.repository.stock_report import (
     get_stock_report_history,
     get_stock_reports_by_date,
     get_stock_report_dates,
+    save_gap_check_results,
+    get_gap_stats_by_dates,
 )
 
 from core.repository.sector_report import (

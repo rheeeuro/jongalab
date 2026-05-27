@@ -3,8 +3,18 @@ import { apiFetch } from "@/lib/api";
 import Link from "next/link";
 import { FileText, ChevronRight, Calendar } from "lucide-react";
 
+type GapStat = { wins: number; losses: number; flats: number; total: number };
+
 async function getDailySummaryList(market: string): Promise<DailySummary[]> {
   return apiFetch(`/api/daily-summary-list?limit=100&market=${market}`, []);
+}
+
+async function getGapStats(dates: string[]): Promise<Record<string, GapStat>> {
+  if (dates.length === 0) return {};
+  return apiFetch(
+    `/api/stock-report/gap-stats?dates=${encodeURIComponent(dates.join(","))}`,
+    {},
+  );
 }
 
 export const dynamic = "force-dynamic";
@@ -35,6 +45,7 @@ export default async function ReportsArchivePage(props: {
   const params = await props.searchParams;
   const market = (params?.market as string) || "ALL";
   const reports = await getDailySummaryList(market);
+  const gapStats = await getGapStats(reports.map((r) => r.report_date));
   const grouped = groupByMonth(reports);
 
   return (
@@ -73,7 +84,13 @@ export default async function ReportsArchivePage(props: {
                   </span>
                 </h2>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {monthReports.map((r) => (
+                  {monthReports.map((r) => {
+                    const gap = gapStats[r.report_date];
+                    const winRate =
+                      gap && gap.total > 0
+                        ? (gap.wins / gap.total) * 100
+                        : null;
+                    return (
                     <Link
                       key={r.id}
                       href={`/reports/${r.report_date}`}
@@ -112,12 +129,29 @@ export default async function ReportsArchivePage(props: {
                           </span>
                         </div>
                       </div>
+                      {gap && gap.total > 0 && (
+                        <div className="mt-3 flex items-center gap-1.5 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                          <span>🌅 갭</span>
+                          <span className="text-rose-600 dark:text-rose-400">
+                            {gap.wins}승
+                          </span>
+                          <span className="text-blue-600 dark:text-blue-400">
+                            {gap.losses}패
+                          </span>
+                          {winRate !== null && (
+                            <span className="ml-auto tabular-nums">
+                              {winRate.toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <div className="mt-3 flex items-center justify-end text-xs font-bold text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-100">
                         자세히
                         <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
                       </div>
                     </Link>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             ))}

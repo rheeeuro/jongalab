@@ -19,6 +19,7 @@ from core.trading_engine import AnalysisEngine
 from core.repository.stock_report import (
     get_stock_report_dates,
     get_stock_reports_by_date,
+    save_gap_check_results,
 )
 from core.notifications import send_gap_check_alert
 
@@ -126,6 +127,11 @@ def run_initial():
     rows = _query_stocks(reports, detect_pending=True, stk_postfix="_NX")
     _save_state(report_date, rows)
 
+    try:
+        save_gap_check_results(report_date, rows)
+    except Exception as e:
+        logger.warning(f"갭 체크 결과 DB 저장 실패: {e}")
+
     check_time = datetime.now().strftime("%m-%d %H:%M")
     send_gap_check_alert(report_date, check_time, rows)
     logger.info("갭상승 체크 완료")
@@ -198,6 +204,11 @@ def run_retry():
                     (krx["now_price"] - r["now_price"]) / r["now_price"] * 100
                 )
         merged.append(out)
+
+    try:
+        save_gap_check_results(report_date, merged)
+    except Exception as e:
+        logger.warning(f"갭 체크 결과 DB 저장 실패: {e}")
 
     check_time = datetime.now().strftime("%m-%d %H:%M")
     send_gap_check_alert(report_date, check_time, merged, is_retry=True)

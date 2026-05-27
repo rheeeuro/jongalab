@@ -1,6 +1,7 @@
 """종목일간리포트 데이터 접근"""
 import json
 from datetime import date, datetime
+from decimal import Decimal
 
 from core.db import get_db
 
@@ -109,6 +110,100 @@ def get_stock_report_dates(limit: int = 30) -> list[str]:
         ]
 
 
+def save_gap_check_results(report_date: str, rows: list[dict]):
+    """갭 체크 결과를 daily_stock_report에 업데이트.
+
+    rows 항목 형태:
+      초기(08:10): {rank, now_price, pct}   → gap_nxt_*
+      재조회(09:10): {rank, nxt_price?, nxt_pct?, krx_price?, krx_pct?}
+
+    error/pending 행은 가격 값이 없으므로 자연스럽게 건너뜀.
+    rank_no는 같은 report_date 안에서 unique 하다고 가정.
+    """
+    if not rows:
+        return
+
+    updates = []
+    for r in rows:
+        rank = r.get("rank")
+        if rank is None:
+            continue
+        # retry rows use explicit nxt_*/krx_* keys; initial rows use generic now_price/pct (always NXT)
+        if any(k in r for k in ("nxt_price", "nxt_pct", "krx_price", "krx_pct")):
+            nxt_price = r.get("nxt_price")
+            nxt_pct = r.get("nxt_pct")
+            krx_price = r.get("krx_price")
+            krx_pct = r.get("krx_pct")
+        else:
+            nxt_price = r.get("now_price")
+            nxt_pct = r.get("pct")
+            krx_price = None
+            krx_pct = None
+        if all(v is None for v in (nxt_price, nxt_pct, krx_price, krx_pct)):
+            continue
+        updates.append((nxt_price, nxt_pct, krx_price, krx_pct, report_date, rank))
+
+    if not updates:
+        return
+
+    with get_db() as (conn, cursor):
+        for nxt_price, nxt_pct, krx_price, krx_pct, rd, rank in updates:
+            cursor.execute(
+                """UPDATE daily_stock_report
+                   SET gap_nxt_price = COALESCE(%s, gap_nxt_price),
+                       gap_nxt_pct   = COALESCE(%s, gap_nxt_pct),
+                       gap_krx_price = COALESCE(%s, gap_krx_price),
+                       gap_krx_pct   = COALESCE(%s, gap_krx_pct),
+                       gap_checked_at = CURRENT_TIMESTAMP
+                   WHERE report_date = %s AND rank_no = %s""",
+                (nxt_price, nxt_pct, krx_price, krx_pct, rd, rank),
+            )
+        conn.commit()
+
+
+def get_gap_stats_by_dates(dates: list[str]) -> dict[str, dict]:
+    """여러 날짜의 Top 10 갭 체크 승률 통계를 한 번에 조회.
+
+    반환: {date: {wins, losses, flats, total}}
+      - KRX 우선, 없으면 NXT 등락률 기준.
+      - 갭 체크가 안 된 날짜는 키 없음.
+    """
+    if not dates:
+        return {}
+
+    placeholders = ",".join(["%s"] * len(dates))
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"""SELECT report_date,
+                       COALESCE(gap_krx_pct, gap_nxt_pct) AS pct
+                  FROM daily_stock_report
+                 WHERE report_date IN ({placeholders})
+                   AND rank_no BETWEEN 1 AND 10
+                   AND (gap_krx_pct IS NOT NULL OR gap_nxt_pct IS NOT NULL)""",
+            tuple(dates),
+        )
+        rows = cursor.fetchall()
+
+    stats: dict[str, dict] = {}
+    for row in rows:
+        d = row["report_date"]
+        key = d.isoformat() if isinstance(d, (date, datetime)) else str(d)
+        pct = row["pct"]
+        if pct is None:
+            continue
+        if isinstance(pct, Decimal):
+            pct = float(pct)
+        s = stats.setdefault(key, {"wins": 0, "losses": 0, "flats": 0, "total": 0})
+        s["total"] += 1
+        if pct > 0:
+            s["wins"] += 1
+        elif pct < 0:
+            s["losses"] += 1
+        else:
+            s["flats"] += 1
+    return stats
+
+
 def _score_to_grade(score: float) -> str:
     """supply_score(0~100) → 등급 문자열. classify_supply_score와 임계값 동일."""
     if score >= 85:
@@ -128,6 +223,8 @@ def _serialize_dates(row: dict):
         row["report_date"] = row["report_date"].isoformat().split("T")[0]
     if isinstance(row.get("created_at"), datetime):
         row["created_at"] = row["created_at"].isoformat()
+    if isinstance(row.get("gap_checked_at"), datetime):
+        row["gap_checked_at"] = row["gap_checked_at"].isoformat()
     # boolean 변환 (MariaDB TINYINT → Python bool)
     for key in ("ma_aligned", "near_high", "is_leader", "is_theme_stock"):
         if key in row:

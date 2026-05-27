@@ -17,6 +17,7 @@ import {
   ExternalLink,
   Youtube,
   MessageCircle,
+  Sunrise,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { FixedLossCalculator } from "@/components/FixedLossCalculator";
@@ -218,6 +219,81 @@ export default async function StockReportPage({
             </span>
           </div>
         </header>
+
+        {/* 다음날 아침 갭 체크 결과 */}
+        {(typeof r.gap_nxt_pct === "number" || typeof r.gap_krx_pct === "number") && (() => {
+          const hasNxt = typeof r.gap_nxt_pct === "number" && r.gap_nxt_price != null;
+          const hasKrx = typeof r.gap_krx_pct === "number" && r.gap_krx_price != null;
+          // 텔레그램 포맷과 동일: NXT+KRX 둘 다 있으면 KRX는 NXT→KRX 장중 델타
+          const krxIntraday =
+            hasNxt && hasKrx && r.gap_nxt_price! > 0
+              ? ((r.gap_krx_price! - r.gap_nxt_price!) / r.gap_nxt_price!) * 100
+              : null;
+          return (
+          <Card className="border-0 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 rounded-3xl shadow-none">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Sunrise className="w-5 h-5 text-amber-500" />
+                다음날 아침 갭 체크
+                {r.gap_checked_at && (
+                  <span className="ml-auto text-xs font-normal text-slate-500">
+                    {new Date(r.gap_checked_at).toLocaleString("ko-KR", {
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      timeZone: "Asia/Seoul",
+                    })}{" "}
+                    기준
+                  </span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                리포트 시각 가격: <span className="font-bold tabular-nums">{r.current_price.toLocaleString("ko-KR")}</span>원
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {hasNxt && (
+                  <GapResultBox
+                    label="장 시작 전 (NXT)"
+                    sublabel="리포트가 → NXT"
+                    pct={r.gap_nxt_pct!}
+                    fromPrice={r.current_price}
+                    toPrice={r.gap_nxt_price!}
+                  />
+                )}
+                {hasKrx && (
+                  <GapResultBox
+                    label="장 시작 후 (KRX)"
+                    sublabel={krxIntraday !== null ? "NXT → KRX (장중)" : "리포트가 → KRX"}
+                    pct={krxIntraday !== null ? krxIntraday : r.gap_krx_pct!}
+                    fromPrice={krxIntraday !== null ? r.gap_nxt_price! : r.current_price}
+                    toPrice={r.gap_krx_price!}
+                  />
+                )}
+              </div>
+              {hasNxt && hasKrx && (
+                <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                  리포트가 → KRX 누적{" "}
+                  <span
+                    className={`font-extrabold tabular-nums ${
+                      r.gap_krx_pct! > 0
+                        ? "text-rose-600 dark:text-rose-400"
+                        : r.gap_krx_pct! < 0
+                          ? "text-blue-600 dark:text-blue-400"
+                          : "text-slate-500"
+                    }`}
+                  >
+                    {r.gap_krx_pct! > 0 ? "+" : ""}
+                    {r.gap_krx_pct!.toFixed(2)}%
+                  </span>
+                </p>
+              )}
+            </CardContent>
+          </Card>
+          );
+        })()}
 
         {/* 1. 종목 기본 정보 카드 */}
         <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
@@ -581,6 +657,48 @@ export default async function StockReportPage({
         </p>
       </div>
     </main>
+  );
+}
+
+function GapResultBox({
+  label,
+  sublabel,
+  pct,
+  fromPrice,
+  toPrice,
+}: {
+  label: string;
+  sublabel?: string;
+  pct: number;
+  fromPrice: number;
+  toPrice: number | null;
+}) {
+  const isUp = pct > 0;
+  const isDown = pct < 0;
+  return (
+    <div className="rounded-2xl bg-white/70 p-4 dark:bg-slate-900/40">
+      <p className="text-xs font-bold text-slate-500 dark:text-slate-400">{label}</p>
+      {sublabel && (
+        <p className="text-[10px] font-medium text-slate-400">{sublabel}</p>
+      )}
+      <p
+        className={`mt-1 text-2xl font-extrabold tabular-nums ${
+          isUp
+            ? "text-rose-600 dark:text-rose-400"
+            : isDown
+              ? "text-blue-600 dark:text-blue-400"
+              : "text-slate-500"
+        }`}
+      >
+        {isUp ? "+" : ""}
+        {pct.toFixed(2)}%
+      </p>
+      {toPrice != null && (
+        <p className="mt-1 text-xs text-slate-500 tabular-nums">
+          {fromPrice.toLocaleString("ko-KR")} → {toPrice.toLocaleString("ko-KR")}원
+        </p>
+      )}
+    </div>
   );
 }
 

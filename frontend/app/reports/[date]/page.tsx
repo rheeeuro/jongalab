@@ -1,9 +1,10 @@
 import { DailySummary, StockReport, SectorReport } from "@/types";
 import { DailySummaryCard } from "@/components/DailySummaryCard";
+import { StockReportCard, finalGapPct } from "@/components/StockReportCard";
 import { apiFetch } from "@/lib/api";
 import { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, Crown, FileText, Layers, BarChart3 } from "lucide-react";
+import { ArrowLeft, FileText, Layers, BarChart3 } from "lucide-react";
 
 function fetchOptions(date: string): RequestInit {
   const today = new Date().toLocaleDateString("en-CA");
@@ -52,13 +53,19 @@ export async function generateMetadata({
   };
 }
 
-const GRADE_TONE: Record<string, string> = {
-  S: "bg-rose-500 text-white",
-  A: "bg-orange-500 text-white",
-  B: "bg-amber-500 text-white",
-  C: "bg-slate-400 text-white dark:bg-slate-600",
-  D: "bg-slate-300 text-white dark:bg-slate-700",
-};
+function gapWinRate(reports: StockReport[]) {
+  const top10 = reports.filter((r) => r.rank_no >= 1 && r.rank_no <= 10);
+  let wins = 0, losses = 0, flats = 0;
+  for (const r of top10) {
+    const pct = finalGapPct(r);
+    if (pct === null) continue;
+    if (pct > 0) wins++;
+    else if (pct < 0) losses++;
+    else flats++;
+  }
+  const total = wins + losses + flats;
+  return { wins, losses, flats, total };
+}
 
 export default async function ReportPage({
   params,
@@ -227,7 +234,9 @@ export default async function ReportPage({
         )}
 
         {/* 종목 일간 리포트 */}
-        {stockReports.length > 0 && (
+        {stockReports.length > 0 && (() => {
+          const gapStat = gapWinRate(stockReports);
+          return (
           <section>
             <SectionHeader
               icon={<BarChart3 className="h-5 w-5 text-indigo-500" />}
@@ -236,76 +245,36 @@ export default async function ReportPage({
               timestamp={stockReports[0]?.created_at}
             />
 
+            {/* 갭 체크 결과 요약 (Top 10) */}
+            {gapStat.total > 0 && (
+              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                <span className="text-base">🌅</span>
+                <span>다음날 아침 갭 체크 (Top 10):</span>
+                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-extrabold text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
+                  {gapStat.wins}승
+                </span>
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-extrabold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+                  {gapStat.losses}패
+                </span>
+                {gapStat.flats > 0 && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-extrabold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    보합 {gapStat.flats}
+                  </span>
+                )}
+                <span className="ml-auto text-xs font-extrabold tabular-nums">
+                  승률 {((gapStat.wins / gapStat.total) * 100).toFixed(0)}%
+                </span>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {stockReports.map((r) => {
-                const isUp = r.change_pct > 0;
-                const isDown = r.change_pct < 0;
-
-                return (
-                  <Link
-                    key={r.stock_code}
-                    href={`/reports/${date}/${r.stock_code}`}
-                    className="group rounded-2xl bg-white p-4 transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-slate-900/60"
-                  >
-                    {/* 상단: 순위 + 종목명 */}
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-xs font-black text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
-                        {r.rank_no}
-                      </span>
-                      <span className="truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400">
-                        {r.stock_name}
-                      </span>
-                      {r.is_leader && (
-                        <Crown className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-                      )}
-                      {r.is_theme_stock && (
-                        <span className="shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-extrabold text-orange-600 dark:bg-orange-950/40 dark:text-orange-400">
-                          테마
-                        </span>
-                      )}
-                    </div>
-
-                    <p className="mt-1.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                      {r.sector} ·{" "}
-                      {(r.trading_value / 1e8).toLocaleString("ko-KR", {
-                        maximumFractionDigits: 0,
-                      })}
-                      억
-                    </p>
-
-                    <div className="mt-3 flex items-center justify-between">
-                      <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
-                          GRADE_TONE[r.supply_grade] || GRADE_TONE.D
-                        }`}
-                      >
-                        수급{r.supply_grade}
-                      </span>
-                      <span
-                        className={`text-sm font-extrabold tabular-nums ${
-                          isUp
-                            ? "text-rose-600 dark:text-rose-400"
-                            : isDown
-                              ? "text-blue-600 dark:text-blue-400"
-                              : "text-slate-500"
-                        }`}
-                      >
-                        {isUp ? "+" : ""}
-                        {r.change_pct.toFixed(1)}%
-                      </span>
-                      <div className="text-right tabular-nums">
-                        <span className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">
-                          {r.score.toFixed(0)}
-                        </span>
-                        <span className="text-xs text-slate-400">점</span>
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
+              {stockReports.map((r) => (
+                <StockReportCard key={r.stock_code} report={r} date={date} />
+              ))}
             </div>
           </section>
-        )}
+          );
+        })()}
 
         {/* AI 코멘트 */}
         {report && (

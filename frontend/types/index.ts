@@ -124,6 +124,11 @@ export interface StockReport {
   content_score: number;
   score: number;
   rank_no: number;
+  gap_nxt_price?: number | null;
+  gap_nxt_pct?: number | null;
+  gap_krx_price?: number | null;
+  gap_krx_pct?: number | null;
+  gap_checked_at?: string | null;
   created_at?: string;
 }
 

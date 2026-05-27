@@ -10,6 +10,7 @@ from core.repository import (
     get_stock_report_dates,
     get_sector_reports_by_date,
     get_content_by_stock_and_date,
+    get_gap_stats_by_dates,
 )
 
 router = APIRouter(prefix="/api", tags=["stock-report"])
@@ -57,6 +58,11 @@ class StockReport(BaseModel):
     content_score: float = 0.0
     score: float = 0.0
     rank_no: int = 0
+    gap_nxt_price: Optional[int] = None
+    gap_nxt_pct: Optional[float] = None
+    gap_krx_price: Optional[int] = None
+    gap_krx_pct: Optional[float] = None
+    gap_checked_at: Optional[str] = None
     created_at: Optional[str] = None
 
 
@@ -109,6 +115,25 @@ def list_sector_reports(report_date: str):
         return results
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class GapStat(BaseModel):
+    wins: int = 0
+    losses: int = 0
+    flats: int = 0
+    total: int = 0
+
+
+@router.get("/stock-report/gap-stats", response_model=dict[str, GapStat])
+def gap_stats(dates: str = Query(..., description="콤마 구분 YYYY-MM-DD 목록")):
+    """여러 날짜의 Top 10 갭 체크 승/패 통계 (KRX 우선, 폴백 NXT)"""
+    try:
+        date_list = [d.strip() for d in dates.split(",") if d.strip()]
+        if not date_list:
+            return {}
+        return get_gap_stats_by_dates(date_list)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
