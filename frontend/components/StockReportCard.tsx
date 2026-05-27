@@ -66,31 +66,54 @@ export function StockReportCard({
       href={`/reports/${date}/${r.stock_code}`}
       className="group rounded-2xl bg-white p-4 transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-slate-900/60"
     >
-      {/* 상단: 순위 + 종목명 + 플래그 */}
+      {/* 상단: 순위 + 종목명 + 플래그 / 우측: 현재가 + 등락율 */}
       <div className="flex items-center gap-2">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-xs font-black text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
-          {r.rank_no}
-        </span>
-        <span className="min-w-0 truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400">
-          {r.stock_name}
-        </span>
-        {r.is_leader && (
-          <Crown className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-        )}
-        {r.is_theme_stock && (
-          <span className="shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-extrabold text-orange-600 dark:bg-orange-950/40 dark:text-orange-400">
-            테마
-          </span>
-        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-xs font-black text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
+              {r.rank_no}
+            </span>
+            <span className="min-w-0 truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400">
+              {r.stock_name}
+            </span>
+            {r.is_leader && (
+              <Crown className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+            )}
+            {r.is_theme_stock && (
+              <span className="shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-extrabold text-orange-600 dark:bg-orange-950/40 dark:text-orange-400">
+                테마
+              </span>
+            )}
+          </div>
+          <p className="mt-1.5 truncate text-xs text-slate-500 dark:text-slate-400">
+            {r.sector || "기타"} ·{" "}
+            {(r.trading_value / 1e8).toLocaleString("ko-KR", {
+              maximumFractionDigits: 0,
+            })}
+            억
+          </p>
+        </div>
+        <div className="shrink-0 text-right tabular-nums">
+          <div className="text-sm font-extrabold text-slate-900 dark:text-slate-100">
+            {r.current_price.toLocaleString("ko-KR")}
+            <span className="ml-0.5 text-[10px] font-bold text-slate-400">
+              원
+            </span>
+          </div>
+          <div
+            className={`text-xs font-extrabold ${
+              isUp
+                ? "text-rose-600 dark:text-rose-400"
+                : isDown
+                  ? "text-blue-600 dark:text-blue-400"
+                  : "text-slate-500"
+            }`}
+          >
+            {isUp ? "+" : ""}
+            {r.change_pct.toFixed(1)}%
+          </div>
+        </div>
       </div>
-
-      <p className="mt-1.5 truncate text-xs text-slate-500 dark:text-slate-400">
-        {r.sector || "기타"} ·{" "}
-        {(r.trading_value / 1e8).toLocaleString("ko-KR", {
-          maximumFractionDigits: 0,
-        })}
-        억
-      </p>
 
       <div className="mt-3 flex items-center justify-between">
         <span
@@ -99,18 +122,6 @@ export function StockReportCard({
           }`}
         >
           수급{r.supply_grade}
-        </span>
-        <span
-          className={`text-sm font-extrabold tabular-nums ${
-            isUp
-              ? "text-rose-600 dark:text-rose-400"
-              : isDown
-                ? "text-blue-600 dark:text-blue-400"
-                : "text-slate-500"
-          }`}
-        >
-          {isUp ? "+" : ""}
-          {r.change_pct.toFixed(1)}%
         </span>
         <div className="text-right tabular-nums">
           <span className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">

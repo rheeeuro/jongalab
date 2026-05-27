@@ -23,3 +23,7 @@ docker-compose.yml
 stock_session.*
 .gap_check_pending.json
 .claude/
+
+# 핵심 로직
+core/trading_engine.py
+core/prompts.py
