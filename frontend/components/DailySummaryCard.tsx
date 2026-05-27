@@ -60,12 +60,14 @@ export function DailySummaryCard({ summary, disableLink }: Props) {
           stock={summary.buy_stock}
           ticker={summary.buy_ticker}
           reason={summary.buy_reason}
+          date={summary.report_date}
         />
         <PickBlock
           tone="sell"
           stock={summary.sell_stock}
           ticker={summary.sell_ticker}
           reason={summary.sell_reason}
+          date={summary.report_date}
         />
       </div>
     </div>
@@ -77,11 +79,13 @@ function PickBlock({
   stock,
   ticker,
   reason,
+  date,
 }: {
   tone: "buy" | "sell";
   stock: string;
   ticker?: string;
   reason: string;
+  date?: string;
 }) {
   const isBuy = tone === "buy";
   const bg = isBuy
@@ -115,7 +119,7 @@ function PickBlock({
             {stock || "종목 없음"}
           </span>
         )}
-        {ticker && <StockPriceBadge ticker={ticker} />}
+        {ticker && <StockPriceBadge ticker={ticker} date={date} />}
       </div>
 
       <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
