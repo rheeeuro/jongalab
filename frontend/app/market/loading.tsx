@@ -1,4 +1,4 @@
-import { BarChart3, Landmark, Gem, TrendingUp } from "lucide-react";
+import { BarChart3, Landmark, Gem, TrendingUp, Globe } from "lucide-react";
 
 function Skeleton({ className }: { className?: string }) {
   return (
@@ -67,6 +67,18 @@ export default function DashboardLoading() {
             주요 시장 지표와 주도주 현황을 한눈에 확인하세요.
           </p>
         </div>
+
+        {/* 미국 시장 지수 */}
+        <SectionSkeleton
+          icon={<Globe className="h-5 w-5 text-blue-500" />}
+          title="🇺🇸 미국 시장"
+        >
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <IndexCardSkeleton key={i} />
+            ))}
+          </div>
+        </SectionSkeleton>
 
         {/* 한국 시장 지수 */}
         <SectionSkeleton

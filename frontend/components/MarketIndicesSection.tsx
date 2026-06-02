@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import type { MarketIndices } from "@/types";
 import { AnimatedMarketIndexCard } from "./AnimatedMarketIndexCard";
-import { Landmark, Gem } from "lucide-react";
+import { Landmark, Gem, Globe } from "lucide-react";
 
 const CACHE_KEY = "market-indices-cache";
 const POLL_INTERVAL = 60_000; // 1분
-const EMPTY_INDICES: MarketIndices = { KR: [], COMMODITIES: [] };
+const EMPTY_INDICES: MarketIndices = { US: [], KR: [], COMMODITIES: [] };
 
 function readCachedMarketIndices(): MarketIndices | null {
   if (typeof window === "undefined") return null;
@@ -99,11 +99,26 @@ export function MarketIndicesSection() {
   return (
     <>
       <Section
+        icon={<Globe className="h-5 w-5 text-blue-500" />}
+        title="🇺🇸 미국 시장"
+      >
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {(displayData.US ?? []).map((item) => (
+            <AnimatedMarketIndexCard
+              key={item.symbol}
+              item={item}
+              animate={animate}
+            />
+          ))}
+        </div>
+      </Section>
+
+      <Section
         icon={<Landmark className="h-5 w-5 text-red-500" />}
         title="🇰🇷 한국 시장"
       >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {displayData.KR.map((item) => (
+          {(displayData.KR ?? []).map((item) => (
             <AnimatedMarketIndexCard
               key={item.symbol}
               item={item}
@@ -118,7 +133,7 @@ export function MarketIndicesSection() {
         title="원자재 / 암호화폐"
       >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {displayData.COMMODITIES.map((item) => (
+          {(displayData.COMMODITIES ?? []).map((item) => (
             <AnimatedMarketIndexCard
               key={item.symbol}
               item={item}

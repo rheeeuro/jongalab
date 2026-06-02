@@ -15,6 +15,13 @@ from core.repository.ticker import lookup_name_by_ticker
 # ── 시장 지수 정의 ──
 
 MARKET_INDICES = {
+    "US": [
+        {"symbol": "^GSPC", "name": "S&P 500"},
+        {"symbol": "^IXIC", "name": "NASDAQ"},
+        {"symbol": "^DJI", "name": "다우존스"},
+        {"symbol": "^VIX", "name": "VIX (공포지수)"},
+        {"symbol": "DX-Y.NYB", "name": "달러 인덱스"},
+    ],
     "KR": [
         {"symbol": "^KS11", "name": "코스피"},
         {"symbol": "^KQ11", "name": "코스닥"},

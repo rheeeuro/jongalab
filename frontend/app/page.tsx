@@ -39,6 +39,7 @@ async function getLatestSectorReport(): Promise<SectorReport[]> {
 }
 
 async function getMarketIndices(): Promise<{
+  US: MarketIndex[];
   KR: MarketIndex[];
   COMMODITIES: MarketIndex[];
 } | null> {

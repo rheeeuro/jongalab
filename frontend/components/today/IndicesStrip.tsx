@@ -3,6 +3,7 @@ import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 interface Props {
   indices: {
+    US: MarketIndex[];
     KR: MarketIndex[];
     COMMODITIES: MarketIndex[];
   } | null;
@@ -12,6 +13,7 @@ export function IndicesStrip({ indices }: Props) {
   if (!indices) return null;
 
   const items: MarketIndex[] = [];
+  items.push(...(indices.US ?? []));
   items.push(...(indices.KR ?? []));
   items.push(...(indices.COMMODITIES ?? []));
 
