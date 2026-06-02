@@ -47,6 +47,7 @@ from core.repository.sector_report import (
     save_sector_reports,
     get_sector_reports_by_date,
     get_sector_report_dates,
+    get_top_themes_by_dates,
 )
 
 from core.repository.strategy_config import (

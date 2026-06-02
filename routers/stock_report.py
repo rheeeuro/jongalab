@@ -11,6 +11,7 @@ from core.repository import (
     get_sector_reports_by_date,
     get_content_by_stock_and_date,
     get_gap_stats_by_dates,
+    get_top_themes_by_dates,
 )
 
 router = APIRouter(prefix="/api", tags=["stock-report"])
@@ -103,6 +104,21 @@ class SectorReport(BaseModel):
     rank_no: int = 0
     stocks: List[SectorStock] = []
     created_at: Optional[str] = None
+
+
+@router.get("/sector-report/top-themes", response_model=dict[str, List[str]])
+def top_themes(
+    dates: str = Query(..., description="콤마 구분 YYYY-MM-DD 목록"),
+    limit: int = Query(3, description="날짜별 최대 테마 수"),
+):
+    """여러 날짜의 상위 주도 테마명 목록 (날짜별 rank_no 순)"""
+    try:
+        date_list = [d.strip() for d in dates.split(",") if d.strip()]
+        if not date_list:
+            return {}
+        return get_top_themes_by_dates(date_list, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/sector-report/{report_date}", response_model=List[SectorReport])

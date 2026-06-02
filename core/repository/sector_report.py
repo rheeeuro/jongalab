@@ -64,6 +64,35 @@ def get_sector_reports_by_date(report_date: str) -> list[dict]:
         return results
 
 
+def get_top_themes_by_dates(dates: list[str], limit: int = 3) -> dict[str, list[str]]:
+    """여러 날짜의 상위 주도 테마명을 한 번에 조회.
+
+    반환: {date: [thema_nm, ...]}  (날짜별 rank_no 순 최대 limit개)
+    """
+    if not dates:
+        return {}
+
+    placeholders = ",".join(["%s"] * len(dates))
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"""SELECT report_date, thema_nm, rank_no
+                  FROM daily_sector_report
+                 WHERE report_date IN ({placeholders})
+                 ORDER BY report_date DESC, rank_no ASC""",
+            tuple(dates),
+        )
+        rows = cursor.fetchall()
+
+    result: dict[str, list[str]] = {}
+    for row in rows:
+        d = row["report_date"]
+        key = d.isoformat().split("T")[0] if isinstance(d, (date, datetime)) else str(d)
+        themes = result.setdefault(key, [])
+        if len(themes) < limit:
+            themes.append(row["thema_nm"])
+    return result
+
+
 def get_sector_report_dates(limit: int = 30) -> list[str]:
     """섹터 리포트가 존재하는 날짜 목록"""
     with get_db() as (conn, cursor):
