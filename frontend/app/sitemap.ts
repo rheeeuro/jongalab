@@ -2,7 +2,7 @@ import { MetadataRoute } from "next";
 import { API_BASE } from "@/lib/api";
 import { DailySummary, StockReport, TickerDictionary } from "@/types";
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://stock.rheeeuro.com";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://jongalab.com";
 const REVALIDATE_SECONDS = 3600;
 
 function parseLastModified(date?: string) {

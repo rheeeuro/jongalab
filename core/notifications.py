@@ -78,7 +78,7 @@ def send_analysis_alert(channel: str, title: str, analysis: str, score: int = 50
             f"관련 종목: {ticker_display}\n"
             f"──────────────────\n"
             f"{formatted_analysis}\n\n"
-            f"👉 [대시보드 바로가기](https://stock.rheeeuro.com)"
+            f"👉 [대시보드 바로가기](https://jongalab.com)"
         )
 
         count = _send_telegram_message(message)
@@ -97,7 +97,7 @@ def send_daily_digest_alert(date: str, buy: str, buy_reason: str, sell: str, sel
             f"└ {buy_reason}\n\n"
             f"🐻 *매도(Sell): {sell}*\n"
             f"└ {sell_reason}\n\n"
-            f"👉 [대시보드 확인하기](https://stock.rheeeuro.com)"
+            f"👉 [대시보드 확인하기](https://jongalab.com)"
         )
 
         count = _send_telegram_message(message)

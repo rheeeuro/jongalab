@@ -39,7 +39,7 @@ export function Navbar() {
           <Link
             href="/"
             className="flex shrink-0 items-center gap-1.5 text-base font-extrabold tracking-tight text-slate-900 dark:text-slate-100"
-            aria-label="주식 AI 홈"
+            aria-label="종가랩 홈"
           >
             <Image
               src="/logo.png"
@@ -48,7 +48,7 @@ export function Navbar() {
               height={24}
               className="rounded-lg"
             />
-            <span className="hidden sm:inline">주식 AI</span>
+            <span className="hidden sm:inline">종가랩</span>
           </Link>
 
           {/* 데스크톱 (lg+) 메인 네비게이션 */}

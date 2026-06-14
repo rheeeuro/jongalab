@@ -44,3 +44,23 @@ def exit_if_not_trading_day() -> None:
     if not is_trading_day():
         logger.info("휴장일(주말·공휴일 등) — 워커를 실행하지 않고 종료합니다.")
         sys.exit(0)
+
+
+def exit_if_outside_window(start_hour: int, end_hour: int, *, dt: datetime | None = None) -> None:
+    """휴장일이거나 운영 시간대(시 단위) 밖이면 프로세스를 즉시 정상 종료(exit 0)한다.
+
+    `exit_if_not_trading_day()` 와 동일하게 거래일(주말·공휴일 포함)을 먼저 막고,
+    추가로 `start_hour <= 현재 시각(시) <= end_hour`(양끝 포함) 범위만 통과시킨다.
+    cron 스케줄과 무관하게 pm2 restart/start 로 즉시 기동될 때, 의도한 운영
+    시간대 밖(예: 새벽) 실행을 한 번 더 차단하기 위함이다.
+    """
+    d = dt or datetime.now()
+    if not is_trading_day(d):
+        logger.info("휴장일(주말·공휴일 등) — 워커를 실행하지 않고 종료합니다.")
+        sys.exit(0)
+    if not (start_hour <= d.hour <= end_hour):
+        logger.info(
+            "운영 시간대(%02d~%02d시) 밖(현재 %02d:%02d) — 워커를 실행하지 않고 종료합니다.",
+            start_hour, end_hour, d.hour, d.minute,
+        )
+        sys.exit(0)

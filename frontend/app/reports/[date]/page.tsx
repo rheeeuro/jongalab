@@ -46,8 +46,8 @@ export async function generateMetadata({
     openGraph: {
       title,
       description,
-      url: `https://stock.rheeeuro.com/reports/${resolvedParams.date}`,
-      siteName: "주식 AI 에이전트",
+      url: `https://jongalab.com/reports/${resolvedParams.date}`,
+      siteName: "종가랩",
       type: "article",
     },
   };

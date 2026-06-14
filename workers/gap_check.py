@@ -217,8 +217,9 @@ def run_retry():
 
 
 if __name__ == "__main__":
-    from core.market_calendar import exit_if_not_trading_day
-    exit_if_not_trading_day()
+    from core.market_calendar import exit_if_outside_window
+    # cron: 5 8(초기) / 5 9(--retry) * * 1-5. 휴장일·운영시간대(08~09시) 밖이면 종료.
+    exit_if_outside_window(8, 9)
     if "--retry" in sys.argv:
         run_retry()
     else:

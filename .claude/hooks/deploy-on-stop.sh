@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Stop: 이번 턴에 누적된 코드 변경(.claude/.pending-changes)을 분류해서
-#   - 프론트 변경 → npm run build 후 stock-web 재시작
-#   - api.py/routers/core 변경 → stock-api 재시작
-#   - core 공유 변경 / telegram_listener 변경 → stock-telegram 재시작
+#   - 프론트 변경 → npm run build 후 jongalab-fe 재시작
+#   - api.py/routers/core 변경 → jongalab-be 재시작
+#   - core 공유 변경 / telegram_listener 변경 → jongalab-telegram 재시작
 #   - cron 워커 변경 → 재시작하지 않음(다음 cron 실행 때 자동 반영) — 안내만
 # pm2 가 없거나 해당 앱이 online 이 아니면 조용히 건너뛴다.
 # 빌드 실패 시 stop 을 막아(decision:block) Claude 가 이어서 고치게 한다.
@@ -36,10 +36,10 @@ for f in "${FILES[@]}"; do
   case "$f" in
     */core/*.py)                        NEED_API=1; NEED_TG=1 ;;   # core 는 api·telegram 공유
     */workers/telegram_listener.py)     NEED_TG=1 ;;
-    */workers/youtube_collector.py)     CRON_HIT[stock-collector]=1 ;;
-    */workers/daily_digest.py)          CRON_HIT[daily-report]=1 ;;
-    */workers/gap_check.py)             CRON_HIT[gap-check]=1 ;;
-    */workers/closing_bet.py)           CRON_HIT[closing-bet]=1 ;;
+    */workers/youtube_collector.py)     CRON_HIT[jongalab-collector]=1 ;;
+    */workers/daily_digest.py)          CRON_HIT[jongalab-daily-report]=1 ;;
+    */workers/gap_check.py)             CRON_HIT[jongalab-gap-check]=1 ;;
+    */workers/closing_bet.py)           CRON_HIT[jongalab-closing-bet]=1 ;;
     */workers/kiwoom_token_refresh.py)  CRON_HIT[kiwoom-token-refresh]=1 ;;
   esac
 done
@@ -72,29 +72,29 @@ if [ "$NEED_WEB" = "1" ]; then
   if [ $? -ne 0 ]; then
     BUILD_FAILED="$BUILD_OUT"
   else
-    if is_online stock-web; then
-      pm2 restart stock-web >/dev/null 2>&1 && NOTES+=("✅ stock-web 빌드+재시작")
+    if is_online jongalab-fe; then
+      pm2 restart jongalab-fe >/dev/null 2>&1 && NOTES+=("✅ jongalab-fe 빌드+재시작")
     else
-      NOTES+=("ℹ️ stock-web 빌드 성공(앱이 online 아님 — 재시작 생략)")
+      NOTES+=("ℹ️ jongalab-fe 빌드 성공(앱이 online 아님 — 재시작 생략)")
     fi
   fi
 fi
 
 # 2) 백엔드 API
 if [ "$NEED_API" = "1" ]; then
-  if is_online stock-api; then
-    pm2 restart stock-api >/dev/null 2>&1 && NOTES+=("✅ stock-api 재시작")
+  if is_online jongalab-be; then
+    pm2 restart jongalab-be >/dev/null 2>&1 && NOTES+=("✅ jongalab-be 재시작")
   else
-    NOTES+=("ℹ️ stock-api 변경됨(앱이 online 아님 — 재시작 생략)")
+    NOTES+=("ℹ️ jongalab-be 변경됨(앱이 online 아님 — 재시작 생략)")
   fi
 fi
 
 # 3) 텔레그램 리스너(상시)
 if [ "$NEED_TG" = "1" ]; then
-  if is_online stock-telegram; then
-    pm2 restart stock-telegram >/dev/null 2>&1 && NOTES+=("✅ stock-telegram 재시작")
+  if is_online jongalab-telegram; then
+    pm2 restart jongalab-telegram >/dev/null 2>&1 && NOTES+=("✅ jongalab-telegram 재시작")
   else
-    NOTES+=("ℹ️ stock-telegram 변경됨(앱이 online 아님 — 재시작 생략)")
+    NOTES+=("ℹ️ jongalab-telegram 변경됨(앱이 online 아님 — 재시작 생략)")
   fi
 fi
 
@@ -110,7 +110,7 @@ if [ -n "$BUILD_FAILED" ]; then
     echo "$BUILD_FAILED" | tail -30 >&2
     exit 0
   fi
-  REASON=$(printf '프론트 빌드(npm run build) 실패로 stock-web 을 재시작하지 못했습니다. 아래 오류를 고치세요:\n%s' "$(echo "$BUILD_FAILED" | tail -30)")
+  REASON=$(printf '프론트 빌드(npm run build) 실패로 jongalab-fe 을 재시작하지 못했습니다. 아래 오류를 고치세요:\n%s' "$(echo "$BUILD_FAILED" | tail -30)")
   python3 -c 'import json,sys; print(json.dumps({"decision":"block","reason":sys.argv[1]}))' "$REASON"
   exit 0
 fi

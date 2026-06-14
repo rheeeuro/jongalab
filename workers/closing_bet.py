@@ -348,7 +348,8 @@ class ClosingBetStrategy:
 
 
 if __name__ == "__main__":
-    from core.market_calendar import exit_if_not_trading_day
-    exit_if_not_trading_day()
+    from core.market_calendar import exit_if_outside_window
+    # cron: 0,30 9-18 * * 1-5. 휴장일·운영시간대(09~18시) 밖이면 종료.
+    exit_if_outside_window(9, 18)
     strategy = ClosingBetStrategy()
     strategy.run()

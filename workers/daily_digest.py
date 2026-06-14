@@ -91,6 +91,7 @@ def generate_daily_report():
 
 
 if __name__ == "__main__":
-    from core.market_calendar import exit_if_not_trading_day
-    exit_if_not_trading_day()
+    from core.market_calendar import exit_if_outside_window
+    # cron: 50 7 * * 1-5 (07:50). 휴장일·운영시간대(07~09시) 밖이면 종료.
+    exit_if_outside_window(7, 9)
     generate_daily_report()

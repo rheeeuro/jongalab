@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "주식 AI 에이전트",
+  title: "종가랩 — 종가 전략 연구소",
   description: "AI가 분석해주는 매일의 주식 시장 요약",
   icons: {
     icon: "/logo.png",
