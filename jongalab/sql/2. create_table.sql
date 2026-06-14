@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS content_analysis (
     platform VARCHAR(20) DEFAULT 'youtube',   -- 'youtube', 'telegram', 'news'
     source_url VARCHAR(255),                  -- 원문 링크
     related_tickers VARCHAR(255) DEFAULT NULL, -- JSON 배열 [{"ticker":"...", "name":"..."}]
+    ticker_sectors VARCHAR(500) DEFAULT NULL COMMENT 'related_tickers와 1:1 대응 [{"ticker":"...","sector":"..."}]',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_external_id (external_id)
 );
@@ -55,6 +56,8 @@ CREATE TABLE ticker_dictionary (
     company_name VARCHAR(100) UNIQUE NOT NULL,
     ticker_symbol VARCHAR(50) NOT NULL,
     status VARCHAR(20) DEFAULT 'PENDING',  -- 'PENDING'(대기중), 'ACTIVE'(검증완료), 'INACTIVE'(비활성)
+    sector VARCHAR(100) DEFAULT NULL,            -- 섹터 캐시 (TTL 1년 — 형식적 방어선, 실제로는 거의 고정값)
+    sector_updated_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -92,6 +95,13 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     content_score FLOAT DEFAULT 0.0,
     score FLOAT DEFAULT 0.0,
     rank_no INT DEFAULT 0,
+
+    -- 갭 체크(다음날 아침) 결과 영구 보존: 08:10 NXT, 09:10 KRX 재조회 결과를 Top 10 종목에 업데이트
+    gap_nxt_price INT DEFAULT NULL COMMENT '갭 체크 NXT 가격(08:10)',
+    gap_nxt_pct FLOAT DEFAULT NULL COMMENT '리포트가 → NXT 등락률(%)',
+    gap_krx_price INT DEFAULT NULL COMMENT '갭 체크 KRX 가격(09:10)',
+    gap_krx_pct FLOAT DEFAULT NULL COMMENT '리포트가 → KRX 등락률(%)',
+    gap_checked_at TIMESTAMP NULL DEFAULT NULL,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 

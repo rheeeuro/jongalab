@@ -13,12 +13,12 @@ from dotenv import load_dotenv
 _ROOT_ENV = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(_ROOT_ENV)
 
-# DB 설정 (jongalab 과 동일 MariaDB, kiwoom_token 테이블 공유)
+# DB 설정 (jongalab 과 동일 MariaDB 서버, kiwoom_token 은 전용 kiwoom DB 에 보관)
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', '127.0.0.1'),
     'user': os.getenv('DB_USER', 'stock_user'),
     'password': os.getenv('DB_PASSWORD', ''),
-    'database': os.getenv('DB_NAME', 'stock_agent'),
+    'database': os.getenv('KIWOOM_DB_NAME', 'kiwoom'),
     'port': int(os.getenv('DB_PORT', '3307')),
     'charset': 'utf8mb4',
     'collation': 'utf8mb4_unicode_ci',

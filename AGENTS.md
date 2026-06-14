@@ -10,7 +10,9 @@
 
 ## 디렉터리 구조
 루트는 **`jongalab/`(메인 앱)** 과 **`kiwoom/`(키움 데이터 전용 서버)** 로 분리된다.
-공통 인프라는 각자 최소 복제하고, **키움 토큰(`kiwoom_token` 테이블)은 같은 MariaDB 를 공유**한다.
+공통 인프라는 각자 최소 복제하고, **같은 MariaDB 서버에 DB(스키마)를 분리**해 쓴다 —
+jongalab 은 `jongalab` DB(분석/리포트/소스 등), kiwoom 은 전용 `kiwoom` DB(`kiwoom_token`).
+DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(`DB_HOST`/`DB_USER`/`DB_PASSWORD`/`DB_PORT` 는 공유).
 
 ### `jongalab/` — 메인 앱 (분석/트레이딩/워커/프론트)
 - `core/` — 비즈니스 로직. `ai_service.py`(LLM 추상화), `trading_engine.py`(종가베팅 전략),
@@ -20,17 +22,19 @@
   gap_check, closing_bet)
 - `frontend/` — Next.js 16 App Router + Tailwind 4 + recharts. `app/`(페이지), `components/`,
   `lib/api.ts`(fetch 래퍼, API_BASE=:8000), `types/index.ts`
+- `sql/` — `jongalab` DB 스키마 (`1. create_database.sql` + `2. create_table.sql`)
 
 ### `kiwoom/` — 키움 데이터 전용 서버 (FastAPI, :8001)
 - `core/kiwoom_api.py`(키움 REST 클라이언트), `core/repository/kiwoom_token.py`(토큰 저장),
   `core/{config,db,logging_setup}.py`(DB 키만 가진 최소 복제)
 - `api.py` — 데이터 조회 엔드포인트(소비자가 쓰는 11종) + `/health`
 - `workers/kiwoom_token_refresh.py` — 매일 07:00 토큰 갱신 (cron)
+- `sql/` — `kiwoom` DB 스키마 (`1. create_database.sql` + `2. create_table.sql`, `kiwoom_token`)
 - **데이터 조회 전용**: 주문/계좌는 노출하지 않는다. jongalab 은 `core.kiwoom_client.KiwoomRestClient`
   로 `http://127.0.0.1:8001` 호출(`KIWOOM_BASE_URL`).
 
 ### 루트
-- `sql/` — DB 스키마 (MariaDB), `ecosystem.config.js`, `.env`(단일, 양쪽이 절대경로로 로드), `.claude/`
+- `ecosystem.config.js`, `.env`(단일, 양쪽이 절대경로로 로드), `.claude/`
 
 ## 명령어
 > 파이썬 명령은 해당 서브프로젝트 디렉터리(`jongalab/` 또는 `kiwoom/`)에서 실행한다.
