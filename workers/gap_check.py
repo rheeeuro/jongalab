@@ -217,6 +217,8 @@ def run_retry():
 
 
 if __name__ == "__main__":
+    from core.market_calendar import exit_if_not_trading_day
+    exit_if_not_trading_day()
     if "--retry" in sys.argv:
         run_retry()
     else:

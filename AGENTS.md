@@ -62,6 +62,14 @@
 - **Claude Code**: `.claude/` 에 자동화 레이어가 있다 — 편집 후 위 검증을 자동 실행하는 훅,
   민감 파일 편집 차단 훅, 슬래시 커맨드(`/check` `/run-api` `/run-web` `/db` `/new-card` `/new-worker`),
   전문 서브에이전트(backend/frontend/verify). 위 "검증" 단계가 훅으로 강제된다.
+- **Claude Code 자동 배포 훅**: 코드 변경은 턴 종료(Stop) 시점에 PM2 에 자동 반영된다
+  (`.claude/hooks/track-changes.sh` 가 변경 파일을 누적 → `deploy-on-stop.sh` 가 분류·실행).
+  - `frontend/**` 변경 → `npm run build` 후 `stock-web` 재시작(빌드 실패 시 Stop 을 막아 이어서 고치게 함).
+    또한 프론트 편집마다 **모바일 최우선** 가이드가 컨텍스트로 주입된다.
+  - `api.py`/`routers/**`/`core/**` → `stock-api` 재시작, `core/**`·`telegram_listener.py` → `stock-telegram` 재시작.
+  - cron 워커(`youtube_collector`/`daily_digest`/`gap_check`/`closing_bet`/`kiwoom_token_refresh`)는
+    **재시작하지 않는다** — cron 마다 새 프로세스로 spawn 되어 다음 스케줄 실행 때 자동 반영된다.
+  - 해당 PM2 앱이 `online` 이 아니거나 pm2 가 없으면 조용히 건너뛴다.
 - **Codex** (및 기타): 위 자동화가 없으므로 **검증 단계를 직접 실행**해야 한다. 가드레일(민감 파일,
   비밀키)도 사람이 지키듯 스스로 지킨다. 설정은 글로벌 `~/.codex/config.toml`,
   승인/샌드박스는 실행 플래그로 조절한다.

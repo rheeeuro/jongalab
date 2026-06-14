@@ -9,7 +9,9 @@
       "Bash(npm run lint)",
       "Bash(pm2 logs :*)",
       "Bash(pm2 status)",
+      "Bash(pm2 jlist)",
       "Bash(pm2 restart :*)",
+      "Bash(cd frontend && npm run build)",
       "Bash(docker exec :*)",
       "Bash(docker ps :*)",
       "Bash(curl -s http://127.0.0.1:* :*)",
@@ -44,6 +46,20 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/quality-gate.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/track-changes.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/deploy-on-stop.sh"
           }
         ]
       }

@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Stop: 이번 턴에 누적된 코드 변경(.claude/.pending-changes)을 분류해서
+#   - 프론트 변경 → npm run build 후 stock-web 재시작
+#   - api.py/routers/core 변경 → stock-api 재시작
+#   - core 공유 변경 / telegram_listener 변경 → stock-telegram 재시작
+#   - cron 워커 변경 → 재시작하지 않음(다음 cron 실행 때 자동 반영) — 안내만
+# pm2 가 없거나 해당 앱이 online 이 아니면 조용히 건너뛴다.
+# 빌드 실패 시 stop 을 막아(decision:block) Claude 가 이어서 고치게 한다.
+set -uo pipefail
+
+ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+PENDING="$ROOT/.claude/.pending-changes"
+
+# 무한 루프 방지: 이미 stop 훅으로 재진입한 상태면 block 하지 않는다.
+STOP_ACTIVE=$(python3 -c '
+import json,sys
+try: print("1" if json.load(sys.stdin).get("stop_hook_active") else "0")
+except Exception: print("0")
+' 2>/dev/null || echo "0")
+
+[ -s "$PENDING" ] || { rm -f "$PENDING"; exit 0; }
+
+# 변경 파일 중복 제거
+mapfile -t FILES < <(sort -u "$PENDING")
+
+NEED_WEB=0; NEED_API=0; NEED_TG=0
+declare -A CRON_HIT=()
+
+for f in "${FILES[@]}"; do
+  case "$f" in
+    *frontend/*) NEED_WEB=1 ;;
+  esac
+  case "$f" in
+    */api.py|*/routers/*.py)            NEED_API=1 ;;
+  esac
+  case "$f" in
+    */core/*.py)                        NEED_API=1; NEED_TG=1 ;;   # core 는 api·telegram 공유
+    */workers/telegram_listener.py)     NEED_TG=1 ;;
+    */workers/youtube_collector.py)     CRON_HIT[stock-collector]=1 ;;
+    */workers/daily_digest.py)          CRON_HIT[daily-report]=1 ;;
+    */workers/gap_check.py)             CRON_HIT[gap-check]=1 ;;
+    */workers/closing_bet.py)           CRON_HIT[closing-bet]=1 ;;
+    */workers/kiwoom_token_refresh.py)  CRON_HIT[kiwoom-token-refresh]=1 ;;
+  esac
+done
+
+rm -f "$PENDING"   # 소비 완료
+
+command -v pm2 >/dev/null 2>&1 || exit 0   # pm2 없으면 종료
+
+# pm2 앱이 online 인지 확인
+is_online() {
+  pm2 jlist 2>/dev/null | python3 -c '
+import json,sys
+name=sys.argv[1]
+try: apps=json.load(sys.stdin)
+except Exception: sys.exit(1)
+for a in apps:
+    if a.get("name")==name and a.get("pm2_env",{}).get("status")=="online":
+        sys.exit(0)
+sys.exit(1)
+' "$1"
+}
+
+NOTES=()
+BUILD_FAILED=""
+
+# 1) 프론트: 빌드 후 재시작
+if [ "$NEED_WEB" = "1" ]; then
+  echo "🛠  frontend 변경 감지 → npm run build" >&2
+  BUILD_OUT=$(cd "$ROOT/frontend" && npm run build 2>&1)
+  if [ $? -ne 0 ]; then
+    BUILD_FAILED="$BUILD_OUT"
+  else
+    if is_online stock-web; then
+      pm2 restart stock-web >/dev/null 2>&1 && NOTES+=("✅ stock-web 빌드+재시작")
+    else
+      NOTES+=("ℹ️ stock-web 빌드 성공(앱이 online 아님 — 재시작 생략)")
+    fi
+  fi
+fi
+
+# 2) 백엔드 API
+if [ "$NEED_API" = "1" ]; then
+  if is_online stock-api; then
+    pm2 restart stock-api >/dev/null 2>&1 && NOTES+=("✅ stock-api 재시작")
+  else
+    NOTES+=("ℹ️ stock-api 변경됨(앱이 online 아님 — 재시작 생략)")
+  fi
+fi
+
+# 3) 텔레그램 리스너(상시)
+if [ "$NEED_TG" = "1" ]; then
+  if is_online stock-telegram; then
+    pm2 restart stock-telegram >/dev/null 2>&1 && NOTES+=("✅ stock-telegram 재시작")
+  else
+    NOTES+=("ℹ️ stock-telegram 변경됨(앱이 online 아님 — 재시작 생략)")
+  fi
+fi
+
+# 4) cron 워커: 재시작 금지(다음 cron 실행 때 새 프로세스로 자동 반영)
+for app in "${!CRON_HIT[@]}"; do
+  NOTES+=("⏰ $app 변경됨 — cron 워커라 재시작 안 함(다음 스케줄 실행 때 자동 반영)")
+done
+
+# 빌드 실패 처리: stop 을 막아 Claude 가 이어서 고치게 한다(루프 방지 가드 포함)
+if [ -n "$BUILD_FAILED" ]; then
+  if [ "$STOP_ACTIVE" = "1" ]; then
+    echo "❌ frontend 빌드 실패(재진입 상태라 차단하지 않음):" >&2
+    echo "$BUILD_FAILED" | tail -30 >&2
+    exit 0
+  fi
+  REASON=$(printf '프론트 빌드(npm run build) 실패로 stock-web 을 재시작하지 못했습니다. 아래 오류를 고치세요:\n%s' "$(echo "$BUILD_FAILED" | tail -30)")
+  python3 -c 'import json,sys; print(json.dumps({"decision":"block","reason":sys.argv[1]}))' "$REASON"
+  exit 0
+fi
+
+# 정상 요약
+[ ${#NOTES[@]} -gt 0 ] && printf '%s\n' "${NOTES[@]}" >&2
+exit 0

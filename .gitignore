@@ -26,6 +26,8 @@ stock_session.*
 # AI 에이전트 하네스: AGENTS.md/CLAUDE.md/.claude 는 공유 추적,
 # Claude 개인 로컬 설정만 제외
 .claude/settings.local.json
+# 턴 동안 누적되는 변경 파일 목록(Stop 훅이 소비) — 추적 불필요
+.claude/.pending-changes
 
 # 핵심 로직
 core/trading_engine.py

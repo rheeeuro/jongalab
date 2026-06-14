@@ -45,17 +45,46 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
       0,
     );
     if (totalScore <= 0) return [];
-    return reports
-      .map((r) => {
-        const weight = Math.max(r.score, 0) / totalScore;
-        const allocAmount = seedNum * weight;
-        const shares =
-          r.current_price > 0
-            ? Math.floor(allocAmount / r.current_price)
-            : 0;
-        const cost = shares * r.current_price;
-        return { report: r, weight, allocAmount, shares, cost };
-      })
+
+    // 1차: 점수 가중치로 목표 금액 산정 → 정수 주식으로 비례 배분
+    const items = reports.map((r) => {
+      const weight = Math.max(r.score, 0) / totalScore;
+      const allocAmount = seedNum * weight;
+      const price = r.current_price > 0 ? r.current_price : 0;
+      const shares = price > 0 ? Math.floor(allocAmount / price) : 0;
+      return { report: r, weight, allocAmount, price, shares, cost: shares * price };
+    });
+
+    // 2차: 잔여 현금을 그리디로 재투입해 활용률을 최대화한다.
+    // 매번 "목표 대비 가장 덜 채워진(allocAmount - cost가 큰)" 종목 중
+    // 단가가 잔여 현금 이하인 것을 한 주씩 추가 매수한다. 가중치를 최대한
+    // 존중하면서, 매수 가능한 종목이 없을 때까지(잔여 < 최저 단가) 채운다.
+    let leftover = seedNum - items.reduce((s, it) => s + it.cost, 0);
+    for (;;) {
+      let best: (typeof items)[number] | null = null;
+      let bestGap = -Infinity;
+      for (const it of items) {
+        if (it.price <= 0 || it.price > leftover) continue;
+        const gap = it.allocAmount - it.cost; // 부족분이 클수록 우선
+        if (gap > bestGap) {
+          bestGap = gap;
+          best = it;
+        }
+      }
+      if (!best) break;
+      best.shares += 1;
+      best.cost += best.price;
+      leftover -= best.price;
+    }
+
+    return items
+      .map(({ report, weight, allocAmount, shares, cost }) => ({
+        report,
+        weight,
+        allocAmount,
+        shares,
+        cost,
+      }))
       .sort((a, b) => b.cost - a.cost);
   }, [reports, seedNum]);
 
