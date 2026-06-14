@@ -39,12 +39,12 @@ export function StockPriceBadge({ ticker, date }: { ticker: string; date?: strin
   if (!data) return null;
 
   const formatPrice = (price: number, currentTicker: string) => {
-    // 한국 주식 (.KS 또는 .KQ 로 끝나는 경우)
-    if (currentTicker.endsWith('.KS') || currentTicker.endsWith('.KQ')) {
+    // 한국 주식 (6자리 종목코드)
+    if (/^\d{6}$/.test(currentTicker)) {
       // 원화는 소수점 없이 ₩ 표시
       return `₩${price.toLocaleString('ko-KR', { maximumFractionDigits: 0 })}`;
     }
-    // 미국 주식 (그 외)
+    // 그 외 (해외 등)
     // 달러는 소수점 2자리까지 $ 표시
     return `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };

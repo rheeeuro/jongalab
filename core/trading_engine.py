@@ -128,7 +128,6 @@ class StockCandidate:
     score: float = 0.0
     is_leader: bool = False
     is_theme_stock: bool = False
-    market_suffix: str = "KS"  # yfinance suffix: KS=KOSPI, KQ=KOSDAQ
     supply_history: list = field(default_factory=list)  # 최근 5일 수급 현황
     hourly_candles: list = field(default_factory=list)  # 1시간봉 캔들 데이터
     content_count: int = 0        # 오늘 관련 콘텐츠 분석 건수

@@ -76,18 +76,14 @@ function IndexChip({ idx }: { idx: MarketIndex }) {
       ? "text-blue-600 dark:text-blue-400"
       : "text-slate-500";
   const Icon = isUp ? TrendingUp : isDown ? TrendingDown : Minus;
-  const isKr =
-    idx.symbol.endsWith(".KS") || idx.symbol.endsWith(".KQ");
 
   const priceStr =
     idx.price === null
       ? "-"
-      : isKr
-        ? idx.price.toLocaleString("ko-KR", { maximumFractionDigits: 0 })
-        : idx.price.toLocaleString("en-US", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          });
+      : idx.price.toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
 
   return (
     <div className="min-w-[160px] shrink-0 rounded-2xl bg-white p-4 dark:bg-slate-900/60 sm:min-w-0">

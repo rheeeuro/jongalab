@@ -1,15 +1,24 @@
 import re
 import logging
 import warnings
-import yfinance as yf
 from ddgs import DDGS
+from pykrx import stock as pykrx_stock
 
 from core.repository import lookup_ticker, save_ticker
 
 warnings.filterwarnings("ignore")
 
+
+def _is_valid_kr_code(code: str) -> bool:
+    """pykrx로 6자리 코드가 실제 상장 종목인지 검증 (코스피/코스닥 공통)"""
+    try:
+        return bool(pykrx_stock.get_market_ticker_name(code))
+    except Exception:
+        return False
+
+
 def _search_ticker_online(company_name):
-    """기존 DuckDuckGo + yfinance 검색 로직 (dictionary에 없을 때 폴백, 국장 전용)"""
+    """DuckDuckGo 검색으로 6자리 종목코드 추출 → pykrx 검증 (국장 전용)"""
     with DDGS() as ddgs:
         query = f"{company_name} 코스피 코스닥 종목코드"
 
@@ -18,24 +27,12 @@ def _search_ticker_online(company_name):
             combined_text = " ".join([f"{res.get('title')} {res.get('body')} {res.get('href')}" for res in results]).upper()
 
             codes = re.findall(r'\b(\d{6})\b', combined_text)
-            if codes:
-                for code in list(dict.fromkeys(codes)):
-                    for suffix in ['.KS', '.KQ']:
-                        ticker = f"{code}{suffix}"
-                        if len(yf.Ticker(ticker).history(period="1d")) > 0:
-                            return ticker
+            for code in list(dict.fromkeys(codes)):
+                if _is_valid_kr_code(code):
+                    return code
 
         except Exception:
             pass
-
-    try:
-        search = yf.Search(company_name, max_results=10).quotes
-        for q in search:
-            symbol = q['symbol']
-            if symbol.endswith('.KS') or symbol.endswith('.KQ'):
-                return symbol
-    except:
-        pass
 
     return "Not Found"
 
@@ -62,7 +59,7 @@ def _get_single_ticker(company_name):
 def get_tickers(names: list[str]) -> list[dict]:
     """
     names: 한글 또는 영문 기업명 리스트
-    반환: [{"ticker": "005930.KS", "name": "삼성전자"}, ...] 형식 (국장 전용)
+    반환: [{"ticker": "005930", "name": "삼성전자"}, ...] 형식 (국장 전용, 6자리 코드)
     """
     tickers = []
     if not names:

@@ -1,15 +1,46 @@
 """
-시장 데이터 서비스 — yfinance/pykrx 기반 주가·지수 조회
+시장 데이터 서비스
+- 개별 종목(시세/차트/종목명/주도주): 키움 REST API (6자리 종목코드 기준)
+- 주요 지수(미국지수·국내지수·원자재·환율): yfinance
 """
 import math
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import yfinance as yf
 from pykrx import stock as pykrx_stock
 
 from core.repository.ticker import lookup_name_by_ticker
+
+
+# ── 키움 API (국내 종목 시세 — lazy singleton) ──
+_kiwoom_api = None
+
+
+def _get_kiwoom():
+    """국내 종목 조회용 키움 API 인스턴스 (lazy init + ensure_token)"""
+    global _kiwoom_api
+    if _kiwoom_api is None:
+        from core.kiwoom_api import KiwoomConfig, KiwoomRestAPI
+        _kiwoom_api = KiwoomRestAPI(KiwoomConfig())
+    _kiwoom_api.ensure_token()
+    return _kiwoom_api
+
+
+def _parse_num(val) -> float:
+    """키움 응답 가격 문자열("+53,500", "-1200") → float. 빈값/이상치는 0."""
+    if val is None:
+        return 0.0
+    try:
+        return float(str(val).replace("+", "").replace(",", "").strip() or 0)
+    except ValueError:
+        return 0.0
+
+
+def _norm_code(ticker: str) -> str:
+    """'005930.KS', '005930_NX' 등 잔여 접미사가 있어도 6자리 코드만 추출"""
+    return (ticker or "").split(".")[0].split("_")[0].strip()
 
 
 # ── 시장 지수 정의 ──
@@ -33,21 +64,6 @@ MARKET_INDICES = {
         {"symbol": "BTC-USD", "name": "비트코인"},
     ],
 }
-
-# ── 시장별 주도주 ──
-
-MARKET_LEADERS = {
-    "KR": [
-        {"symbol": "005930.KS", "name": "삼성전자"},
-        {"symbol": "000660.KS", "name": "SK하이닉스"},
-        {"symbol": "373220.KS", "name": "LG에너지솔루션"},
-        {"symbol": "207940.KS", "name": "삼성바이오로직스"},
-        {"symbol": "005380.KS", "name": "현대자동차"},
-        {"symbol": "000270.KS", "name": "기아"},
-        {"symbol": "035420.KS", "name": "NAVER"},
-    ],
-}
-
 
 def _safe_float(val) -> float | None:
     """nan/inf를 None으로 변환하여 JSON 직렬화 안전하게 처리"""
@@ -85,100 +101,149 @@ def _fetch_quote(item: dict) -> dict:
         return empty
 
 
-def fetch_stock_price(ticker: str, date: str | None = None) -> dict:
-    """개별 종목 주가 및 등락률 조회.
+def _kiwoom_quote(code: str) -> dict:
+    """키움 ka10001 기준 실시간 현재가/등락 (실패 시 None)"""
+    none = {"price": None, "change": None, "change_percent": None}
+    try:
+        info = _get_kiwoom().get_stock_basic_info(code)
+    except Exception:
+        return none
+    cur = abs(_parse_num(info.get("cur_prc")))
+    if cur == 0:
+        return none
+    pct = _parse_num(info.get("flu_rt"))
+    chg = _parse_num(info.get("pred_pre"))
+    # flu_rt가 비어있으면 전일대비(pred_pre)로 등락률 산출
+    if pct == 0 and chg != 0:
+        prev = cur - chg
+        if prev:
+            pct = chg / prev * 100
+    return {
+        "price": cur,
+        "change": round(chg, 2),
+        "change_percent": round(pct, 2),
+    }
 
-    date 미지정 시 실시간 가격, 지정 시 해당 일자 종가와 전 거래일 대비 등락률.
-    """
-    stock = yf.Ticker(ticker)
 
-    if date:
-        try:
-            target = datetime.strptime(date, "%Y-%m-%d")
-        except ValueError:
-            return {"error": "잘못된 날짜 형식입니다."}
-        # 휴장일을 고려해 2주치를 가져온 뒤 target까지 슬라이싱
-        start = (target - timedelta(days=14)).strftime("%Y-%m-%d")
-        end = (target + timedelta(days=1)).strftime("%Y-%m-%d")
-        hist = stock.history(start=start, end=end)
-    else:
-        hist = stock.history(period="2d")
+def _kiwoom_price_on_date(code: str, ticker: str, date: str) -> dict:
+    """키움 ka10081 일봉으로 특정 일자 종가 + 전 거래일 대비 등락률 조회"""
+    try:
+        target = datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        return {"error": "잘못된 날짜 형식입니다."}
 
-    if hist.empty or len(hist) < 1:
+    try:
+        data = _get_kiwoom().get_daily_chart(code, dt=target.strftime("%Y%m%d"))
+        candles = data.get("stk_dt_pole_chart_qry", [])
+    except Exception:
         return {"error": "데이터를 찾을 수 없습니다."}
 
-    current_price = _safe_float(hist['Close'].iloc[-1])
-    if current_price is None:
+    tgt = target.strftime("%Y%m%d")
+    rows = sorted(
+        [c for c in candles if c.get("dt") and c["dt"] <= tgt],
+        key=lambda c: c["dt"], reverse=True,
+    )
+    if not rows:
         return {"error": "데이터를 찾을 수 없습니다."}
 
-    if len(hist) >= 2:
-        prev_close = _safe_float(hist['Close'].iloc[-2])
-        if prev_close and prev_close != 0:
-            change = round(current_price - prev_close, 2)
-            change_percent = round((change / prev_close) * 100, 2)
-        else:
-            change = 0.0
-            change_percent = 0.0
+    close = abs(_parse_num(rows[0].get("cur_prc")))
+    if close == 0:
+        return {"error": "데이터를 찾을 수 없습니다."}
+
+    if len(rows) >= 2:
+        prev = abs(_parse_num(rows[1].get("cur_prc")))
+        change = round(close - prev, 2) if prev else 0.0
+        change_percent = round(change / prev * 100, 2) if prev else 0.0
     else:
         change = 0.0
         change_percent = 0.0
 
     return {
         "ticker": ticker,
-        "price": current_price,
+        "price": close,
         "change": change,
         "change_percent": change_percent,
     }
 
 
+def fetch_stock_price(ticker: str, date: str | None = None) -> dict:
+    """개별 종목 주가 및 등락률 조회 (키움 REST API).
+
+    date 미지정 시 실시간 가격, 지정 시 해당 일자 종가와 전 거래일 대비 등락률.
+    """
+    code = _norm_code(ticker)
+    if not code:
+        return {"error": "데이터를 찾을 수 없습니다."}
+
+    if date:
+        return _kiwoom_price_on_date(code, ticker, date)
+
+    q = _kiwoom_quote(code)
+    if q["price"] is None:
+        return {"error": "데이터를 찾을 수 없습니다."}
+    return {"ticker": ticker, **q}
+
+
 def fetch_stock_history(ticker: str, period: str = "7d") -> list[dict]:
-    """최근 주가 히스토리 (차트 오버레이용)"""
-    stock = yf.Ticker(ticker)
-    hist = stock.history(period=period)
+    """최근 주가 히스토리 (차트 오버레이용, 키움 일봉)"""
+    code = _norm_code(ticker)
+    if not code:
+        return []
+    count = int(re.sub(r"\D", "", period) or "7")
+
+    try:
+        data = _get_kiwoom().get_daily_chart(code)
+        candles = data.get("stk_dt_pole_chart_qry", [])
+    except Exception:
+        return []
+
+    rows = sorted(
+        [c for c in candles if c.get("dt")],
+        key=lambda c: c["dt"], reverse=True,
+    )[:count]
 
     result = []
-    if not hist.empty:
-        for dt, row in hist.iterrows():
-            result.append({
-                "date": dt.strftime("%Y-%m-%d"),
-                "price": round(row['Close'], 2),
-            })
+    for c in reversed(rows):
+        dt = c["dt"]
+        result.append({
+            "date": f"{dt[:4]}-{dt[4:6]}-{dt[6:8]}",
+            "price": abs(_parse_num(c.get("cur_prc"))),
+        })
     return result
 
 
 def fetch_stock_name(ticker: str) -> str:
-    """티커로 종목명 조회 (dictionary → pykrx → yfinance 순서)"""
+    """티커로 종목명 조회 (dictionary → pykrx → 키움 순서, 국장 전용)"""
     original_ticker = ticker
-    ticker = ticker.strip().upper()
+    ticker = (ticker or "").strip().upper()
 
     # 1) ticker_dictionary에서 우선 조회
     dict_name = lookup_name_by_ticker(ticker)
     if dict_name:
         return dict_name
 
-    # 2) 한국 종목이면 pykrx로 한글명 조회
-    m = re.match(r"^(\d{6})\.(KS|KQ)$", ticker)
-    if m:
-        code = m.group(1)
-        try:
-            kr_name = pykrx_stock.get_market_ticker_name(code)
-            if kr_name:
-                return kr_name
-        except Exception:
-            pass
-
-    # 3) yfinance 폴백
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.get_info()
-        return (
-            info.get("displayName")
-            or info.get("shortName")
-            or info.get("longName")
-            or original_ticker
-        )
-    except Exception:
+    code = _norm_code(ticker)
+    if not re.match(r"^\d{6}$", code):
         return original_ticker
+
+    # 2) pykrx로 한글명 조회
+    try:
+        kr_name = pykrx_stock.get_market_ticker_name(code)
+        if kr_name:
+            return kr_name
+    except Exception:
+        pass
+
+    # 3) 키움 ka10001 폴백
+    try:
+        info = _get_kiwoom().get_stock_basic_info(code)
+        name = (info.get("stk_nm") or "").strip()
+        if name:
+            return name
+    except Exception:
+        pass
+
+    return original_ticker
 
 
 def fetch_market_indices() -> dict:
@@ -197,13 +262,3 @@ def fetch_market_indices() -> dict:
         idx += len(items)
 
     return grouped
-
-
-def fetch_market_leaders(market: str) -> list[dict]:
-    """시장별 주도주 조회"""
-    leaders = MARKET_LEADERS.get(market, [])
-    if not leaders:
-        return []
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        return list(executor.map(_fetch_quote, leaders))

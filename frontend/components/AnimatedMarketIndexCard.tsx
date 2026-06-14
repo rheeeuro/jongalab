@@ -5,9 +5,6 @@ import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { SlotNumber } from "./SlotNumber";
 
 function formatPrice(price: number, symbol: string): string {
-  if (symbol.includes(".KS") || symbol.includes(".KQ")) {
-    return `₩${price.toLocaleString("ko-KR", { maximumFractionDigits: 0 })}`;
-  }
   if (symbol === "USDKRW=X") {
     return `₩${price.toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }

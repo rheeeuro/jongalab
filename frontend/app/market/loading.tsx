@@ -1,4 +1,4 @@
-import { BarChart3, Landmark, Gem, TrendingUp, Globe } from "lucide-react";
+import { BarChart3, Landmark, Gem, Globe } from "lucide-react";
 
 function Skeleton({ className }: { className?: string }) {
   return (
@@ -34,21 +34,6 @@ function IndexCardSkeleton() {
       <Skeleton className="h-4 w-20" />
       <Skeleton className="h-7 w-24" />
       <Skeleton className="h-4 w-16" />
-    </div>
-  );
-}
-
-function LeaderRowSkeleton() {
-  return (
-    <div className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
-      <div className="flex items-center gap-3">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-3 w-16" />
-      </div>
-      <div className="flex items-center gap-3">
-        <Skeleton className="h-4 w-16" />
-        <Skeleton className="h-4 w-14" />
-      </div>
     </div>
   );
 }
@@ -103,20 +88,6 @@ export default function DashboardLoading() {
             ))}
           </div>
         </SectionSkeleton>
-
-        {/* 주도주 */}
-        <div className="grid gap-8">
-          <SectionSkeleton
-            icon={<TrendingUp className="h-5 w-5 text-red-500" />}
-            title="🇰🇷 한국 주도주"
-          >
-            <div className="space-y-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <LeaderRowSkeleton key={i} />
-              ))}
-            </div>
-          </SectionSkeleton>
-        </div>
       </div>
     </main>
   );
