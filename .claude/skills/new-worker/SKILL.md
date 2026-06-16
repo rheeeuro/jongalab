@@ -19,7 +19,7 @@ description: PM2 cron 백그라운드 워커를 스캐폴드하고 ecosystem.con
      name: "<name>",
      script: "uv",
      args: "run workers/<name>.py",
-     cwd: "/home/euro/dev/agent/stock-agent",
+     cwd: "/home/euro/dev/jongalab/jongalab",
      interpreter: "none",
      instances: 1,
      autorestart: false,

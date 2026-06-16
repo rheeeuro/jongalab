@@ -23,7 +23,7 @@ except Exception: print("0")
 # 변경 파일 중복 제거
 mapfile -t FILES < <(sort -u "$PENDING")
 
-NEED_WEB=0; NEED_API=0; NEED_TG=0; NEED_KIWOOM=0
+NEED_WEB=0; NEED_API=0; NEED_TG=0; NEED_KIWOOM=0; NEED_TAPI=0; NEED_TWEB=0
 declare -A CRON_HIT=()
 
 for f in "${FILES[@]}"; do
@@ -46,6 +46,14 @@ for f in "${FILES[@]}"; do
   case "$f" in
     */kiwoom/api.py|*/kiwoom/core/*.py)           NEED_KIWOOM=1 ;;
     */kiwoom/workers/kiwoom_token_refresh.py)     CRON_HIT[kiwoom-token-refresh]=1 ;;
+  esac
+  # ── trading (자동매매 집행 전용 도메인) ──
+  case "$f" in
+    */trading/frontend/*)                         NEED_TWEB=1 ;;
+    */trading/api.py|*/trading/core/*.py)         NEED_TAPI=1 ;;
+    */trading/workers/signal_executor.py)         CRON_HIT[trading-signal-executor]=1 ;;
+    */trading/workers/settle.py)                  CRON_HIT[trading-settle]=1 ;;
+    */trading/workers/reconcile.py)               CRON_HIT[trading-reconcile]=1 ;;
   esac
 done
 
@@ -100,6 +108,32 @@ if [ "$NEED_KIWOOM" = "1" ]; then
     pm2 restart kiwoom-api >/dev/null 2>&1 && NOTES+=("✅ kiwoom-api 재시작")
   else
     NOTES+=("ℹ️ kiwoom-api 변경됨(앱이 online 아님 — 재시작 생략)")
+  fi
+fi
+
+# 2-2) 트레이딩 집행 API (별도 서버)
+if [ "$NEED_TAPI" = "1" ]; then
+  if is_online trading-api; then
+    pm2 restart trading-api >/dev/null 2>&1 && NOTES+=("✅ trading-api 재시작")
+  else
+    NOTES+=("ℹ️ trading-api 변경됨(앱이 online 아님 — 재시작 생략)")
+  fi
+fi
+
+# 2-3) 트레이딩 대시보드: 빌드 후 재시작 (node_modules 미설치면 건너뜀)
+if [ "$NEED_TWEB" = "1" ]; then
+  if [ ! -d "$ROOT/trading/frontend/node_modules" ]; then
+    NOTES+=("ℹ️ trading-fe 변경됨(node_modules 없음 — npm install 전이라 빌드 생략)")
+  else
+    echo "🛠  trading/frontend 변경 감지 → npm run build" >&2
+    TBUILD_OUT=$(cd "$ROOT/trading/frontend" && npm run build 2>&1)
+    if [ $? -ne 0 ]; then
+      BUILD_FAILED="${BUILD_FAILED}${BUILD_FAILED:+$'\n'}[trading-fe] $TBUILD_OUT"
+    elif is_online trading-fe; then
+      pm2 restart trading-fe >/dev/null 2>&1 && NOTES+=("✅ trading-fe 빌드+재시작")
+    else
+      NOTES+=("ℹ️ trading-fe 빌드 성공(앱이 online 아님 — 재시작 생략)")
+    fi
   fi
 fi
 
