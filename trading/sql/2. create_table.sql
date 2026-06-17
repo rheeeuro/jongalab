@@ -97,6 +97,14 @@ CREATE TABLE IF NOT EXISTS settle_plan (
     INDEX idx_active (active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 매수 제외 종목 (blocklist) — 자동매매가 매수하지 않을 종목 (예: 자동매매 이전 보유)
+-- signal_executor 가 매수 직전 검사. settle/monitor 는 영향 없음(이미 보유분은 관리).
+CREATE TABLE IF NOT EXISTS blocklist (
+    stk_cd      VARCHAR(20) PRIMARY KEY,
+    reason      VARCHAR(255),
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 리스크 한도 설정 단일행 (id=1) — 대시보드에서 수정, RiskConfig 가 로드
 -- config JSON: MAX_ORDERS_PER_DAY / MAX_NOTIONAL_PER_NAME / MAX_DAILY_LOSS / MAX_POSITIONS
 CREATE TABLE IF NOT EXISTS risk_config (

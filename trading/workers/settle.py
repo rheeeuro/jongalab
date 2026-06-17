@@ -38,15 +38,20 @@ def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
                 logger.warning("[NXT] 현재가 조회 실패 — 보류 [%s]", stk_cd)
                 continue
             gap_dir = "up" if nxt_open > avg else "down"
-            half = qty // 2
+            half = (qty + 1) // 2  # 올림(소숫점 올림) — 1주는 전량(=1)
             if half >= 1:
                 engine.execute_sell(trade_date, stk_cd, half, nxt_open,
                                     dmst_stex_tp="NXT", tag="nxt")
-            # 잔량 감시계획: 스탑/저가이탈선 = 시초가
-            plan_repo.upsert_plan(trade_date, stk_cd, gap_dir, avg, nxt_open,
-                                  stop_price=nxt_open, note=f"nxt half={half}")
-            logger.info("[NXT] %s 갭%s 절반매도 %d주 @%d, 스탑 %d",
-                        stk_cd, gap_dir, half, nxt_open, nxt_open)
+            remaining = qty - half
+            if remaining > 0:
+                # 잔량 감시계획: 스탑/저가이탈선 = 시초가
+                plan_repo.upsert_plan(trade_date, stk_cd, gap_dir, avg, nxt_open,
+                                      stop_price=nxt_open, note=f"nxt half={half}")
+                logger.info("[NXT] %s 갭%s 절반매도 %d주 @%d (잔량 %d, 스탑 %d)",
+                            stk_cd, gap_dir, half, nxt_open, remaining, nxt_open)
+            else:
+                logger.info("[NXT] %s 갭%s 전량매도 %d주 @%d (잔량 0 — 감시계획 없음)",
+                            stk_cd, gap_dir, half, nxt_open)
         except Exception as e:
             logger.error("[NXT] 청산 실패 [%s]: %s", stk_cd, e)
 

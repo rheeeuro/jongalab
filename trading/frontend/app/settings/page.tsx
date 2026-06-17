@@ -29,14 +29,24 @@ function formatCurrency(value: number): string {
   return value.toLocaleString();
 }
 
+interface BlockItem {
+  stk_cd: string;
+  reason: string | null;
+}
+
 export default function RiskSettingsPage() {
   const [config, setConfig] = useState<RiskConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  const [blocklist, setBlocklist] = useState<BlockItem[]>([]);
+  const [blockText, setBlockText] = useState("");
+  const [blockSaving, setBlockSaving] = useState(false);
+
   useEffect(() => {
     fetchConfig();
+    fetchBlocklist();
   }, []);
 
   async function fetchConfig() {
@@ -48,6 +58,51 @@ export default function RiskSettingsPage() {
       console.error("설정 로드 실패:", e);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchBlocklist() {
+    try {
+      const res = await fetch("/api/blocklist");
+      if (res.ok) {
+        const items: BlockItem[] = await res.json();
+        setBlocklist(items);
+        setBlockText(items.map((i) => i.stk_cd).join(", "));
+      }
+    } catch (e) {
+      console.error("blocklist 로드 실패:", e);
+    }
+  }
+
+  async function handleBlockSave() {
+    setBlockSaving(true);
+    setMessage(null);
+    // 기존 사유 보존: 코드별 reason 맵
+    const reasons = new Map(blocklist.map((i) => [i.stk_cd, i.reason]));
+    const codes = blockText
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const items = codes.map((stk_cd) => ({ stk_cd, reason: reasons.get(stk_cd) ?? null }));
+    try {
+      const res = await fetch("/api/blocklist", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      if (res.ok) {
+        const updated: BlockItem[] = await res.json();
+        setBlocklist(updated);
+        setBlockText(updated.map((i) => i.stk_cd).join(", "));
+        setMessage({ type: "success", text: "제외 목록이 저장되었습니다." });
+      } else {
+        setMessage({ type: "error", text: "제외 목록 저장 실패." });
+      }
+    } catch {
+      setMessage({ type: "error", text: "서버에 연결할 수 없습니다." });
+    } finally {
+      setBlockSaving(false);
+      setTimeout(() => setMessage(null), 3000);
     }
   }
 
@@ -157,6 +212,40 @@ export default function RiskSettingsPage() {
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           저장
+        </button>
+      </div>
+
+      {/* 매수 제외 목록 (blocklist) */}
+      <div className="mt-8">
+        <h2 className="text-base font-semibold">매수 제외 종목</h2>
+        <p className="mt-1 mb-2 text-sm text-slate-500">
+          여기 등록한 종목은 자동매매가 매수하지 않습니다 (예: 자동매매 이전 보유 종목). 6자리 코드를 쉼표/공백으로 구분.
+        </p>
+        <textarea
+          value={blockText}
+          onChange={(e) => setBlockText(e.target.value)}
+          rows={2}
+          inputMode="numeric"
+          placeholder="476830, 005930"
+          className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        />
+        {blocklist.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {blocklist.map((b) => (
+              <li key={b.stk_cd} className="text-xs text-slate-500">
+                <span className="font-medium text-slate-700 dark:text-slate-300">{b.stk_cd}</span>
+                {b.reason ? ` — ${b.reason}` : ""}
+              </li>
+            ))}
+          </ul>
+        )}
+        <button
+          onClick={handleBlockSave}
+          disabled={blockSaving}
+          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+        >
+          {blockSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          제외 목록 저장
         </button>
       </div>
     </main>

@@ -19,6 +19,7 @@ from core.repository import risk_config as risk_config_repo
 from core.repository import trade_signal as signal_repo
 from core.repository import order as order_repo
 from core.repository import audit_log
+from core.repository import blocklist as blocklist_repo
 from core.kiwoom_data_client import KiwoomDataClient
 
 setup_logging()
@@ -38,6 +39,15 @@ class RiskConfigBody(BaseModel):
     MAX_NOTIONAL_PER_NAME: int = 5_000_000
     MAX_DAILY_LOSS: int = 3_000_000
     MAX_POSITIONS: int = 5
+
+
+class BlocklistItem(BaseModel):
+    stk_cd: str
+    reason: str | None = None
+
+
+class BlocklistBody(BaseModel):
+    items: list[BlocklistItem]
 
 
 # ── 헬스 ──
@@ -129,6 +139,19 @@ def get_risk_config():
 def put_risk_config(b: RiskConfigBody):
     """리스크 한도 설정 수정. 다음 RiskEngine 생성 시점부터 적용."""
     return risk_config_repo.update_risk_config(b.model_dump())
+
+
+# ── 매수 제외 목록 (blocklist) ──
+@app.get("/blocklist")
+def get_blocklist():
+    """매수 제외 종목 목록."""
+    return blocklist_repo.get_all()
+
+
+@app.put("/blocklist")
+def put_blocklist(b: BlocklistBody):
+    """매수 제외 목록 전체 교체. 다음 매수 집행부터 적용."""
+    return blocklist_repo.replace_all([i.model_dump() for i in b.items])
 
 
 # ── 제어 (수동) ──
