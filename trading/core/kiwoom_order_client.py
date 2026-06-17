@@ -120,15 +120,17 @@ class KiwoomOrderClient:
         mdfy_qty: int,
         mdfy_uv: int,
         mdfy_cond_uv: str = "",
+        dmst_stex_tp: str = "KRX",
     ) -> dict:
         """kt10002 — 정정주문. 미체결 주문의 수량/단가 변경.
 
         orig_ord_no: 정정할 원주문번호(매수/매도 응답의 7자리 ord_no).
         mdfy_qty: 정정수량(1주 단위). 0 입력 시 잔량 전부 정정.
         mdfy_uv: 정정단가(원). 응답 ord_no 는 새 주문번호.
+        dmst_stex_tp: 원주문의 거래소(KRX/NXT/SOR)와 일치해야 한다.
         """
         return self._post(_URL_ORDR, "kt10002", {
-            "dmst_stex_tp": "KRX",
+            "dmst_stex_tp": dmst_stex_tp,
             "orig_ord_no": orig_ord_no,
             "stk_cd": stk_cd,
             "mdfy_qty": str(mdfy_qty),
@@ -136,15 +138,17 @@ class KiwoomOrderClient:
             "mdfy_cond_uv": mdfy_cond_uv,
         })
 
-    def cancel(self, orig_ord_no: str, stk_cd: str, cncl_qty: int = 0) -> dict:
+    def cancel(self, orig_ord_no: str, stk_cd: str, cncl_qty: int = 0,
+               dmst_stex_tp: str = "KRX") -> dict:
         """kt10003 — 취소주문. 미체결 주문 취소(긴급 청산·장 마감 전 정리).
 
         orig_ord_no: 취소할 원주문번호(7자리).
         cncl_qty: 취소수량(1주 단위). 0(기본) 입력 시 잔량 전부 취소.
+        dmst_stex_tp: 원주문의 거래소(KRX/NXT/SOR)와 일치해야 한다.
         응답 ord_no 는 새 주문번호.
         """
         return self._post(_URL_ORDR, "kt10003", {
-            "dmst_stex_tp": "KRX",
+            "dmst_stex_tp": dmst_stex_tp,
             "orig_ord_no": orig_ord_no,
             "stk_cd": stk_cd,
             "cncl_qty": str(cncl_qty),

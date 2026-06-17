@@ -92,10 +92,11 @@ class ExecutionEngine:
         paper = getattr(self.client, "paper", False)
         mode = "paper" if paper else "live"
         order_id = order_repo.create_intended(
-            key, signal_id, stk_cd, "buy", qty, price, "limit", mode
+            key, signal_id, stk_cd, "buy", qty, price, "market", mode
         )
         audit_log.append("buy_intended", stk_cd, {"order_id": order_id, "qty": qty, "price": price})
-        resp = self.client.buy(stk_cd, qty, price, trde_tp="0", dmst_stex_tp=dmst_stex_tp)  # 0: 보통(지정가)
+        # 시장가(trde_tp=3): 종가 무렵 즉시 체결 보장. ord_uv 는 빈값(price=0)으로 보낸다.
+        resp = self.client.buy(stk_cd, qty, 0, trde_tp="3", dmst_stex_tp=dmst_stex_tp)
         audit_log.append("buy_response", stk_cd, {"order_id": order_id, "resp": resp})
         # paper 는 즉시 전량 체결 가정 → 체결·포지션 시뮬레이션. live 는 ka10076 으로 사후 반영.
         order_repo.mark_sent(order_id, resp.get("ord_no"), "filled" if paper else "sent")
@@ -123,9 +124,10 @@ class ExecutionEngine:
 
         paper = getattr(self.client, "paper", False)
         mode = "paper" if paper else "live"
-        order_id = order_repo.create_intended(key, None, stk_cd, "sell", qty, price, "limit", mode)
+        order_id = order_repo.create_intended(key, None, stk_cd, "sell", qty, price, "market", mode)
         audit_log.append("sell_intended", stk_cd, {"order_id": order_id, "qty": qty, "price": price, "tag": tag})
-        resp = self.client.sell(stk_cd, qty, price, trde_tp="0", dmst_stex_tp=dmst_stex_tp)
+        # 시장가(trde_tp=3): 청산 즉시 체결 보장(미체결로 포지션 묶임 방지). ord_uv 빈값.
+        resp = self.client.sell(stk_cd, qty, 0, trde_tp="3", dmst_stex_tp=dmst_stex_tp)
         audit_log.append("sell_response", stk_cd, {"order_id": order_id, "resp": resp})
         order_repo.mark_sent(order_id, resp.get("ord_no"), "filled" if paper else "sent")
         self.risk.record_order(trade_date)

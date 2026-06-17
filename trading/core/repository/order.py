@@ -30,6 +30,24 @@ def get_open_sent() -> list[dict]:
         return cursor.fetchall()
 
 
+def get_stale_sent() -> list[dict]:
+    """전일 이전에 전송됐는데 아직 'sent'(미체결)인 주문 — 개장 시 자동취소 대상."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, stk_cd, kiwoom_ord_no FROM `order` "
+            "WHERE status = 'sent' AND mode = 'live' AND kiwoom_ord_no IS NOT NULL "
+            "AND created_at < CURDATE()"
+        )
+        return cursor.fetchall()
+
+
+def mark_canceled(order_id: int) -> None:
+    """주문을 취소 상태로 정리."""
+    with get_db() as (conn, cursor):
+        cursor.execute("UPDATE `order` SET status = 'canceled' WHERE id = %s", (order_id,))
+        conn.commit()
+
+
 def list_by_date(date_dash: str) -> list[dict]:
     """해당 날짜(YYYY-MM-DD) 주문 — 일별 상세용 (생성순)."""
     with get_db() as (conn, cursor):

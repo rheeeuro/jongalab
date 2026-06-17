@@ -14,6 +14,7 @@ from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.config import SELL_EXCHANGE
 from core.fill_sync import sync_fills
+from core.order_maintenance import cancel_stale_orders
 from core.repository import position as position_repo
 from core.repository import settle_plan as plan_repo
 
@@ -29,8 +30,10 @@ def in_session(now: datetime) -> bool:
 
 
 def check_once(engine: ExecutionEngine) -> None:
-    # live 체결을 먼저 반영해 포지션을 최신화한 뒤 스탑 검사 (paper 는 no-op)
+    # live 체결을 먼저 반영해 포지션을 최신화 (paper 는 no-op)
     sync_fills(engine.client)
+    # 전일 잔여 미체결 자동 취소(개장 중) — 묶임 방지
+    cancel_stale_orders(engine.client)
     for plan in plan_repo.get_active_plans():
         stk_cd = plan["stk_cd"]
         pos = position_repo.get_position(stk_cd)
