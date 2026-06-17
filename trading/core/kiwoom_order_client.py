@@ -88,10 +88,12 @@ class KiwoomOrderClient:
     # ── 주문 ──
     # trde_tp(매매구분): 0:보통(지정가), 3:시장가, 5:조건부지정가, 6:최유리, 7:최우선,
     #   10:보통(IOC), 20:보통(FOK) 등. 시장가는 ord_uv 를 빈 문자열로 보낸다.
+    # dmst_stex_tp(거래소): KRX(정규장), NXT(넥스트레이드 08~20시), SOR(스마트라우팅).
     @staticmethod
-    def _order_body(stk_cd: str, qty: int, price: int, trde_tp: str) -> dict:
+    def _order_body(stk_cd: str, qty: int, price: int, trde_tp: str,
+                    dmst_stex_tp: str = "KRX") -> dict:
         return {
-            "dmst_stex_tp": "KRX",                       # KRX, NXT, SOR
+            "dmst_stex_tp": dmst_stex_tp,                # KRX, NXT, SOR
             "stk_cd": stk_cd,
             "ord_qty": str(qty),                         # 단위: 1주
             "ord_uv": str(price) if price and price > 0 else "",  # 시장가면 "" (단위: 원)
@@ -99,13 +101,17 @@ class KiwoomOrderClient:
             "cond_uv": "",                               # 조건단가 (조건부지정가 등에서만 사용)
         }
 
-    def buy(self, stk_cd: str, qty: int, price: int = 0, trde_tp: str = "3") -> dict:
+    def buy(self, stk_cd: str, qty: int, price: int = 0, trde_tp: str = "3",
+            dmst_stex_tp: str = "KRX") -> dict:
         """kt10000 — 매수주문. trde_tp 기본 '3'(시장가). 지정가는 '0' + price."""
-        return self._post(_URL_ORDR, "kt10000", self._order_body(stk_cd, qty, price, trde_tp))
+        return self._post(_URL_ORDR, "kt10000",
+                          self._order_body(stk_cd, qty, price, trde_tp, dmst_stex_tp))
 
-    def sell(self, stk_cd: str, qty: int, price: int = 0, trde_tp: str = "3") -> dict:
+    def sell(self, stk_cd: str, qty: int, price: int = 0, trde_tp: str = "3",
+             dmst_stex_tp: str = "KRX") -> dict:
         """kt10001 — 매도주문. 매수(kt10000)와 동일 바디 구조 (스펙 확인 완료)."""
-        return self._post(_URL_ORDR, "kt10001", self._order_body(stk_cd, qty, price, trde_tp))
+        return self._post(_URL_ORDR, "kt10001",
+                          self._order_body(stk_cd, qty, price, trde_tp, dmst_stex_tp))
 
     def modify(
         self,

@@ -58,8 +58,10 @@ class ExecutionEngine:
         qty = budget // price
         return qty, price
 
-    def execute_buy(self, trade_date: str, signal: dict) -> dict | None:
-        """매수 시그널 1건 집행. 차단/중복이면 None 반환."""
+    def execute_buy(self, trade_date: str, signal: dict, dmst_stex_tp: str = "KRX") -> dict | None:
+        """매수 시그널 1건 집행. 차단/중복이면 None 반환.
+        dmst_stex_tp: 거래소 라우팅 — 16:00 매수는 NXT 시간대라 'NXT'.
+        """
         signal_id = signal["id"]
         stk_cd = signal["stk_cd"]
         key = self.idempotency_key(trade_date, signal_id, "buy")
@@ -91,7 +93,7 @@ class ExecutionEngine:
             key, signal_id, stk_cd, "buy", qty, price, "limit", mode
         )
         audit_log.append("buy_intended", stk_cd, {"order_id": order_id, "qty": qty, "price": price})
-        resp = self.client.buy(stk_cd, qty, price, trde_tp="0")  # 0: 보통(지정가)
+        resp = self.client.buy(stk_cd, qty, price, trde_tp="0", dmst_stex_tp=dmst_stex_tp)  # 0: 보통(지정가)
         audit_log.append("buy_response", stk_cd, {"order_id": order_id, "resp": resp})
         # paper 는 즉시 전량 체결 가정 → 체결·포지션 시뮬레이션. live 는 ka10076 으로 사후 반영.
         order_repo.mark_sent(order_id, resp.get("ord_no"), "filled" if paper else "sent")
@@ -102,11 +104,15 @@ class ExecutionEngine:
             audit_log.append("buy_filled_paper", stk_cd, {"order_id": order_id, "qty": qty, "price": price})
         return resp
 
-    def execute_sell(self, trade_date: str, stk_cd: str, qty: int, price: int) -> dict | None:
+    def execute_sell(self, trade_date: str, stk_cd: str, qty: int, price: int,
+                     dmst_stex_tp: str = "KRX", tag: str = "") -> dict | None:
         """매도(청산) 집행. 청산은 리스크 게이트를 거치지 않는다(노출 축소·킬스위치 중에도 탈출 허용).
         paper 는 즉시 체결 가정 → 실현손익을 risk_state 에 누적.
+        dmst_stex_tp: 거래소(NXT 08시 매도 / KRX 09시 매도).
+        tag: 멱등 키 구분자 — 같은 종목·거래일에 단계별(nxt-half/krx/stop) 매도를 구별한다.
         """
-        key = self.idempotency_key(trade_date, 0, f"sell:{stk_cd}")
+        suffix = f"sell:{tag}:{stk_cd}" if tag else f"sell:{stk_cd}"
+        key = self.idempotency_key(trade_date, 0, suffix)
         if order_repo.find_by_idempotency_key(key):
             logger.info("중복 매도 스킵 (idempotency): %s", key)
             return None
@@ -116,8 +122,8 @@ class ExecutionEngine:
         paper = getattr(self.client, "paper", False)
         mode = "paper" if paper else "live"
         order_id = order_repo.create_intended(key, None, stk_cd, "sell", qty, price, "limit", mode)
-        audit_log.append("sell_intended", stk_cd, {"order_id": order_id, "qty": qty, "price": price})
-        resp = self.client.sell(stk_cd, qty, price, trde_tp="0")
+        audit_log.append("sell_intended", stk_cd, {"order_id": order_id, "qty": qty, "price": price, "tag": tag})
+        resp = self.client.sell(stk_cd, qty, price, trde_tp="0", dmst_stex_tp=dmst_stex_tp)
         audit_log.append("sell_response", stk_cd, {"order_id": order_id, "resp": resp})
         order_repo.mark_sent(order_id, resp.get("ord_no"), "filled" if paper else "sent")
         self.risk.record_order(trade_date)

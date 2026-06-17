@@ -80,6 +80,23 @@ CREATE TABLE IF NOT EXISTS kill_switch (
     CHECK (id = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 청산 계획 (시초가 2단계 매도) — NXT 08:05 단계가 기록, 1분 모니터·KRX 09:05 단계가 소비
+-- gap_dir: NXT 시초가 vs 매수 평단. stop_price: 모니터 감시선(이탈 시 즉시 전량 매도)
+CREATE TABLE IF NOT EXISTS settle_plan (
+    trade_date  CHAR(8) NOT NULL,                       -- 매수 거래일(YYYYMMDD)
+    stk_cd      VARCHAR(20) NOT NULL,
+    gap_dir     ENUM('up','down') NOT NULL,
+    avg_price   INT NOT NULL,                           -- 매수 평단
+    nxt_open    INT NOT NULL,                           -- NXT 시초가
+    stop_price  INT NOT NULL,                           -- 감시선(갭상승=시초가, 갭하락=저가이탈선)
+    active      BOOLEAN NOT NULL DEFAULT 1,             -- 모니터 감시 대상
+    note        VARCHAR(255),
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (trade_date, stk_cd),
+    INDEX idx_active (active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 리스크 한도 설정 단일행 (id=1) — 대시보드에서 수정, RiskConfig 가 로드
 -- config JSON: MAX_ORDERS_PER_DAY / MAX_NOTIONAL_PER_NAME / MAX_DAILY_LOSS / MAX_POSITIONS
 CREATE TABLE IF NOT EXISTS risk_config (

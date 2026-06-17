@@ -29,7 +29,7 @@ def main() -> int:
     for sig in signals:
         try:
             signal_repo.update_status(sig["id"], "executing")
-            resp = engine.execute_buy(trade_date, sig)
+            resp = engine.execute_buy(trade_date, sig, dmst_stex_tp="NXT")  # 16:00 = NXT 시간대
             # resp 있으면 전송 성공(done), None 이면 차단/수량0/멱등 스킵(skipped)
             signal_repo.update_status(sig["id"], "done" if resp else "skipped")
         except Exception as e:
