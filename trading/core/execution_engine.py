@@ -65,4 +65,5 @@ class ExecutionEngine:
         resp = self.client.buy(stk_cd, qty, price, trde_tp="0")  # 0: 보통(지정가)
         audit_log.append("buy_response", stk_cd, {"order_id": order_id, "resp": resp})
         order_repo.mark_sent(order_id, resp.get("ord_no"), "sent")
+        self.risk.record_order(trade_date)  # 일일 주문수 한도 카운팅
         return resp

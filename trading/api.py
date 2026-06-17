@@ -14,6 +14,7 @@ from core.logging_setup import setup_logging
 from core.repository import kiwoom_token as token_repo
 from core.repository import risk_state as risk_repo
 from core.repository import position as position_repo
+from core.repository import risk_config as risk_config_repo
 
 setup_logging()
 logger = logging.getLogger("TradingAPI")
@@ -25,6 +26,13 @@ app = FastAPI(title="Trading Execution API")
 class KillSwitch(BaseModel):
     flag: bool
     reason: str | None = None
+
+
+class RiskConfigBody(BaseModel):
+    MAX_ORDERS_PER_DAY: int = 10
+    MAX_NOTIONAL_PER_NAME: int = 5_000_000
+    MAX_DAILY_LOSS: int = 3_000_000
+    MAX_POSITIONS: int = 5
 
 
 # ── 헬스 ──
@@ -61,6 +69,19 @@ def root():
 def positions():
     """보유 포지션."""
     return position_repo.get_open_positions()
+
+
+# ── 리스크 설정 (대시보드에서 조회/수정) ──
+@app.get("/risk-config", response_model=RiskConfigBody)
+def get_risk_config():
+    """현재 리스크 한도 설정."""
+    return risk_config_repo.get_risk_config()
+
+
+@app.put("/risk-config", response_model=RiskConfigBody)
+def put_risk_config(b: RiskConfigBody):
+    """리스크 한도 설정 수정. 다음 RiskEngine 생성 시점부터 적용."""
+    return risk_config_repo.update_risk_config(b.model_dump())
 
 
 # ── 제어 (수동) ──

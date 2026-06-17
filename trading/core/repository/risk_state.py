@@ -14,6 +14,48 @@ def get_state(trade_date: str) -> Optional[dict]:
         return cursor.fetchone()
 
 
+def ensure_row(trade_date: str) -> None:
+    """해당 거래일 행이 없으면 기본값으로 생성 (멱등)."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "INSERT IGNORE INTO risk_state (trade_date) VALUES (%s)", (trade_date,)
+        )
+        conn.commit()
+
+
+def increment_orders(trade_date: str, n: int = 1) -> None:
+    """일일 주문 건수 증가 (주문 전송 성공 시 호출)."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "INSERT INTO risk_state (trade_date, orders_count) VALUES (%s, %s) "
+            "ON DUPLICATE KEY UPDATE orders_count = orders_count + %s",
+            (trade_date, n, n),
+        )
+        conn.commit()
+
+
+def add_realized_pnl(trade_date: str, amount: int) -> None:
+    """일일 실현손익 누적 (청산 체결 반영 시 호출)."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "INSERT INTO risk_state (trade_date, realized_pnl) VALUES (%s, %s) "
+            "ON DUPLICATE KEY UPDATE realized_pnl = realized_pnl + %s",
+            (trade_date, amount, amount),
+        )
+        conn.commit()
+
+
+def set_breaker(trade_date: str, tripped: bool) -> None:
+    """서킷브레이커 발동 플래그 기록 (일자별)."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "INSERT INTO risk_state (trade_date, breaker_tripped) VALUES (%s, %s) "
+            "ON DUPLICATE KEY UPDATE breaker_tripped = %s",
+            (trade_date, tripped, tripped),
+        )
+        conn.commit()
+
+
 def get_kill_switch() -> bool:
     """DB 킬스위치 플래그 (전역, 거래일 무관)."""
     with get_db() as (conn, cursor):

@@ -79,6 +79,15 @@ CREATE TABLE IF NOT EXISTS kill_switch (
     CHECK (id = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 리스크 한도 설정 단일행 (id=1) — 대시보드에서 수정, RiskConfig 가 로드
+-- config JSON: MAX_ORDERS_PER_DAY / MAX_NOTIONAL_PER_NAME / MAX_DAILY_LOSS / MAX_POSITIONS
+CREATE TABLE IF NOT EXISTS risk_config (
+    id          INT PRIMARY KEY DEFAULT 1,
+    config      JSON NOT NULL,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CHECK (id = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 불변 감사로그 (append-only) — 주문 의도 + 키움 응답 원문
 CREATE TABLE IF NOT EXISTS audit_log (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
