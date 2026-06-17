@@ -20,6 +20,7 @@ from core.trading_engine import (
 from core.repository.stock_report import save_stock_reports
 from core.repository.sector_report import save_sector_reports
 from core.repository.content import get_today_content_by_stock
+from core.repository.trade_signal import push_trade_signals
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ClosingBet")
@@ -238,6 +239,19 @@ class ClosingBetStrategy:
             logger.info(f"Phase 2 리포트 {len(reports)}건 DB 저장 완료")
         except Exception as e:
             logger.error(f"Phase 2 리포트 DB 저장 실패: {e}")
+
+        # 매수 시그널 핸드오프 — trading 도메인(trade_signal)으로 적재.
+        # trading 의 리스크 엔진·사이징이 실제 매수 종목수를 제한하므로 상위 후보를 그대로 넘긴다.
+        try:
+            signals = [
+                {"stk_cd": r["stock_code"], "stk_nm": r["stock_name"],
+                 "rank_no": r["rank_no"], "score": r["score"]}
+                for r in reports
+            ]
+            n = push_trade_signals(datetime.now().strftime("%Y%m%d"), signals)
+            logger.info(f"trade_signal 핸드오프 {len(signals)}건 (영향 {n}행)")
+        except Exception as e:
+            logger.error(f"trade_signal 핸드오프 실패(trading DB 미설정?): {e}")
 
     # ── 관심 섹터 동적 로드 ──
     def _fetch_watchlist_sectors(self):

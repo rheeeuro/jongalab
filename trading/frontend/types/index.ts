@@ -15,7 +15,19 @@ export interface Position {
   avg_price: number;
   realized_pnl: number;
   updated_at: string;
+  // /positions 에서 현재가로 평가 (조회 실패 시 0)
+  cur_prc?: number;
+  eval_amt?: number;
+  unrealized_pnl?: number;
 }
+
+export type SignalStatus =
+  | "pending"
+  | "executing"
+  | "done"
+  | "skipped"
+  | "rejected"
+  | "expired";
 
 export interface TradeSignal {
   id: number;
@@ -24,6 +36,36 @@ export interface TradeSignal {
   stk_nm: string | null;
   rank_no: number | null;
   score: number | null;
-  status: "pending" | "executing" | "done" | "rejected" | "expired";
+  status: SignalStatus;
   note: string | null;
+}
+
+export interface Order {
+  id: number;
+  stk_cd: string;
+  side: "buy" | "sell";
+  qty: number;
+  price: number;
+  mode: "paper" | "live";
+  status: "intended" | "sent" | "accepted" | "rejected" | "filled" | "canceled";
+  kiwoom_ord_no: string | null;
+  created_at: string;
+}
+
+export interface AuditEvent {
+  id: number;
+  event: string;
+  stk_cd: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any;
+  created_at: string;
+}
+
+export interface DailySummary {
+  trade_date: string;
+  realized_pnl: number;
+  orders_count: number;
+  breaker_tripped: boolean;
+  open_positions: number;
+  kill_switch: boolean | null;
 }

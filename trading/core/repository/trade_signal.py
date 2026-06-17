@@ -8,6 +8,16 @@ from typing import Optional
 from core.db import get_db
 
 
+def get_signals_by_date(trade_date: str) -> list[dict]:
+    """해당 거래일 전체 시그널 (상태 무관, 대시보드용)."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT * FROM trade_signal WHERE trade_date = %s ORDER BY rank_no ASC",
+            (trade_date,),
+        )
+        return cursor.fetchall()
+
+
 def get_pending_signals(trade_date: str) -> list[dict]:
     """집행 대기(pending) 시그널 조회 (해당 거래일)."""
     with get_db() as (conn, cursor):

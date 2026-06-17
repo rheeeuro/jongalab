@@ -18,6 +18,11 @@ case "$FILE" in
     echo "   수정이 정말 필요하면 사용자에게 명시적으로 확인받은 뒤, 변경 내용을 설명하고 진행하세요." >&2
     exit 2
     ;;
+  *trading/core/risk_engine.py|*trading/core/execution_engine.py)
+    echo "🚫 $FILE 는 자금 손실에 직결되는 민감 로직(리스크 한도·주문 집행)입니다." >&2
+    echo "   수정 전 사용자에게 명시적으로 확인받고, 변경 내용을 설명한 뒤 진행하세요." >&2
+    exit 2
+    ;;
   *.env|*.session|*.session-journal)
     echo "🚫 $FILE 는 비밀/세션 파일입니다. 편집·커밋 금지." >&2
     exit 2

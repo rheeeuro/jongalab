@@ -15,10 +15,11 @@ CREATE TABLE IF NOT EXISTS trade_signal (
     stk_nm      VARCHAR(100),
     rank_no     INT,                                    -- 종가베팅 후보 순위
     score       DECIMAL(6,2),
-    status      ENUM('pending','executing','done','rejected','expired') NOT NULL DEFAULT 'pending',
+    status      ENUM('pending','executing','done','skipped','rejected','expired') NOT NULL DEFAULT 'pending',
     note        VARCHAR(255),
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_date_stk (trade_date, stk_cd),   -- closing_bet 재실행 멱등(상태 보존 upsert)
     INDEX idx_date_status (trade_date, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

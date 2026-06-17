@@ -66,6 +66,9 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
 - `jongalab/core/trading_engine.py`, `jongalab/core/prompts.py`는 **민감 로직 파일**이다(가드 훅이 편집 차단).
   변경은 복구 불가하고 팀에 공유되지 않는다. 수정 전 반드시 사용자 확인을 받고, 수정 시 변경 내용을 명시한다.
   요청 없는 리팩터링/정리 금지.
+- `trading/core/risk_engine.py`, `trading/core/execution_engine.py`는 **자금 손실에 직결되는 민감
+  로직**이다(리스크 한도·주문 집행, 가드 훅이 편집 차단). 수정 전 반드시 사용자 확인을 받고 변경 내용을 명시한다.
+  (git 추적 대상이라 복구는 가능하나, 실수 시 실거래 손실로 이어질 수 있다.)
 - `.env`, `*.session`, `mariadb_data/`, `ollama_data/`는 읽기·수정·커밋 금지.
 - 비밀키/토큰을 코드나 로그에 하드코딩하지 않는다. 모두 `.env` → `core/config.py` 경유.
 

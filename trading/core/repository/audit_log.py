@@ -16,3 +16,21 @@ def append(event: str, stk_cd: Optional[str], payload: dict) -> None:
             (event, stk_cd, json.dumps(payload, ensure_ascii=False, default=str)),
         )
         conn.commit()
+
+
+def list_recent(limit: int = 50) -> list[dict]:
+    """최근 감사 이벤트 (대시보드용, 최신순). payload 는 dict 로 파싱."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, event, stk_cd, payload, created_at "
+            "FROM audit_log ORDER BY id DESC LIMIT %s",
+            (int(limit),),
+        )
+        rows = cursor.fetchall()
+    for r in rows:
+        if isinstance(r.get("payload"), str):
+            try:
+                r["payload"] = json.loads(r["payload"])
+            except (ValueError, TypeError):
+                pass
+    return rows

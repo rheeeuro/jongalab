@@ -30,10 +30,8 @@ def main() -> int:
         try:
             signal_repo.update_status(sig["id"], "executing")
             resp = engine.execute_buy(trade_date, sig)
-            signal_repo.update_status(sig["id"], "done" if resp else "rejected")
-        except NotImplementedError:
-            logger.warning("집행 로직 미구현(스켈레톤) — signal %s 보류", sig["id"])
-            signal_repo.update_status(sig["id"], "pending")
+            # resp 있으면 전송 성공(done), None 이면 차단/수량0/멱등 스킵(skipped)
+            signal_repo.update_status(sig["id"], "done" if resp else "skipped")
         except Exception as e:
             logger.error("시그널 %s 집행 실패: %s", sig["id"], e)
             signal_repo.update_status(sig["id"], "rejected", note=str(e))

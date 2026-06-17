@@ -8,6 +8,18 @@ from typing import Optional
 from core.db import get_db
 
 
+def list_recent(limit: int = 50) -> list[dict]:
+    """최근 주문 목록 (대시보드용, 최신순)."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, idempotency_key, stk_cd, side, qty, price, ord_type, mode, "
+            "status, kiwoom_ord_no, created_at "
+            "FROM `order` ORDER BY id DESC LIMIT %s",
+            (int(limit),),
+        )
+        return cursor.fetchall()
+
+
 def find_by_idempotency_key(key: str) -> Optional[dict]:
     """동일 멱등성 키 주문이 이미 있는지 확인 (중복 전송 차단)."""
     with get_db() as (conn, cursor):

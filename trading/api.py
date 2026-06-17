@@ -5,6 +5,7 @@ Trading Execution API — 자동매매 집행/조회/제어 FastAPI 서버 (loca
 주문 권한은 이 도메인에만 있으며, 모든 주문은 ExecutionEngine + RiskEngine 을 경유한다.
 """
 import logging
+from datetime import datetime
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -15,6 +16,10 @@ from core.repository import kiwoom_token as token_repo
 from core.repository import risk_state as risk_repo
 from core.repository import position as position_repo
 from core.repository import risk_config as risk_config_repo
+from core.repository import trade_signal as signal_repo
+from core.repository import order as order_repo
+from core.repository import audit_log
+from core.kiwoom_data_client import KiwoomDataClient
 
 setup_logging()
 logger = logging.getLogger("TradingAPI")
@@ -67,8 +72,50 @@ def root():
 # ── 조회 (대시보드) ──
 @app.get("/positions")
 def positions():
-    """보유 포지션."""
-    return position_repo.get_open_positions()
+    """보유 포지션 + 현재가 평가(미실현손익). 현재가 조회 실패 종목은 0 처리."""
+    rows = position_repo.get_open_positions()
+    if rows:
+        dc = KiwoomDataClient()
+        for p in rows:
+            cur = dc.get_current_price(p["stk_cd"])
+            p["cur_prc"] = cur
+            p["eval_amt"] = cur * p["qty"]
+            p["unrealized_pnl"] = (cur - p["avg_price"]) * p["qty"] if cur else 0
+    return rows
+
+
+@app.get("/signals")
+def signals(date: str | None = None):
+    """거래일 시그널 목록 (기본: 오늘)."""
+    trade_date = date or datetime.now().strftime("%Y%m%d")
+    return signal_repo.get_signals_by_date(trade_date)
+
+
+@app.get("/orders")
+def orders(limit: int = 50):
+    """최근 주문 목록."""
+    return order_repo.list_recent(limit)
+
+
+@app.get("/audit")
+def audit(limit: int = 50):
+    """최근 감사 이벤트."""
+    return audit_log.list_recent(limit)
+
+
+@app.get("/summary")
+def summary(date: str | None = None):
+    """일일 요약 — 실현손익·주문수·서킷브레이커·보유종목수·킬스위치."""
+    trade_date = date or datetime.now().strftime("%Y%m%d")
+    state = risk_repo.get_state(trade_date) or {}
+    return {
+        "trade_date": trade_date,
+        "realized_pnl": state.get("realized_pnl") or 0,
+        "orders_count": state.get("orders_count") or 0,
+        "breaker_tripped": bool(state.get("breaker_tripped")),
+        "open_positions": len(position_repo.get_open_positions()),
+        "kill_switch": risk_repo.get_kill_switch(),
+    }
 
 
 # ── 리스크 설정 (대시보드에서 조회/수정) ──

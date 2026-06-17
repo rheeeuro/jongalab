@@ -21,6 +21,10 @@ DB_CONFIG = {
     'use_unicode': True,
 }
 
+# trading DB 설정 — closing_bet 이 매수 시그널(trade_signal)을 적재하는 대상.
+# (같은 MariaDB 서버, 스키마만 분리. trading 도메인이 소비한다.)
+TRADING_DB_CONFIG = {**DB_CONFIG, 'database': os.getenv('TRADING_DB_NAME', 'trading')}
+
 # 텔레그램 설정
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
