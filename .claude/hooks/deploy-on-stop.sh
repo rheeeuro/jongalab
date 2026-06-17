@@ -52,7 +52,7 @@ for f in "${FILES[@]}"; do
     */trading/frontend/*)                         NEED_TWEB=1 ;;
     */trading/api.py|*/trading/core/*.py)         NEED_TAPI=1; NEED_TMON=1 ;;  # core 는 모니터도 공유
     */trading/workers/monitor.py)                 NEED_TMON=1 ;;               # 상시 워커 → 재시작
-    */trading/workers/signal_executor.py)         CRON_HIT[trading-signal-executor]=1 ;;
+    */trading/workers/signal_executor.py)         CRON_HIT[trading-buy-krx]=1; CRON_HIT[trading-buy-nxt]=1 ;;
     */trading/workers/settle.py)                  CRON_HIT[trading-settle-nxt]=1; CRON_HIT[trading-settle-krx]=1 ;;
     */trading/workers/reconcile.py)               CRON_HIT[trading-reconcile]=1 ;;
   esac

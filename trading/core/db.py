@@ -6,7 +6,7 @@ get_kiwoom_db() — 키움 토큰 공유 DB (읽기 전용 — 토큰 조회용)
 """
 from contextlib import contextmanager
 import mysql.connector
-from core.config import DB_CONFIG, KIWOOM_DB_CONFIG
+from core.config import DB_CONFIG, KIWOOM_DB_CONFIG, JONGALAB_DB_CONFIG
 
 
 def get_connection():
@@ -37,6 +37,18 @@ def get_db():
 def get_kiwoom_db():
     """키움 토큰 공유 DB 안전 연결 (토큰 읽기 전용)."""
     conn = mysql.connector.connect(**KIWOOM_DB_CONFIG)
+    cursor = conn.cursor(dictionary=True)
+    try:
+        yield conn, cursor
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@contextmanager
+def get_jongalab_db():
+    """jongalab DB 안전 연결 (텔레그램 관리자 chat id 읽기 전용)."""
+    conn = mysql.connector.connect(**JONGALAB_DB_CONFIG)
     cursor = conn.cursor(dictionary=True)
     try:
         yield conn, cursor

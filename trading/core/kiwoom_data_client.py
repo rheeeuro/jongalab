@@ -43,6 +43,19 @@ class KiwoomDataClient:
         """ka10001 — 주식기본정보 (cur_prc 등)."""
         return self._post("/stock/basic-info", {"stk_cd": stk_cd})
 
+    def get_stock_detail_info(self, stk_cd: str) -> dict:
+        """ka10100 — 종목정보조회 (nxtEnable, marketName 등)."""
+        return self._post("/stock/detail-info", {"stk_cd": stk_cd})
+
+    def is_nxt_enabled(self, stk_cd: str) -> bool:
+        """NXT(넥스트레이드) 거래 가능 종목인지. 조회 실패 시 False(보수적)."""
+        try:
+            d = self.get_stock_detail_info(stk_cd)
+        except Exception as e:
+            logger.warning("NXT 여부 조회 실패 [%s]: %s", stk_cd, e)
+            return False
+        return str(d.get("nxtEnable", "")).upper() == "Y"
+
     def get_current_price(self, stk_cd: str) -> int:
         """현재가(원, 양수). 조회 실패 시 0."""
         try:

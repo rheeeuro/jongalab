@@ -12,6 +12,7 @@ from datetime import datetime
 
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
+from core.config import SELL_EXCHANGE
 from core.fill_sync import sync_fills
 from core.repository import position as position_repo
 from core.repository import settle_plan as plan_repo
@@ -42,7 +43,7 @@ def check_once(engine: ExecutionEngine) -> None:
                 continue
             if cur <= plan["stop_price"]:
                 engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
-                                    dmst_stex_tp="SOR", tag="stop")
+                                    dmst_stex_tp=SELL_EXCHANGE, tag="stop")
                 plan_repo.deactivate(plan["trade_date"], stk_cd,
                                      f"스탑/저가이탈 즉시매도 @{cur}(<= {plan['stop_price']})")
                 logger.info("스탑 발동 [%s] 전량매도 %d주 @%d (선 %d)",

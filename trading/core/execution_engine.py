@@ -41,17 +41,19 @@ class ExecutionEngine:
         return f"{trade_date}:{signal_id}:{side}"
 
     def size_order(self, signal: dict) -> tuple[int, int]:
-        """시그널 → (수량, 지정가). 가용현금을 보유 한도 종목수로 균등 배분하고
-        종목당 명목 한도로 캡, 현재가로 수량을 산출한다. 살 수 없으면 (0, price).
+        """시그널 → (수량, 지정가).
 
-        budget = min(MAX_NOTIONAL_PER_NAME, 가용현금 // MAX_POSITIONS)
-        qty = budget // 현재가
+        기본: 매수 워커(signal_executor)가 시드배분기(core.seed_allocator)로 후보 전체에
+        배분한 수량을 signal['_qty']/['_price'] 로 주입한다 → 그대로 사용.
+        (fallback) 사전 배분이 없으면 단일 종목 사이징(가용현금 // MAX_POSITIONS, 종목당 캡).
         """
+        if signal.get("_qty") is not None:
+            return int(signal["_qty"] or 0), int(signal.get("_price") or 0)
+
         stk_cd = signal["stk_cd"]
         price = self.data.get_current_price(stk_cd)
         if price <= 0:
             return 0, 0
-
         avail = to_int(self.client.get_deposit().get("ord_alow_amt"))
         slots = max(1, self.risk.cfg.MAX_POSITIONS)
         budget = min(self.risk.cfg.MAX_NOTIONAL_PER_NAME, avail // slots)
