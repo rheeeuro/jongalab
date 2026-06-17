@@ -20,6 +20,16 @@ def list_recent(limit: int = 50) -> list[dict]:
         return cursor.fetchall()
 
 
+def get_open_sent() -> list[dict]:
+    """live 전송 완료(미체결 반영 전) 주문 — 체결 동기화 대상."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, stk_cd, side, qty, kiwoom_ord_no FROM `order` "
+            "WHERE status = 'sent' AND mode = 'live' AND kiwoom_ord_no IS NOT NULL"
+        )
+        return cursor.fetchall()
+
+
 def list_by_date(date_dash: str) -> list[dict]:
     """해당 날짜(YYYY-MM-DD) 주문 — 일별 상세용 (생성순)."""
     with get_db() as (conn, cursor):

@@ -17,6 +17,7 @@ from datetime import datetime
 
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
+from core.fill_sync import sync_fills
 from core.repository import position as position_repo
 from core.repository import settle_plan as plan_repo
 
@@ -107,6 +108,7 @@ def main() -> int:
     trade_date = now.strftime("%Y%m%d")
     logger.info("청산 시작 [%s] (거래일 %s)", args.venue.upper(), trade_date)
     engine = ExecutionEngine()
+    sync_fills(engine.client)  # 직전 체결을 포지션에 반영 후 청산 판단 (paper 는 no-op)
     if args.venue == "nxt":
         run_nxt(engine, trade_date)
     else:

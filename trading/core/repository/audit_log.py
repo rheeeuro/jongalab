@@ -23,7 +23,7 @@ def realized_by_date(date_dash: str) -> dict:
     with get_db() as (conn, cursor):
         cursor.execute(
             "SELECT stk_cd, payload FROM audit_log "
-            "WHERE event = 'sell_filled_paper' "
+            "WHERE event IN ('sell_filled_paper', 'sell_filled_live') "
             "AND created_at >= %s AND created_at < %s + INTERVAL 1 DAY",
             (date_dash, date_dash),
         )
