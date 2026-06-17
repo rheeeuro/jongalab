@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { BottomTabs } from "@/components/BottomTabs";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,7 +20,11 @@ export default function RootLayout({
           content="width=device-width, initial-scale=1, viewport-fit=cover"
         />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100">
+        {/* 하단 탭바 높이만큼 패딩 */}
+        <div className="pb-24">{children}</div>
+        <BottomTabs />
+      </body>
     </html>
   );
 }

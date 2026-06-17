@@ -12,6 +12,11 @@
   }
 }
 
+html {
+  /* 스크롤바 영역을 항상 확보 — 페이지 전환/길이 변화 시 가로 레이아웃 흔들림 방지 */
+  scrollbar-gutter: stable;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

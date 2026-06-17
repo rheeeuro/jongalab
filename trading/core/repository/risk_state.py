@@ -14,6 +14,17 @@ def get_state(trade_date: str) -> Optional[dict]:
         return cursor.fetchone()
 
 
+def get_month(yyyymm: str) -> list[dict]:
+    """해당 월(YYYYMM) 일별 리스크 상태 — 달력 일별 실현손익용."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT trade_date, realized_pnl, orders_count, breaker_tripped "
+            "FROM risk_state WHERE trade_date LIKE %s ORDER BY trade_date",
+            (yyyymm + "%",),
+        )
+        return cursor.fetchall()
+
+
 def ensure_row(trade_date: str) -> None:
     """해당 거래일 행이 없으면 기본값으로 생성 (멱등)."""
     with get_db() as (conn, cursor):

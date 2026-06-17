@@ -34,6 +34,13 @@ def get_plan(trade_date: str, stk_cd: str) -> Optional[dict]:
         return cursor.fetchone()
 
 
+def get_by_date(trade_date: str) -> list[dict]:
+    """해당 거래일 청산계획 전체 — 일별 상세(갭상승 여부)용."""
+    with get_db() as (conn, cursor):
+        cursor.execute("SELECT * FROM settle_plan WHERE trade_date=%s", (trade_date,))
+        return cursor.fetchall()
+
+
 def get_active_plans() -> list[dict]:
     """현재 감시 대상(active=1) 청산 계획 — 1분 모니터·KRX 단계가 사용."""
     with get_db() as (conn, cursor):

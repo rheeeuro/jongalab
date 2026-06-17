@@ -20,6 +20,19 @@ def list_recent(limit: int = 50) -> list[dict]:
         return cursor.fetchall()
 
 
+def list_by_date(date_dash: str) -> list[dict]:
+    """해당 날짜(YYYY-MM-DD) 주문 — 일별 상세용 (생성순)."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, stk_cd, side, qty, price, ord_type, mode, status, "
+            "kiwoom_ord_no, created_at "
+            "FROM `order` WHERE created_at >= %s AND created_at < %s + INTERVAL 1 DAY "
+            "ORDER BY id",
+            (date_dash, date_dash),
+        )
+        return cursor.fetchall()
+
+
 def find_by_idempotency_key(key: str) -> Optional[dict]:
     """동일 멱등성 키 주문이 이미 있는지 확인 (중복 전송 차단)."""
     with get_db() as (conn, cursor):

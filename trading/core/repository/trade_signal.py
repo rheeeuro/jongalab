@@ -8,6 +8,16 @@ from typing import Optional
 from core.db import get_db
 
 
+def get_name_map() -> dict:
+    """종목코드 → 종목명 맵 (대시보드 표시용). 시그널에 등장한 모든 종목."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT stk_cd, MAX(stk_nm) AS nm FROM trade_signal "
+            "WHERE stk_nm IS NOT NULL GROUP BY stk_cd"
+        )
+        return {r["stk_cd"]: r["nm"] for r in cursor.fetchall()}
+
+
 def get_signals_by_date(trade_date: str) -> list[dict]:
     """해당 거래일 전체 시그널 (상태 무관, 대시보드용)."""
     with get_db() as (conn, cursor):

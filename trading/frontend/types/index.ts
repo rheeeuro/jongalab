@@ -61,6 +61,33 @@ export interface AuditEvent {
   created_at: string;
 }
 
+export type NameMap = Record<string, string>;
+
+export interface MonthlyPnl {
+  month: string;
+  total: number;
+  days: Record<string, { realized_pnl: number; orders_count: number; breaker: boolean }>;
+}
+
+export interface DayPlan {
+  stk_cd: string;
+  gap_dir: "up" | "down";
+  avg_price: number;
+  nxt_open: number;
+  stop_price: number;
+  active: number;
+}
+
+export interface DayDetail {
+  date: string;
+  realized_pnl: number;
+  orders_count: number;
+  buys: Order[];
+  sells: Order[];
+  plans: DayPlan[];
+  realized_by_stock: Record<string, number>;
+}
+
 export interface DailySummary {
   trade_date: string;
   realized_pnl: number;

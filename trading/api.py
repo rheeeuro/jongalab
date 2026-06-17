@@ -20,6 +20,7 @@ from core.repository import trade_signal as signal_repo
 from core.repository import order as order_repo
 from core.repository import audit_log
 from core.repository import blocklist as blocklist_repo
+from core.repository import settle_plan as settle_plan_repo
 from core.kiwoom_data_client import KiwoomDataClient
 
 setup_logging()
@@ -94,6 +95,12 @@ def positions():
     return rows
 
 
+@app.get("/names")
+def names():
+    """종목코드 → 종목명 맵 (표시용)."""
+    return signal_repo.get_name_map()
+
+
 @app.get("/signals")
 def signals(date: str | None = None):
     """거래일 시그널 목록 (기본: 오늘)."""
@@ -111,6 +118,43 @@ def orders(limit: int = 50):
 def audit(limit: int = 50):
     """최근 감사 이벤트."""
     return audit_log.list_recent(limit)
+
+
+@app.get("/pnl/monthly")
+def pnl_monthly(month: str | None = None):
+    """월별 일자 실현손익 — 달력용. month=YYYYMM (기본 이번 달)."""
+    month = month or datetime.now().strftime("%Y%m")
+    rows = risk_repo.get_month(month)
+    days = {
+        r["trade_date"]: {
+            "realized_pnl": r["realized_pnl"] or 0,
+            "orders_count": r["orders_count"] or 0,
+            "breaker": bool(r["breaker_tripped"]),
+        }
+        for r in rows
+    }
+    total = sum(d["realized_pnl"] for d in days.values())
+    return {"month": month, "total": total, "days": days}
+
+
+@app.get("/day")
+def day_detail(date: str | None = None):
+    """일별 상세 — 매수/매도/갭여부/실현손익. date=YYYYMMDD (기본 오늘)."""
+    d = date or datetime.now().strftime("%Y%m%d")
+    dash = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+    orders = order_repo.list_by_date(dash)
+    realized_map = audit_log.realized_by_date(dash)
+    plans = {p["stk_cd"]: p for p in settle_plan_repo.get_by_date(d)}
+    state = risk_repo.get_state(d) or {}
+    return {
+        "date": d,
+        "realized_pnl": state.get("realized_pnl") or 0,
+        "orders_count": state.get("orders_count") or 0,
+        "buys": [o for o in orders if o["side"] == "buy"],
+        "sells": [o for o in orders if o["side"] == "sell"],
+        "plans": list(plans.values()),       # 갭상승/하락 여부
+        "realized_by_stock": realized_map,    # 종목별 실현손익
+    }
 
 
 @app.get("/summary")
