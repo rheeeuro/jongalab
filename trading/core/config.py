@@ -33,10 +33,9 @@ KIWOOM_DB_CONFIG = {**_DB_BASE, 'database': os.getenv('KIWOOM_DB_NAME', 'kiwoom'
 # 키움 데이터 서버 (시세/수급 읽기) — 주문은 trading 이 키움 REST 로 직접 호출한다
 KIWOOM_BASE_URL = os.getenv('KIWOOM_BASE_URL', 'http://127.0.0.1:8001')
 
-# ── 키움 주문/계좌 (운영/모의) ──
+# ── 키움 주문/계좌 (운영/모의) — 계좌·주문은 토큰에 귀속(별도 계좌번호 불필요) ──
 KIWOOM_APP_KEY = os.getenv('KIWOOM_APP_KEY', '')
 KIWOOM_SECRET_KEY = os.getenv('KIWOOM_SECRET_KEY', '')
-KIWOOM_ACCOUNT_NO = os.getenv('KIWOOM_ACCOUNT_NO', '')
 
 # ── ⚠️ 매매 안전장치 ──
 # 'paper': 모의(주문 미전송, 의도만 로깅·기록) / 'live': 실주문 전송. 기본값은 paper.

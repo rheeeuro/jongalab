@@ -62,7 +62,7 @@ class ExecutionEngine:
             key, signal_id, stk_cd, "buy", qty, price, "limit", "paper"
         )
         audit_log.append("buy_intended", stk_cd, {"order_id": order_id, "qty": qty, "price": price})
-        resp = self.client.buy(stk_cd, qty, price, ord_type="0")
+        resp = self.client.buy(stk_cd, qty, price, trde_tp="0")  # 0: 보통(지정가)
         audit_log.append("buy_response", stk_cd, {"order_id": order_id, "resp": resp})
         order_repo.mark_sent(order_id, resp.get("ord_no"), "sent")
         return resp
