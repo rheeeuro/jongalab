@@ -7,10 +7,10 @@ Trading Execution API — 자동매매 집행/조회/제어 FastAPI 서버 (loca
 import logging
 from datetime import datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from core.config import DB_CONFIG, TRADING_MODE  # noqa: F401  (import 시 루트 .env 로드)
+from core.config import DB_CONFIG, TRADING_MODE, ADMIN_PASSWORD  # noqa: F401  (import 시 루트 .env 로드)
 from core.logging_setup import setup_logging
 from core.repository import kiwoom_token as token_repo
 from core.repository import risk_state as risk_repo
@@ -30,6 +30,10 @@ app = FastAPI(title="Trading Execution API")
 
 
 # ── 요청 바디 ──
+class LoginBody(BaseModel):
+    password: str = ""
+
+
 class KillSwitch(BaseModel):
     flag: bool
     reason: str | None = None
@@ -78,6 +82,15 @@ def health():
 @app.get("/")
 def root():
     return {"status": "ok", "service": "Trading Execution API"}
+
+
+# ── 대시보드 로그인 (비밀번호 검증) ──
+@app.post("/admin/login")
+def admin_login(b: LoginBody):
+    """대시보드 접속 비밀번호 검증. ADMIN_PASSWORD 미설정이거나 불일치면 401."""
+    if ADMIN_PASSWORD and b.password == ADMIN_PASSWORD:
+        return {"ok": True}
+    raise HTTPException(status_code=401, detail="비밀번호가 올바르지 않습니다.")
 
 
 # ── 조회 (대시보드) ──

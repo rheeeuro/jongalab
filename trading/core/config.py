@@ -36,6 +36,9 @@ JONGALAB_DB_CONFIG = {**_DB_BASE, 'database': os.getenv('JONGALAB_DB_NAME', 'jon
 # 텔레그램 봇 토큰 (관리자 매수현황 알림). jongalab 과 동일 .env 값.
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '')
 
+# 대시보드 접속 비밀번호 (프론트 로그인 → 백엔드 /admin/login 검증).
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', '')
+
 # 키움 데이터 서버 (시세/수급 읽기) — 주문은 trading 이 키움 REST 로 직접 호출한다
 KIWOOM_BASE_URL = os.getenv('KIWOOM_BASE_URL', 'http://127.0.0.1:8001')
 

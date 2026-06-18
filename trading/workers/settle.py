@@ -16,7 +16,6 @@ import logging
 from datetime import datetime
 
 from core.logging_setup import setup_logging
-from core.config import SELL_EXCHANGE
 from core.execution_engine import ExecutionEngine
 from core.fill_sync import sync_fills
 from core.repository import position as position_repo
@@ -47,7 +46,7 @@ def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
             half = (qty + 1) // 2  # 올림(소숫점 올림) — 1주는 전량(=1)
             if half >= 1:
                 engine.execute_sell(trade_date, stk_cd, half, nxt_open,
-                                    dmst_stex_tp=SELL_EXCHANGE, tag="nxt")
+                                    dmst_stex_tp="NXT", tag="nxt")  # NXT → 최유리IOC
             remaining = qty - half
             if remaining > 0:
                 # 잔량 감시계획: 스탑/저가이탈선 = 시초가
@@ -66,8 +65,7 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
     """KRX 09:05 — 잔량 처리(갭상승 전량 / 갭하락 회복 실패 시 전량)."""
     plans = plan_repo.get_active_plans()
     if not plans:
-        logger.info("[KRX] 활성 청산계획 없음 — 종료")
-        return
+        logger.info("[KRX] 활성 청산계획 없음 — plan 없는 잔여 포지션만 정리")
     for plan in plans:
         stk_cd = plan["stk_cd"]
         pos = position_repo.get_position(stk_cd)
@@ -81,13 +79,13 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
                 continue
             if plan["gap_dir"] == "up":
                 engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
-                                    dmst_stex_tp=SELL_EXCHANGE, tag="krx")
+                                    dmst_stex_tp="KRX", tag="krx")
                 plan_repo.deactivate(plan["trade_date"], stk_cd, "갭상승 KRX 전량매도")
                 logger.info("[KRX] %s 갭상승 전량매도 %d주 @%d", stk_cd, pos["qty"], cur)
             else:  # 갭하락
                 if cur < plan["nxt_open"]:  # 시초가 회복 못함
                     engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
-                                        dmst_stex_tp=SELL_EXCHANGE, tag="krx")
+                                        dmst_stex_tp="KRX", tag="krx")
                     plan_repo.deactivate(plan["trade_date"], stk_cd, "갭하락 회복실패 전량매도")
                     logger.info("[KRX] %s 갭하락 회복실패 전량매도 %d주 @%d", stk_cd, pos["qty"], cur)
                 else:
@@ -96,21 +94,19 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
         except Exception as e:
             logger.error("[KRX] 청산 실패 [%s]: %s", stk_cd, e)
 
-    # 비-NXT 포지션(08:05 단계를 건너뜀, plan 없음) → KRX 에서 전량 청산
+    # plan 없는 잔여 포지션(비-NXT + 08:05 NXT 매도 실패/누락분) → KRX 정규장 시장가 전량청산
     for p in position_repo.get_open_positions():
         stk_cd = p["stk_cd"]
-        if engine.data.is_nxt_enabled(stk_cd):
-            continue  # NXT 종목은 위 plan 로직에서 처리
         if plan_repo.get_plan(trade_date, stk_cd):
-            continue  # 이미 plan 있으면 위에서 처리됨
+            continue  # plan 있는 NXT 종목은 위에서 처리됨
         try:
             cur = engine.data.get_current_price(stk_cd)
             if cur <= 0:
                 logger.warning("[KRX] 현재가 조회 실패 — 보류 [%s]", stk_cd)
                 continue
             engine.execute_sell(trade_date, stk_cd, p["qty"], cur,
-                                dmst_stex_tp=SELL_EXCHANGE, tag="krxfull")
-            logger.info("[KRX] %s 비-NXT 전량청산 %d주 @%d", stk_cd, p["qty"], cur)
+                                dmst_stex_tp="KRX", tag="krxfull")
+            logger.info("[KRX] %s 잔여 전량청산 %d주 @%d (KRX 시장가)", stk_cd, p["qty"], cur)
         except Exception as e:
             logger.error("[KRX] 비-NXT 청산 실패 [%s]: %s", stk_cd, e)
 

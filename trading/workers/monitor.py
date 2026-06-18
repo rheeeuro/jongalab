@@ -12,7 +12,6 @@ from datetime import datetime
 
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
-from core.config import SELL_EXCHANGE
 from core.fill_sync import sync_fills
 from core.order_maintenance import cancel_stale_orders
 from core.repository import position as position_repo
@@ -27,6 +26,12 @@ POLL_SEC = 60
 def in_session(now: datetime) -> bool:
     """평일 08:00~20:00 (NXT 운영시간)."""
     return now.weekday() < 5 and 8 <= now.hour < 20
+
+
+def sell_venue(now: datetime) -> str:
+    """매도 거래소: KRX 정규장(09:00~15:30)이면 KRX(시장가), 그 외 NXT 시간대면 NXT(최유리IOC)."""
+    hm = (now.hour, now.minute)
+    return "KRX" if (9, 0) <= hm < (15, 30) else "NXT"
 
 
 def check_once(engine: ExecutionEngine) -> None:
@@ -46,7 +51,7 @@ def check_once(engine: ExecutionEngine) -> None:
                 continue
             if cur <= plan["stop_price"]:
                 engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
-                                    dmst_stex_tp=SELL_EXCHANGE, tag="stop")
+                                    dmst_stex_tp=sell_venue(datetime.now()), tag="stop")
                 plan_repo.deactivate(plan["trade_date"], stk_cd,
                                      f"스탑/저가이탈 즉시매도 @{cur}(<= {plan['stop_price']})")
                 logger.info("스탑 발동 [%s] 전량매도 %d주 @%d (선 %d)",

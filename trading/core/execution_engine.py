@@ -40,6 +40,14 @@ class ExecutionEngine:
         """동일 (거래일, 시그널, 매수/매도) 조합의 중복 주문 방지 키."""
         return f"{trade_date}:{signal_id}:{side}"
 
+    @staticmethod
+    def _now_trde_tp(dmst_stex_tp: str) -> str:
+        """거래소별 '즉시 체결' 주문타입.
+        KRX 는 시장가(3)를 받지만 NXT 는 시장가 미지원 → 최유리지정가 IOC(16)로 즉시 체결.
+        (SOR/기타는 KRX 라우팅 가정으로 시장가(3))
+        """
+        return "16" if dmst_stex_tp == "NXT" else "3"
+
     def size_order(self, signal: dict) -> tuple[int, int]:
         """시그널 → (수량, 지정가).
 
@@ -95,9 +103,16 @@ class ExecutionEngine:
             key, signal_id, stk_cd, "buy", qty, price, "market", mode
         )
         audit_log.append("buy_intended", stk_cd, {"order_id": order_id, "qty": qty, "price": price})
-        # 시장가(trde_tp=3): 종가 무렵 즉시 체결 보장. ord_uv 는 빈값(price=0)으로 보낸다.
-        resp = self.client.buy(stk_cd, qty, 0, trde_tp="3", dmst_stex_tp=dmst_stex_tp)
+        # 거래소별 즉시체결 주문타입(KRX 시장가 / NXT 최유리IOC). ord_uv 빈값(price=0).
+        resp = self.client.buy(stk_cd, qty, 0, trde_tp=self._now_trde_tp(dmst_stex_tp),
+                               dmst_stex_tp=dmst_stex_tp)
         audit_log.append("buy_response", stk_cd, {"order_id": order_id, "resp": resp})
+        # live 에서 키움이 거부(return_code≠0 또는 주문번호 없음)하면 rejected 로 기록하고 중단
+        if not paper and (resp.get("return_code") != 0 or not resp.get("ord_no")):
+            order_repo.mark_sent(order_id, None, "rejected")
+            audit_log.append("buy_rejected", stk_cd, {"order_id": order_id, "resp": resp})
+            logger.warning("매수 거부 [%s]: %s", stk_cd, resp.get("return_msg"))
+            return None
         # paper 는 즉시 전량 체결 가정 → 체결·포지션 시뮬레이션. live 는 ka10076 으로 사후 반영.
         order_repo.mark_sent(order_id, resp.get("ord_no"), "filled" if paper else "sent")
         self.risk.record_order(trade_date)  # 일일 주문수 한도 카운팅
@@ -126,9 +141,16 @@ class ExecutionEngine:
         mode = "paper" if paper else "live"
         order_id = order_repo.create_intended(key, None, stk_cd, "sell", qty, price, "market", mode)
         audit_log.append("sell_intended", stk_cd, {"order_id": order_id, "qty": qty, "price": price, "tag": tag})
-        # 시장가(trde_tp=3): 청산 즉시 체결 보장(미체결로 포지션 묶임 방지). ord_uv 빈값.
-        resp = self.client.sell(stk_cd, qty, 0, trde_tp="3", dmst_stex_tp=dmst_stex_tp)
+        # 거래소별 즉시체결 주문타입(KRX 시장가 / NXT 최유리IOC). ord_uv 빈값.
+        resp = self.client.sell(stk_cd, qty, 0, trde_tp=self._now_trde_tp(dmst_stex_tp),
+                                dmst_stex_tp=dmst_stex_tp)
         audit_log.append("sell_response", stk_cd, {"order_id": order_id, "resp": resp})
+        # live 에서 키움이 거부하면 rejected 로 기록하고 중단(가짜 매도기록 방지)
+        if not paper and (resp.get("return_code") != 0 or not resp.get("ord_no")):
+            order_repo.mark_sent(order_id, None, "rejected")
+            audit_log.append("sell_rejected", stk_cd, {"order_id": order_id, "resp": resp})
+            logger.warning("매도 거부 [%s]: %s", stk_cd, resp.get("return_msg"))
+            return None
         order_repo.mark_sent(order_id, resp.get("ord_no"), "filled" if paper else "sent")
         self.risk.record_order(trade_date)
         if paper:
