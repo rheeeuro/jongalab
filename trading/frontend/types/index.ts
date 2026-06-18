@@ -101,6 +101,7 @@ export interface DayDetail {
   plans: DayPlan[];
   realized_by_stock: Record<string, number>;
   roundtrips: RoundTrip[];
+  invested: number; // 오늘 청산 원금(Σ 매수가×매도수량) — 실현손익 수익률의 분모
 }
 
 export interface DailySummary {

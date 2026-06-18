@@ -28,6 +28,14 @@ export function wonCompact(v: number): string {
   return `${sign}${a}`;
 }
 
+// 수익률 표기 (+/- 부호, 소수 1자리). 분모 0/누락이면 null.
+export function pct(pnl: number, base: number): string | null {
+  if (!base) return null;
+  const v = (pnl / base) * 100;
+  const sign = v > 0 ? "+" : v < 0 ? "-" : "";
+  return `${sign}${Math.abs(v).toFixed(1)}%`;
+}
+
 // 손익 색상 (국내 관례: 이익 빨강 / 손실 파랑 / 0 회색)
 export function pnlClass(v: number): string {
   if (v > 0) return "text-rose-500";

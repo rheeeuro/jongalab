@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api";
-import { won, wonExact, pnlClass, fmtDate, todayYYYYMMDD } from "@/lib/format";
+import { won, wonExact, pnlClass, pct, fmtDate, todayYYYYMMDD } from "@/lib/format";
 import type { HealthStatus, Position, DayDetail, DailySummary, NameMap } from "@/types";
 import RoundTrips from "@/components/RoundTrips";
 
@@ -15,6 +15,8 @@ export default async function TodayPage() {
   ]);
 
   const pnl = summary?.realized_pnl ?? 0;
+  const invested = day?.invested ?? 0;
+  const pnlPct = pct(pnl, invested); // 청산 원금 대비 수익률 (원금 0이면 null)
   const nm = (code: string) => names[code] || code;
   const buys = day?.buys ?? [];
   const trips = day?.roundtrips ?? [];
@@ -28,9 +30,21 @@ export default async function TodayPage() {
       {/* 히어로: 오늘 실현손익 */}
       <section className="mt-2">
         <h1 className="text-[15px] font-medium text-slate-500">오늘 실현 손익</h1>
-        <p className={`mt-1 text-4xl font-extrabold tracking-tight ${pnlClass(pnl)}`}>
-          {won(pnl)}
-        </p>
+        <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <p className={`text-4xl font-extrabold tracking-tight ${pnlClass(pnl)}`}>
+            {won(pnl)}
+          </p>
+          {pnlPct && (
+            <span className={`text-lg font-bold tabular-nums ${pnlClass(pnl)}`}>
+              {pnlPct}
+            </span>
+          )}
+        </div>
+        {pnlPct && (
+          <p className="mt-1 text-xs text-slate-400 tabular-nums">
+            청산 원금 {wonExact(invested)} 대비
+          </p>
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
           <Badge tone={live ? "rose" : "slate"}>{live ? "실전투자" : "모의투자"}</Badge>
           <Badge tone={auto ? "green" : "red"}>{auto ? "자동매매 작동중" : "자동매매 정지"}</Badge>

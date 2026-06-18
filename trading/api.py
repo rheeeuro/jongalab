@@ -219,6 +219,9 @@ def day_detail(date: str | None = None):
     plans = {p["stk_cd"]: p for p in settle_plan_repo.get_by_date(d)}
     state = risk_repo.get_state(d) or {}
     sells = [o for o in orders if o["side"] == "sell"]
+    roundtrips = _build_roundtrips(dash, sells, realized_map)  # 매수가→매도가→실현손익
+    # 청산 원금 = 오늘 판 수량의 매수원금 합(Σ 매수가×매도수량). 실현손익의 분모(수익률 기준).
+    invested = sum(t["buy_price"] * t["sell_qty"] for t in roundtrips)
     return {
         "date": d,
         "realized_pnl": state.get("realized_pnl") or 0,
@@ -227,7 +230,8 @@ def day_detail(date: str | None = None):
         "sells": sells,
         "plans": list(plans.values()),       # 갭상승/하락 여부
         "realized_by_stock": realized_map,    # 종목별 실현손익
-        "roundtrips": _build_roundtrips(dash, sells, realized_map),  # 매수가→매도가→실현손익
+        "roundtrips": roundtrips,
+        "invested": invested,                 # 오늘 청산 원금(수익률 분모)
     }
 
 
