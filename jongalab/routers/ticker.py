@@ -1,11 +1,12 @@
 """티커 사전 관리 라우트"""
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 import mysql.connector
 
 from core.repository import get_ticker_dictionary, update_ticker, delete_ticker
 from core.sector_resolver import fetch_sector_from_api
+from routers.admin import require_admin
 
 router = APIRouter(prefix="/api/ticker-dictionary", tags=["ticker-dictionary"])
 
@@ -42,7 +43,7 @@ def resolve_sector(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/{ticker_id}")
+@router.put("/{ticker_id}", dependencies=[Depends(require_admin)])
 def update_ticker_dict(ticker_id: int, body: TickerDictionaryUpdate):
     """ticker dictionary 항목 수정"""
     if body.status not in ("PENDING", "ACTIVE", "INACTIVE"):
@@ -61,7 +62,7 @@ def update_ticker_dict(ticker_id: int, body: TickerDictionaryUpdate):
     return {"success": True}
 
 
-@router.delete("/{ticker_id}")
+@router.delete("/{ticker_id}", dependencies=[Depends(require_admin)])
 def delete_ticker_dict(ticker_id: int):
     """ticker dictionary 항목 삭제"""
     success = delete_ticker(ticker_id)

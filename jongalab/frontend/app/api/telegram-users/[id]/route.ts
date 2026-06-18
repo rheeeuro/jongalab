@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { API_BASE } from '@/lib/api';
+import { API_BASE, adminAuthHeaders } from '@/lib/api';
 
 type RouteContext = {
   params: Promise<{ id: string }> | { id: string };
@@ -14,7 +14,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
 
     const res = await fetch(`${API_BASE}/api/telegram-users/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await adminAuthHeaders()) },
       body: JSON.stringify(body),
     });
 
@@ -38,6 +38,7 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
 
     const res = await fetch(`${API_BASE}/api/telegram-users/${id}`, {
       method: 'DELETE',
+      headers: await adminAuthHeaders(),
     });
 
     if (!res.ok) {

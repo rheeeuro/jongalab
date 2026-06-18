@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { API_BASE } from '@/lib/api';
+import { API_BASE, adminAuthHeaders } from '@/lib/api';
 
 export async function GET() {
   try {
     const res = await fetch(`${API_BASE}/api/strategy-config`, {
       cache: 'no-store',
+      headers: await adminAuthHeaders(),
     });
     if (!res.ok) {
       return NextResponse.json({ error: '백엔드 응답 에러' }, { status: res.status });
@@ -21,7 +22,7 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const res = await fetch(`${API_BASE}/api/strategy-config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await adminAuthHeaders()) },
       body: JSON.stringify(body),
     });
     if (!res.ok) {

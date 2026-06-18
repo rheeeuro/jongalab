@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { API_BASE } from '@/lib/api';
+import { API_BASE, adminAuthHeaders } from '@/lib/api';
 
 // GET /api/telegram-users — 텔레그램 유저 목록 조회 프록시
 export async function GET(request: NextRequest) {
@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
 
     const res = await fetch(`${API_BASE}/api/telegram-users${params}`, {
       cache: 'no-store',
+      headers: await adminAuthHeaders(),
     });
 
     if (!res.ok) {
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const res = await fetch(`${API_BASE}/api/telegram-users`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await adminAuthHeaders()) },
       body: JSON.stringify(body),
     });
 

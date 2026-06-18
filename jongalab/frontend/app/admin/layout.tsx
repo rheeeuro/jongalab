@@ -24,11 +24,21 @@ export default function AdminLayout({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const saved = sessionStorage.getItem("admin_auth");
-    if (saved === "true") {
-      setAuthenticated(true);
-    }
-    setChecking(false);
+    // httpOnly 세션 쿠키를 백엔드로 검증(콘솔에서 위조 불가). 통과해야 관리 화면 노출.
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/verify", { cache: "no-store" });
+        if (!cancelled && res.ok) setAuthenticated(true);
+      } catch {
+        /* 미인증 → 로그인 폼 */
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -42,7 +52,7 @@ export default function AdminLayout({
         body: JSON.stringify({ password }),
       });
       if (res.ok) {
-        sessionStorage.setItem("admin_auth", "true");
+        // 로그인 성공 시 서버가 httpOnly 쿠키를 발급함. 별도 클라이언트 저장 불필요.
         setAuthenticated(true);
       } else {
         setError("비밀번호가 올바르지 않습니다.");
