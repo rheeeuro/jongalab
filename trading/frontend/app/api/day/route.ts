@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, authHeaders } from "@/lib/api";
 
 // GET /api/day?date=YYYYMMDD — 일별 상세 프록시
 export async function GET(request: NextRequest) {
   try {
     const date = new URL(request.url).searchParams.get("date") ?? "";
     const qs = date ? `?date=${date}` : "";
-    const res = await fetch(`${API_BASE}/day${qs}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/day${qs}`, {
+      cache: "no-store",
+      headers: await authHeaders(),
+    });
     if (!res.ok) return NextResponse.json({ error: "백엔드 응답 에러" }, { status: res.status });
     return NextResponse.json(await res.json());
   } catch (error) {

@@ -4,10 +4,11 @@ Trading Execution API — 자동매매 집행/조회/제어 FastAPI 서버 (loca
 대시보드(trading/frontend, :3001)의 백엔드이자 수동 제어 면(킬스위치·포지션·시그널 조회).
 주문 권한은 이 도메인에만 있으며, 모든 주문은 ExecutionEngine + RiskEngine 을 경유한다.
 """
+import hashlib
 import logging
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request
 from pydantic import BaseModel
 
 from core.config import DB_CONFIG, TRADING_MODE, ADMIN_PASSWORD  # noqa: F401  (import 시 루트 .env 로드)
@@ -26,7 +27,27 @@ from core.kiwoom_data_client import KiwoomDataClient
 setup_logging()
 logger = logging.getLogger("TradingAPI")
 
-app = FastAPI(title="Trading Execution API")
+# ── 인증 ──
+# 세션 토큰 = sha256(ADMIN_PASSWORD). 비번을 모르면 계산 불가 → 위조 불가.
+# 로그인 성공 시 이 토큰을 프론트가 httpOnly 쿠키로 보관하고 매 요청 Authorization 헤더로 전달한다.
+# ADMIN_PASSWORD 미설정 시 토큰이 빈 문자열 → 모든 보호 엔드포인트가 401(fail-closed).
+SESSION_TOKEN = hashlib.sha256(ADMIN_PASSWORD.encode()).hexdigest() if ADMIN_PASSWORD else ""
+
+# 인증 없이 접근 가능한 경로 (헬스/루트/로그인/문서).
+_AUTH_EXEMPT = {"/", "/health", "/admin/login", "/docs", "/redoc", "/openapi.json"}
+
+
+def require_auth(request: Request):
+    """전역 의존성 — 면제 경로 외 모든 요청은 유효한 Bearer 토큰을 요구한다."""
+    if request.url.path in _AUTH_EXEMPT:
+        return
+    auth = request.headers.get("authorization", "")
+    token = auth[7:] if auth[:7].lower() == "bearer " else ""
+    if not SESSION_TOKEN or token != SESSION_TOKEN:
+        raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+
+
+app = FastAPI(title="Trading Execution API", dependencies=[Depends(require_auth)])
 
 
 # ── 요청 바디 ──
@@ -87,9 +108,10 @@ def root():
 # ── 대시보드 로그인 (비밀번호 검증) ──
 @app.post("/admin/login")
 def admin_login(b: LoginBody):
-    """대시보드 접속 비밀번호 검증. ADMIN_PASSWORD 미설정이거나 불일치면 401."""
+    """대시보드 접속 비밀번호 검증. 성공 시 세션 토큰을 발급(프론트가 httpOnly 쿠키로 보관).
+    ADMIN_PASSWORD 미설정이거나 불일치면 401."""
     if ADMIN_PASSWORD and b.password == ADMIN_PASSWORD:
-        return {"ok": True}
+        return {"ok": True, "token": SESSION_TOKEN}
     raise HTTPException(status_code=401, detail="비밀번호가 올바르지 않습니다.")
 
 

@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { BottomTabs } from "@/components/BottomTabs";
-import { AuthGate } from "@/components/AuthGate";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,12 +21,10 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100">
-        {/* 비밀번호 게이트(로그인 전엔 children/탭 비노출) */}
-        <AuthGate>
-          {/* 하단 탭바 높이만큼 패딩 */}
-          <div className="pb-24">{children}</div>
-          <BottomTabs />
-        </AuthGate>
+        {/* 접속 게이트는 middleware 가 서버단에서 처리(미인증 → /login). */}
+        {/* 하단 탭바 높이만큼 패딩 */}
+        <div className="pb-24">{children}</div>
+        <BottomTabs />
       </body>
     </html>
   );

@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, authHeaders } from "@/lib/api";
 
 // GET /api/pnl-monthly?month=YYYYMM — 월별 일자 실현손익 프록시
 export async function GET(request: NextRequest) {
   try {
     const month = new URL(request.url).searchParams.get("month") ?? "";
     const qs = month ? `?month=${month}` : "";
-    const res = await fetch(`${API_BASE}/pnl/monthly${qs}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/pnl/monthly${qs}`, {
+      cache: "no-store",
+      headers: await authHeaders(),
+    });
     if (!res.ok) return NextResponse.json({ error: "백엔드 응답 에러" }, { status: res.status });
     return NextResponse.json(await res.json());
   } catch (error) {

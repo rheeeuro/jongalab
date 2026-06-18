@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, authHeaders } from "@/lib/api";
 
 // GET /api/risk-config — 리스크 설정 조회 프록시
 export async function GET() {
   try {
-    const res = await fetch(`${API_BASE}/risk-config`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/risk-config`, {
+      cache: "no-store",
+      headers: await authHeaders(),
+    });
     if (!res.ok) {
       return NextResponse.json({ error: "백엔드 응답 에러" }, { status: res.status });
     }
@@ -21,7 +24,7 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const res = await fetch(`${API_BASE}/risk-config`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(await authHeaders()) },
       body: JSON.stringify(body),
     });
     if (!res.ok) {

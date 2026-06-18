@@ -13,6 +13,7 @@ const TABS = [
 
 export function BottomTabs() {
   const pathname = usePathname();
+  if (pathname === "/login") return null; // 로그인 화면엔 탭 미노출
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-100 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
       <div className="mx-auto flex max-w-2xl items-stretch justify-around pb-[env(safe-area-inset-bottom)]">
