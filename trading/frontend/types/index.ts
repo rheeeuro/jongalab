@@ -46,6 +46,9 @@ export interface Order {
   side: "buy" | "sell";
   qty: number;
   price: number;
+  /** 실제 체결 수량가중평균가. 미체결이면 null → price(주문 시점 참조가) 폴백. */
+  fill_price: number | null;
+  filled_qty: number;
   mode: "paper" | "live";
   status: "intended" | "sent" | "accepted" | "rejected" | "filled" | "canceled";
   kiwoom_ord_no: string | null;

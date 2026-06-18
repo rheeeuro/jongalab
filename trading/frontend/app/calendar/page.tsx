@@ -164,7 +164,7 @@ export default function CalendarPage() {
                     {detail.buys.map((o) => (
                       <li key={o.id} className="flex items-center justify-between py-2">
                         <span className="font-medium">{nm(o.stk_cd)}</span>
-                        <span className="text-sm text-slate-500 tabular-nums">{o.qty}주 · {wonExact(o.price)}</span>
+                        <span className="text-sm text-slate-500 tabular-nums">{o.qty}주 · {wonExact(o.fill_price ?? o.price)}</span>
                       </li>
                     ))}
                   </ul>

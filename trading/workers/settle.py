@@ -20,6 +20,8 @@ from core.execution_engine import ExecutionEngine
 from core.fill_sync import sync_fills
 from core.repository import position as position_repo
 from core.repository import settle_plan as plan_repo
+from core.repository import trade_signal as signal_repo
+from core.notifications import notify_admin
 
 setup_logging()
 logger = logging.getLogger("Settle")
@@ -62,7 +64,17 @@ def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
 
 
 def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
-    """KRX 09:05 — 잔량 처리(갭상승 전량 / 갭하락 회복 실패 시 전량)."""
+    """KRX 09:05 — 잔량 처리(갭상승 전량 / 갭하락 회복 실패 시 전량).
+
+    KRX 단계는 잔량을 '전량' 청산하므로, 실제 매도된 종목을 모아 관리자에게 텔레그램 전송한다.
+    """
+    names = signal_repo.get_name_map()
+    sold: list[dict] = []  # 텔레그램 청산 알림용
+
+    def _record(stk_cd: str, qty: int, price: int, avg: int) -> None:
+        sold.append({"nm": names.get(stk_cd, stk_cd), "cd": stk_cd,
+                     "qty": qty, "price": price, "avg": avg})
+
     plans = plan_repo.get_active_plans()
     if not plans:
         logger.info("[KRX] 활성 청산계획 없음 — plan 없는 잔여 포지션만 정리")
@@ -78,15 +90,19 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
                 logger.warning("[KRX] 현재가 조회 실패 — 보류 [%s]", stk_cd)
                 continue
             if plan["gap_dir"] == "up":
-                engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
-                                    dmst_stex_tp="KRX", tag="krx")
+                resp = engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
+                                           dmst_stex_tp="KRX", tag="krx")
                 plan_repo.deactivate(plan["trade_date"], stk_cd, "갭상승 KRX 전량매도")
+                if resp:
+                    _record(stk_cd, pos["qty"], cur, pos["avg_price"])
                 logger.info("[KRX] %s 갭상승 전량매도 %d주 @%d", stk_cd, pos["qty"], cur)
             else:  # 갭하락
                 if cur < plan["nxt_open"]:  # 시초가 회복 못함
-                    engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
-                                        dmst_stex_tp="KRX", tag="krx")
+                    resp = engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
+                                               dmst_stex_tp="KRX", tag="krx")
                     plan_repo.deactivate(plan["trade_date"], stk_cd, "갭하락 회복실패 전량매도")
+                    if resp:
+                        _record(stk_cd, pos["qty"], cur, pos["avg_price"])
                     logger.info("[KRX] %s 갭하락 회복실패 전량매도 %d주 @%d", stk_cd, pos["qty"], cur)
                 else:
                     logger.info("[KRX] %s 갭하락 시초가 회복(%d≥%d) — 보유 유지(모니터 감시)",
@@ -104,11 +120,45 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
             if cur <= 0:
                 logger.warning("[KRX] 현재가 조회 실패 — 보류 [%s]", stk_cd)
                 continue
-            engine.execute_sell(trade_date, stk_cd, p["qty"], cur,
-                                dmst_stex_tp="KRX", tag="krxfull")
+            resp = engine.execute_sell(trade_date, stk_cd, p["qty"], cur,
+                                       dmst_stex_tp="KRX", tag="krxfull")
+            if resp:
+                _record(stk_cd, p["qty"], cur, p["avg_price"])
             logger.info("[KRX] %s 잔여 전량청산 %d주 @%d (KRX 시장가)", stk_cd, p["qty"], cur)
         except Exception as e:
             logger.error("[KRX] 비-NXT 청산 실패 [%s]: %s", stk_cd, e)
+
+    # 관리자 텔레그램 청산 현황 전송 (매도된 종목이 있을 때만)
+    _notify_sells(trade_date, sold)
+
+
+def _notify_sells(trade_date: str, sold: list[dict]) -> None:
+    """KRX 전량청산 현황을 관리자에게 텔레그램 전송 (paper/live 무관, 전송 실패는 무시).
+
+    live 는 시장가/IOC 라 실체결가가 사후(fill_sync) 반영되므로, 여기 매도가·손익은
+    주문 시점 현재가 기준의 '참조/예상'값임을 명시한다.
+    """
+    if not sold:
+        return
+    try:
+        d = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+        total = sum(s["qty"] * s["price"] for s in sold)
+        est_pnl = sum((s["price"] - s["avg"]) * s["qty"] for s in sold)
+        lines = "\n".join(
+            f"• {s['nm']}(`{s['cd']}`) {s['qty']}주 @{s['price']:,} "
+            f"(평단 {s['avg']:,} · 예상 {(s['price']-s['avg'])*s['qty']:+,}원)"
+            for s in sold
+        )
+        msg = (
+            f"💰 *[KRX] 청산 현황* {d}\n"
+            f"{len(sold)}종목 전량매도 / 매도액 {total:,}원\n"
+            f"예상 실현손익 {est_pnl:+,}원\n"
+            f"──────────────────\n{lines}\n"
+            f"_매도가·손익은 주문 시점 참조값(실체결 사후 반영)_"
+        )
+        notify_admin(msg)
+    except Exception as e:
+        logger.error("청산현황 알림 실패: %s", e)
 
 
 def main() -> int:

@@ -9,12 +9,19 @@ from core.db import get_db
 
 
 def list_recent(limit: int = 50) -> list[dict]:
-    """최근 주문 목록 (대시보드용, 최신순)."""
+    """최근 주문 목록 (대시보드용, 최신순).
+
+    price 는 주문 시점 참조가(시장가/IOC 는 ord_uv=0 이라 실체결가와 다름).
+    fill_price 는 실제 체결 수량가중평균가(미체결이면 NULL) → 대시보드는 이걸 우선 표시.
+    """
     with get_db() as (conn, cursor):
         cursor.execute(
-            "SELECT id, idempotency_key, stk_cd, side, qty, price, ord_type, mode, "
-            "status, kiwoom_ord_no, created_at "
-            "FROM `order` ORDER BY id DESC LIMIT %s",
+            "SELECT o.id, o.idempotency_key, o.stk_cd, o.side, o.qty, o.price, o.ord_type, "
+            "o.mode, o.status, o.kiwoom_ord_no, o.created_at, "
+            "ROUND(SUM(f.qty * f.price) / NULLIF(SUM(f.qty), 0)) AS fill_price, "
+            "COALESCE(SUM(f.qty), 0) AS filled_qty "
+            "FROM `order` o LEFT JOIN fill f ON f.order_id = o.id "
+            "GROUP BY o.id ORDER BY o.id DESC LIMIT %s",
             (int(limit),),
         )
         return cursor.fetchall()
@@ -49,13 +56,19 @@ def mark_canceled(order_id: int) -> None:
 
 
 def list_by_date(date_dash: str) -> list[dict]:
-    """해당 날짜(YYYY-MM-DD) 주문 — 일별 상세용 (생성순)."""
+    """해당 날짜(YYYY-MM-DD) 주문 — 일별 상세용 (생성순).
+
+    fill_price = 실제 체결 수량가중평균가(미체결 NULL). price 는 주문 시점 참조가.
+    """
     with get_db() as (conn, cursor):
         cursor.execute(
-            "SELECT id, stk_cd, side, qty, price, ord_type, mode, status, "
-            "kiwoom_ord_no, created_at "
-            "FROM `order` WHERE created_at >= %s AND created_at < %s + INTERVAL 1 DAY "
-            "ORDER BY id",
+            "SELECT o.id, o.stk_cd, o.side, o.qty, o.price, o.ord_type, o.mode, o.status, "
+            "o.kiwoom_ord_no, o.created_at, "
+            "ROUND(SUM(f.qty * f.price) / NULLIF(SUM(f.qty), 0)) AS fill_price, "
+            "COALESCE(SUM(f.qty), 0) AS filled_qty "
+            "FROM `order` o LEFT JOIN fill f ON f.order_id = o.id "
+            "WHERE o.created_at >= %s AND o.created_at < %s + INTERVAL 1 DAY "
+            "GROUP BY o.id ORDER BY o.id",
             (date_dash, date_dash),
         )
         return cursor.fetchall()

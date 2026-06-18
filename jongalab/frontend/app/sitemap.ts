@@ -70,11 +70,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   routes.push(...reportRoutes);
 
-  // 날짜별 종목 리포트 상세 페이지
+  // 날짜별 종목 리포트 상세 페이지 (당일은 갭 데이터 미확정 → 카드 페이지 fetch 캐시 오염 방지로 제외)
+  const todaySeoul = new Date().toLocaleDateString("en-CA", {
+    timeZone: "Asia/Seoul",
+  });
   const stockReportsByDate = await Promise.all(
-    Array.from(reportMap.keys()).map((date) =>
-      fetchJson<StockReport[]>(`/api/stock-report/${encodeURIComponent(date)}`, [])
-    )
+    Array.from(reportMap.keys())
+      .filter((date) => date < todaySeoul)
+      .map((date) =>
+        fetchJson<StockReport[]>(`/api/stock-report/${encodeURIComponent(date)}`, [])
+      )
   );
 
   const stockReportRoutes: MetadataRoute.Sitemap = stockReportsByDate

@@ -68,7 +68,7 @@ export default async function HistoryPage() {
                       </div>
                       <div className="text-right">
                         <p className="font-semibold tabular-nums">{o.qty}주</p>
-                        <p className="text-xs text-slate-400 tabular-nums">{wonExact(o.price)}</p>
+                        <p className="text-xs text-slate-400 tabular-nums">{wonExact(o.fill_price ?? o.price)}</p>
                       </div>
                     </li>
                   );

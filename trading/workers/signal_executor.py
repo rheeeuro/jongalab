@@ -84,6 +84,10 @@ def main() -> int:
     logger.info("가용현금 %d × (거래소점수 %.0f / 전체 %.0f) → 시드 %d원, 후보 %d종목",
                 cash, venue_score, total_score, seed, len(venue_items))
 
+    # 알림용 거래소별 시드 분해 (이 거래소=seed, 반대편=잔여 점수 몫)
+    other_seed = int(cash * (total_score - venue_score) / total_score) if total_score > 0 else 0
+    krx_seed, nxt_seed = (seed, other_seed) if args.venue == "krx" else (other_seed, seed)
+
     cands: list[dict] = [
         {"sig": sig, "stk_cd": stk, "score": score,
          "price": engine.data.get_current_price(stk)}
@@ -112,18 +116,21 @@ def main() -> int:
             signal_repo.update_status(sig["id"], "rejected", note=str(e))
 
     # 4) 관리자 텔레그램 매수 현황 전송
-    _notify_buys(args.venue.upper(), trade_date, seed, bought)
+    _notify_buys(args.venue.upper(), trade_date, seed, cash, krx_seed, nxt_seed, bought)
 
     logger.info("매수 집행 종료 [%s]", args.venue.upper())
     return 0
 
 
-def _notify_buys(venue: str, trade_date: str, seed: int, bought: list[dict]) -> None:
+def _notify_buys(venue: str, trade_date: str, seed: int, cash: int,
+                 krx_seed: int, nxt_seed: int, bought: list[dict]) -> None:
     """매수 현황을 관리자에게 텔레그램 전송 (paper/live 무관, 전송 실패는 무시)."""
     try:
         d = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+        breakdown = f"전체시드 {cash:,}원 (KRX {krx_seed:,} / NXT {nxt_seed:,})"
         if not bought:
-            msg = f"🛒 *[{venue}] 매수 현황* {d}\n시드 {seed:,}원 — 매수된 종목 없음"
+            msg = (f"🛒 *[{venue}] 매수 현황* {d}\n{breakdown}\n"
+                   f"시드 {seed:,}원 — 매수된 종목 없음")
         else:
             total = sum(b["qty"] * b["price"] for b in bought)
             lines = "\n".join(
@@ -132,6 +139,7 @@ def _notify_buys(venue: str, trade_date: str, seed: int, bought: list[dict]) -> 
             )
             msg = (
                 f"🛒 *[{venue}] 매수 현황* {d}\n"
+                f"{breakdown}\n"
                 f"시드 {seed:,}원 → {len(bought)}종목 / 매수액 {total:,}원\n"
                 f"──────────────────\n{lines}"
             )
