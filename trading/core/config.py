@@ -52,6 +52,13 @@ KIWOOM_SECRET_KEY = os.getenv('KIWOOM_SECRET_KEY', '')
 BUY_EXCHANGE = os.getenv('BUY_EXCHANGE', 'SOR')
 SELL_EXCHANGE = os.getenv('SELL_EXCHANGE', 'SOR')
 
+# ── 청산 스탑선 튜닝 ──
+# NXT 절반 매도 후 잔량의 스탑/저가이탈선을 시초가 대비 몇 % 아래로 둘지(>0). 시초가를 그대로
+# 선으로 잡으면 절반 매도 직후 가격이 시초가에서 한 틱만 눌려도(갭상승은 추가상승 무산, 갭하락은
+# 회복 기다리기 전에) 잔량이 즉시 털린다. 시초가*(1 - pct/100) 로 버퍼를 둬 잔량을 조금 더 들고 간다.
+# 갭상승 스탑선·갭하락 저가이탈선 양쪽에 동일 적용.
+STOP_BUFFER_PCT = float(os.getenv('STOP_BUFFER_PCT', '0.5'))
+
 # ── ⚠️ 매매 안전장치 ──
 # 'paper': 모의(주문 미전송, 의도만 로깅·기록) / 'live': 실주문 전송. 기본값은 paper.
 TRADING_MODE = os.getenv('TRADING_MODE', 'paper').lower()

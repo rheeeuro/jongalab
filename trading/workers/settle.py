@@ -15,6 +15,7 @@ import argparse
 import logging
 from datetime import datetime
 
+from core.config import STOP_BUFFER_PCT
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.fill_sync import sync_fills
@@ -52,11 +53,14 @@ def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
                                     dmst_stex_tp="NXT", tag="nxt")  # NXT → 최유리IOC
             remaining = qty - half
             if remaining > 0:
-                # 잔량 감시계획: 스탑/저가이탈선 = 시초가
+                # 잔량 감시계획 스탑/저가이탈선 = 시초가에서 STOP_BUFFER_PCT% 아래(버퍼).
+                # 시초가를 그대로 잡으면 절반 매도 직후 한 틱만 눌려도 잔량이 즉시 털리므로,
+                # 갭상승(추가상승 여지)·갭하락(시초가 회복 대기) 모두 약간의 버퍼를 둔다.
+                stop_price = round(nxt_open * (1 - STOP_BUFFER_PCT / 100))
                 plan_repo.upsert_plan(trade_date, stk_cd, gap_dir, avg, nxt_open,
-                                      stop_price=nxt_open, note=f"nxt half={half}")
+                                      stop_price=stop_price, note=f"nxt half={half}")
                 logger.info("[NXT] %s 갭%s 절반매도 %d주 @%d (잔량 %d, 스탑 %d)",
-                            stk_cd, gap_dir, half, nxt_open, remaining, nxt_open)
+                            stk_cd, gap_dir, half, nxt_open, remaining, stop_price)
             else:
                 logger.info("[NXT] %s 갭%s 전량매도 %d주 @%d (잔량 0 — 감시계획 없음)",
                             stk_cd, gap_dir, half, nxt_open)
