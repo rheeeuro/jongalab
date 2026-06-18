@@ -1,6 +1,7 @@
 import { apiFetch } from "@/lib/api";
 import { won, wonExact, pnlClass, fmtDate, todayYYYYMMDD } from "@/lib/format";
 import type { HealthStatus, Position, DayDetail, DailySummary, NameMap } from "@/types";
+import RoundTrips from "@/components/RoundTrips";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ export default async function TodayPage() {
   const pnl = summary?.realized_pnl ?? 0;
   const nm = (code: string) => names[code] || code;
   const buys = day?.buys ?? [];
+  const trips = day?.roundtrips ?? [];
   const live = health?.mode === "live";
   const auto = !health?.kill_switch; // 킬스위치 OFF = 자동매매 작동중
 
@@ -34,6 +36,18 @@ export default async function TodayPage() {
           <Badge tone={auto ? "green" : "red"}>{auto ? "자동매매 작동중" : "자동매매 정지"}</Badge>
         </div>
       </section>
+
+      {/* 오늘 청산 결과 — 어제 산 종목을 오늘 얼마에 팔았나 (오늘 실현손익의 출처) */}
+      <Card title="오늘 청산한 종목" count={trips.length}>
+        {trips.length === 0 ? (
+          <Empty>오늘 청산한 종목이 없어요.</Empty>
+        ) : (
+          <>
+            <p className="-mt-1 mb-1 text-xs text-slate-400">어제 매수가 → 오늘 매도가</p>
+            <RoundTrips trips={trips} names={names} />
+          </>
+        )}
+      </Card>
 
       {/* 오늘 매수 종목 */}
       <Card title="오늘 매수한 종목" count={buys.length}>

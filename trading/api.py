@@ -172,23 +172,62 @@ def pnl_monthly(month: str | None = None):
     return {"month": month, "total": total, "days": days}
 
 
+def _build_roundtrips(date_dash: str, sells: list[dict], realized_map: dict) -> list[dict]:
+    """매도일(date_dash)의 매도를 직전 매수와 짝지어 종목별 라운드트립으로 만든다.
+
+    종가베팅은 전일 매수 → 당일 매도라, 당일 매도를 '얼마에 사서(직전 매수가) 얼마에 팔았고
+    (당일 매도가) 얼마 벌었는지(실현손익)' 한 줄로 보여주기 위한 집계. 실현손익(realized)은
+    감사로그 기준의 권위값이고, 매수가·매도가는 체결가(미체결이면 참조가) 표시값이다.
+    """
+    prior_buys = order_repo.latest_buys_before(date_dash)
+    agg: dict[str, dict] = {}  # 종목별 매도 수량/금액(=Σ 체결수량*체결가)
+    for o in sells:
+        cd = o["stk_cd"]
+        qty = o["filled_qty"] or o["qty"]
+        px = o["fill_price"] or o["price"]
+        a = agg.setdefault(cd, {"qty": 0, "amount": 0})
+        a["qty"] += qty
+        a["amount"] += qty * px
+    trips = []
+    for cd, a in agg.items():
+        sell_qty = a["qty"]
+        sell_price = round(a["amount"] / sell_qty) if sell_qty else 0
+        b = prior_buys.get(cd)
+        buy_price = (b["fill_price"] or b["price"]) if b else 0
+        bdt = b["created_at"] if b else None
+        trips.append({
+            "stk_cd": cd,
+            "buy_date": bdt.strftime("%Y%m%d") if hasattr(bdt, "strftime") else (str(bdt)[:10].replace("-", "") or None),
+            "buy_qty": (b["filled_qty"] or b["qty"]) if b else 0,
+            "buy_price": buy_price or 0,
+            "sell_qty": sell_qty,
+            "sell_price": sell_price,
+            "realized": realized_map.get(cd, 0),
+        })
+    # 실현손익 큰 순(이익 위 → 손실 아래)으로 정렬해 한눈에 보이게 한다.
+    trips.sort(key=lambda t: t["realized"], reverse=True)
+    return trips
+
+
 @app.get("/day")
 def day_detail(date: str | None = None):
-    """일별 상세 — 매수/매도/갭여부/실현손익. date=YYYYMMDD (기본 오늘)."""
+    """일별 상세 — 매수/매도/갭여부/실현손익 + 라운드트립(매수가→매도가). date=YYYYMMDD (기본 오늘)."""
     d = date or datetime.now().strftime("%Y%m%d")
     dash = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
     orders = order_repo.list_by_date(dash)
     realized_map = audit_log.realized_by_date(dash)
     plans = {p["stk_cd"]: p for p in settle_plan_repo.get_by_date(d)}
     state = risk_repo.get_state(d) or {}
+    sells = [o for o in orders if o["side"] == "sell"]
     return {
         "date": d,
         "realized_pnl": state.get("realized_pnl") or 0,
         "orders_count": state.get("orders_count") or 0,
         "buys": [o for o in orders if o["side"] == "buy"],
-        "sells": [o for o in orders if o["side"] == "sell"],
+        "sells": sells,
         "plans": list(plans.values()),       # 갭상승/하락 여부
         "realized_by_stock": realized_map,    # 종목별 실현손익
+        "roundtrips": _build_roundtrips(dash, sells, realized_map),  # 매수가→매도가→실현손익
     }
 
 

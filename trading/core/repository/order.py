@@ -91,6 +91,29 @@ def list_sells_by_date(date_dash: str) -> list[dict]:
         return cursor.fetchall()
 
 
+def latest_buys_before(date_dash: str) -> dict:
+    """각 종목의 'date_dash(YYYY-MM-DD) 0시 이전' 가장 최근 매수 1건 — 매도일 라운드트립 매칭용.
+
+    종가베팅은 전일 매수 → 익일 아침 매도라, 매도일의 매도와 짝지을 매수는 그 날짜 직전의
+    최신 매수다(주말/공휴일 간격 무관). 거부/취소/미전송은 제외.
+    반환: {stk_cd: {stk_cd, qty, price, fill_price, filled_qty, created_at}} (종목당 최신 1건).
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT o.stk_cd, o.qty, o.price, o.created_at, "
+            "ROUND(SUM(f.qty * f.price) / NULLIF(SUM(f.qty), 0)) AS fill_price, "
+            "COALESCE(SUM(f.qty), 0) AS filled_qty "
+            "FROM `order` o LEFT JOIN fill f ON f.order_id = o.id "
+            "WHERE o.side = 'buy' AND o.status NOT IN ('intended', 'rejected', 'canceled') "
+            "AND o.created_at < %s "
+            "GROUP BY o.id ORDER BY o.id",
+            (date_dash,),
+        )
+        rows = cursor.fetchall()
+    # id 오름차순 → 같은 종목이 여러 번이면 마지막(최신)이 덮어써 종목당 최신 1건만 남는다.
+    return {r["stk_cd"]: r for r in rows}
+
+
 def find_by_idempotency_key(key: str) -> Optional[dict]:
     """동일 멱등성 키 주문이 이미 있는지 확인 (중복 전송 차단)."""
     with get_db() as (conn, cursor):

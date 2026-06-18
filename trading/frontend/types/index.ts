@@ -81,6 +81,17 @@ export interface DayPlan {
   active: number;
 }
 
+/** 라운드트립 — 전일 매수 → 당일 매도 한 묶음 (얼마에 사서 얼마에 팔았나 + 실현손익). */
+export interface RoundTrip {
+  stk_cd: string;
+  buy_date: string | null; // YYYYMMDD (직전 매수 거래일)
+  buy_qty: number;
+  buy_price: number;
+  sell_qty: number;
+  sell_price: number;
+  realized: number; // 종목별 실현손익 (감사로그 권위값)
+}
+
 export interface DayDetail {
   date: string;
   realized_pnl: number;
@@ -89,6 +100,7 @@ export interface DayDetail {
   sells: Order[];
   plans: DayPlan[];
   realized_by_stock: Record<string, number>;
+  roundtrips: RoundTrip[];
 }
 
 export interface DailySummary {

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { won, wonExact, wonCompact, pnlClass, fmtDate } from "@/lib/format";
 import type { MonthlyPnl, DayDetail, NameMap } from "@/types";
+import RoundTrips from "@/components/RoundTrips";
 
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -151,15 +152,21 @@ export default function CalendarPage() {
             <div className="flex min-h-[140px] items-center justify-center">
               <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
             </div>
-          ) : !detail || (detail.buys.length === 0 && detail.plans.length === 0) ? (
+          ) : !detail || (detail.buys.length === 0 && (detail.roundtrips?.length ?? 0) === 0) ? (
             <div className="flex min-h-[140px] items-center justify-center">
               <p className="text-sm text-slate-400">이 날의 매매 기록이 없어요.</p>
             </div>
           ) : (
             <div className="mt-3 space-y-4">
+              {(detail.roundtrips?.length ?? 0) > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-semibold text-slate-400">청산 (매수가 → 매도가)</p>
+                  <RoundTrips trips={detail.roundtrips} names={names} plans={detail.plans} />
+                </div>
+              )}
               {detail.buys.length > 0 && (
                 <div>
-                  <p className="mb-1 text-xs font-semibold text-slate-400">매수</p>
+                  <p className="mb-1 text-xs font-semibold text-slate-400">이 날 매수</p>
                   <ul className="divide-y divide-slate-100 dark:divide-slate-800">
                     {detail.buys.map((o) => (
                       <li key={o.id} className="flex items-center justify-between py-2">
@@ -167,29 +174,6 @@ export default function CalendarPage() {
                         <span className="text-sm text-slate-500 tabular-nums">{o.qty}주 · {wonExact(o.fill_price ?? o.price)}</span>
                       </li>
                     ))}
-                  </ul>
-                </div>
-              )}
-              {detail.plans.length > 0 && (
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-slate-400">청산 (갭/손익)</p>
-                  <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {detail.plans.map((p) => {
-                      const r = detail.realized_by_stock?.[p.stk_cd] ?? 0;
-                      return (
-                        <li key={p.stk_cd} className="flex items-center justify-between py-2">
-                          <span className="flex items-center gap-2">
-                            <span className="font-medium">{nm(p.stk_cd)}</span>
-                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                              p.gap_dir === "up" ? "bg-rose-100 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400"
-                                                 : "bg-blue-100 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400"}`}>
-                              {p.gap_dir === "up" ? "갭상승" : "갭하락"}
-                            </span>
-                          </span>
-                          <span className={`text-sm font-semibold tabular-nums ${pnlClass(r)}`}>{won(r)}</span>
-                        </li>
-                      );
-                    })}
                   </ul>
                 </div>
               )}
