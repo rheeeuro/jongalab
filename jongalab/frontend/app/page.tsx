@@ -5,7 +5,6 @@ import { TopPicks } from "@/components/today/TopPicks";
 import { LeadingSectorsStrip } from "@/components/today/LeadingSectorsStrip";
 import { MentionPulse } from "@/components/today/MentionPulse";
 import { ContentTeaser } from "@/components/today/ContentTeaser";
-import { RecentReportsRow } from "@/components/today/RecentReportsRow";
 import { IndicesStrip, IndicesStripSkeleton } from "@/components/today/IndicesStrip";
 import { Suspense } from "react";
 
@@ -19,10 +18,6 @@ async function getContents(): Promise<PaginatedResponse<ContentAnalysis>> {
 
 async function getDailySummary(): Promise<DailySummary | null> {
   return apiFetch(`/api/daily-summary`, null);
-}
-
-async function getDailySummaryList(): Promise<DailySummary[]> {
-  return apiFetch(`/api/daily-summary-list?limit=5`, []);
 }
 
 async function getMentionStats(): Promise<MentionStats | null> {
@@ -57,11 +52,10 @@ async function IndicesSection() {
 }
 
 export default async function HomePage() {
-  const [contents, summary, summaryList, mentionStats, sectorReport] =
+  const [contents, summary, mentionStats, sectorReport] =
     await Promise.all([
       getContents(),
       getDailySummary(),
-      getDailySummaryList(),
       getMentionStats(),
       getLatestSectorReport(),
     ]);
@@ -77,7 +71,6 @@ export default async function HomePage() {
         <LeadingSectorsStrip sectors={sectorReport} />
         <MentionPulse stats={mentionStats} />
         <ContentTeaser items={contents.data || []} />
-        <RecentReportsRow reports={summaryList} />
       </div>
     </main>
   );

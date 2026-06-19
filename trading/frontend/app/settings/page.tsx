@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Save, RotateCcw, Loader2, ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 interface RiskConfig {
   MAX_ORDERS_PER_DAY: number;
@@ -156,6 +157,11 @@ export default function RiskSettingsPage() {
         </Link>
         <h1 className="mt-2 text-xl font-bold sm:text-2xl">리스크 설정</h1>
         <p className="mt-1 text-sm text-slate-500">한도 초과 시 주문이 차단됩니다.</p>
+      </div>
+
+      {/* 화면 테마 */}
+      <div className="mb-5 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 dark:border-slate-800 dark:bg-slate-900">
+        <ThemeToggle variant="row" />
       </div>
 
       {/* 토스트 */}
