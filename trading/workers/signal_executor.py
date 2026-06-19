@@ -79,7 +79,9 @@ def main() -> int:
     venue_score = sum(s for _, _, s in venue_items)
 
     # 2) 시드 = 가용현금의 점수비례 몫 (다른 거래소 몫은 예약, 해당 시간대에 집행)
-    cash = to_int(engine.client.get_deposit().get("ord_alow_amt"))
+    #    현금주문가능금액(100stk_ord_alow_amt)을 쓴다 — 종가베팅은 당일 매도대금을
+    #    종가에 재투입하므로 미정산 매도분을 제외하는 ord_alow_amt 는 시드를 과소산정한다.
+    cash = to_int(engine.client.get_deposit().get("100stk_ord_alow_amt"))
     seed = int(cash * venue_score / total_score) if total_score > 0 else 0
     logger.info("가용현금 %d × (거래소점수 %.0f / 전체 %.0f) → 시드 %d원, 후보 %d종목",
                 cash, venue_score, total_score, seed, len(venue_items))
