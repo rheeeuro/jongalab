@@ -74,23 +74,6 @@ def list_by_date(date_dash: str) -> list[dict]:
         return cursor.fetchall()
 
 
-def list_sells_by_date(date_dash: str) -> list[dict]:
-    """해당 거래일(YYYY-MM-DD)의 체결성 매도 주문 — NXT+KRX 단계 합산 알림용 (거부/취소/미전송 제외).
-
-    같은 종목이 단계별(nxt-half/krx/stop)로 여러 건일 수 있어 호출부에서 종목별로 합산한다.
-    price 는 주문 시점 참조가(시장가/IOC 는 실체결가 사후 반영).
-    """
-    with get_db() as (conn, cursor):
-        cursor.execute(
-            "SELECT stk_cd, qty, price FROM `order` "
-            "WHERE side = 'sell' AND status NOT IN ('intended', 'rejected', 'canceled') "
-            "AND created_at >= %s AND created_at < %s + INTERVAL 1 DAY "
-            "ORDER BY id",
-            (date_dash, date_dash),
-        )
-        return cursor.fetchall()
-
-
 def latest_buys_before(date_dash: str) -> dict:
     """각 종목의 'date_dash(YYYY-MM-DD) 0시 이전' 가장 최근 매수 1건 — 매도일 라운드트립 매칭용.
 

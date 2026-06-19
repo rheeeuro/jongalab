@@ -19,6 +19,7 @@ from core.config import STOP_BUFFER_PCT
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.fill_sync import sync_fills
+from core.repository import audit_log
 from core.repository import order as order_repo
 from core.repository import position as position_repo
 from core.repository import settle_plan as plan_repo
@@ -121,46 +122,55 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
             logger.error("[KRX] 비-NXT 청산 실패 [%s]: %s", stk_cd, e)
 
     # 관리자 텔레그램 청산 현황 전송 (당일 NXT+KRX 합산)
-    _notify_sells(trade_date)
+    _notify_sells(engine, trade_date)
 
 
-def _notify_sells(trade_date: str) -> None:
+def _notify_sells(engine: ExecutionEngine, trade_date: str) -> None:
     """당일 청산 현황을 관리자에게 텔레그램 전송 (paper/live 무관, 전송 실패는 무시).
 
-    KRX 단계만이 아니라 NXT(08:05 절반)+KRX(09:05 잔량) 단계를 종목별로 합산해 '최종' 현황을 보고한다.
-    live 는 시장가/IOC 라 실체결가가 사후(fill_sync) 반영되므로, 여기 매도가·손익은
-    주문 시점 참조가(가중평균) 기준의 '참조/예상'값임을 명시한다.
+    대시보드와 **같은 권위값**으로 보고한다: 실체결가(fill_price)·체결수량으로 집계하고,
+    실현손익은 audit_log(체결 기반) 권위값을 쓴다. 참조가/주문수량 추정이 부호까지 뒤집을 만큼
+    실제와 괴리됐던 문제를 막기 위함. 전송 직전 체결을 한 번 더 동기화한다(live; paper no-op).
+    NXT(08:05 절반)+KRX(09:05 잔량) 단계를 종목별로 합산해 '최종' 현황을 보고한다.
     """
     try:
+        sync_fills(engine.client)  # 최신 체결 반영 후 집계 (참조가/미체결 괴리 최소화)
         d = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
-        sells = order_repo.list_sells_by_date(d)
+        sells = [o for o in order_repo.list_by_date(d) if o["side"] == "sell"
+                 and o["status"] not in ("intended", "rejected", "canceled")]
         if not sells:
             return
         names = signal_repo.get_name_map()
-        # 종목별 합산: 총수량·매도금액(Σ qty*참조가). 같은 종목의 NXT+KRX 단계 주문을 합친다.
+        realized_map = audit_log.realized_by_date(d)  # 종목별 실현손익(권위값)
+        # 종목별 합산: 체결수량·체결금액(Σ 체결수량*체결가). 미체결분만 참조가/주문수량으로 폴백.
         agg: dict[str, dict] = {}
+        pending = False
         for s in sells:
+            qty = int(s["filled_qty"] or 0)
+            px = s["fill_price"]
+            if qty <= 0 or px is None:  # 아직 체결 미반영 → 참조가/주문수량 폴백
+                qty, px, pending = s["qty"], s["price"], True
             a = agg.setdefault(s["stk_cd"], {"qty": 0, "amount": 0})
-            a["qty"] += s["qty"]
-            a["amount"] += s["qty"] * s["price"]
-        lines, total, est_pnl = [], 0, 0
+            a["qty"] += qty
+            a["amount"] += qty * px
+        lines, total, pnl_total = [], 0, 0
         for cd, a in agg.items():
             qty, amount = a["qty"], a["amount"]
-            vwap = round(amount / qty) if qty else 0  # 단계 가중평균 매도가
-            avg = (position_repo.get_position(cd) or {}).get("avg_price", 0) or 0
-            pnl = (vwap - avg) * qty
+            vwap = round(amount / qty) if qty else 0  # 체결 가중평균 매도가
+            pnl = realized_map.get(cd, 0)
             total += amount
-            est_pnl += pnl
+            pnl_total += pnl
             lines.append(
-                f"• {names.get(cd, cd)}(`{cd}`) {qty}주 @{vwap:,} "
-                f"(평단 {avg:,} · 예상 {pnl:+,}원)"
+                f"• {names.get(cd, cd)}(`{cd}`) {qty}주 @{vwap:,} (실현 {pnl:+,}원)"
             )
+        note = ("_일부 미체결분은 참조가 기준 — 체결 후 정정_" if pending
+                else "_실체결가·실현손익(audit) 기준_")
         msg = (
             f"💰 *청산 현황 (NXT+KRX 합산)* {d}\n"
             f"{len(agg)}종목 전량매도 / 매도액 {total:,}원\n"
-            f"예상 실현손익 {est_pnl:+,}원\n"
+            f"실현손익 {pnl_total:+,}원\n"
             f"──────────────────\n" + "\n".join(lines) + "\n"
-            f"_매도가·손익은 주문 시점 참조값(실체결 사후 반영)_"
+            f"{note}"
         )
         notify_admin(msg)
     except Exception as e:
