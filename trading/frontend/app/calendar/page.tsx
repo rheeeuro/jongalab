@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
-import { won, wonExact, wonCompact, pnlClass, fmtDate } from "@/lib/format";
+import { won, wonExact, wonCompact, pnlClass, fmtDate, todayYYYYMMDD } from "@/lib/format";
 import type { MonthlyPnl, DayDetail, NameMap } from "@/types";
 import RoundTrips from "@/components/RoundTrips";
 
@@ -51,6 +51,11 @@ export default function CalendarPage() {
   }, [month]);
 
   async function openDay(date: string) {
+    if (selected === date) {
+      setSelected(null);
+      setDetail(null);
+      return;
+    }
     setSelected(date);
     setLoadingDay(true);
     setDetail(null);
@@ -79,7 +84,11 @@ export default function CalendarPage() {
     ...Array(firstDay).fill(null),
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ];
+  while (cells.length % 7 !== 0) cells.push(null); // 마지막 주 패딩
+  const weeks: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
   const dayKey = (d: number) => `${month}${String(d).padStart(2, "0")}`;
+  const today = todayYYYYMMDD();
   const nm = (c: string) => names[c] || c;
 
   return (
@@ -117,17 +126,32 @@ export default function CalendarPage() {
             const v = info?.realized_pnl ?? 0;
             const has = !!info;
             const isSel = selected === key;
+            const isToday = key === today;
+            const isWeekend = i % 7 === 0 || i % 7 === 6; // 0=일, 6=토
             return (
               <button
                 key={key}
                 onClick={() => openDay(key)}
+                disabled={isWeekend}
                 className={`flex aspect-square flex-col items-center justify-center rounded-xl transition-colors ${
-                  isSel ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "hover:bg-slate-100 dark:hover:bg-slate-800"
+                  isWeekend
+                    ? "cursor-not-allowed opacity-40"
+                    : isSel
+                    ? "bg-slate-200 dark:bg-slate-700"
+                    : isToday
+                    ? "ring-1 ring-inset ring-amber-400 dark:ring-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    : "hover:bg-slate-100 dark:hover:bg-slate-800"
                 }`}
               >
-                <span className={`text-xs ${isSel ? "" : "text-slate-600 dark:text-slate-300"}`}>{d}</span>
+                <span
+                  className={`text-xs ${
+                    isToday ? "font-bold text-amber-500 dark:text-amber-400" : "text-slate-600 dark:text-slate-300"
+                  }`}
+                >
+                  {d}
+                </span>
                 {has && v !== 0 && (
-                  <span className={`mt-0.5 text-[9px] font-bold leading-none ${isSel ? "" : pnlClass(v)}`}>
+                  <span className={`mt-0.5 text-[9px] font-bold leading-none ${pnlClass(v)}`}>
                     {wonCompact(v)}
                   </span>
                 )}
@@ -140,7 +164,7 @@ export default function CalendarPage() {
 
       {/* 선택 일자 상세 */}
       {selected && (
-        <section className="mt-4 rounded-2xl bg-white p-5 shadow-sm dark:bg-slate-900">
+        <section key={selected} className="animate-detail-in mt-4 rounded-2xl bg-white p-5 shadow-sm dark:bg-slate-900">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold">{fmtDate(selected)}</h2>
             <span className={`text-base font-extrabold ${pnlClass(detail?.realized_pnl ?? 0)}`}>
@@ -181,6 +205,32 @@ export default function CalendarPage() {
           )}
         </section>
       )}
+
+      {/* 주간 실현손익 */}
+      <section className="mt-4 rounded-2xl bg-white p-5 shadow-sm dark:bg-slate-900">
+        <h2 className="text-base font-bold">주간 실현손익</h2>
+        <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+          {weeks.map((week, wi) => {
+            const days = week.filter((d): d is number => d !== null);
+            const weekSum = days.reduce((s, d) => s + (data?.days?.[dayKey(d)]?.realized_pnl ?? 0), 0);
+            const weekHas = days.some((d) => data?.days?.[dayKey(d)]);
+            const first = days[0];
+            const last = days[days.length - 1];
+            return (
+              <li key={`w${wi}`} className="flex items-center justify-between py-2.5">
+                <span className="text-sm text-slate-500">
+                  {wi + 1}주차 <span className="text-slate-400">· {mo}/{first}~{mo}/{last}</span>
+                </span>
+                {weekHas ? (
+                  <span className={`text-sm font-bold tabular-nums ${pnlClass(weekSum)}`}>{won(weekSum)}</span>
+                ) : (
+                  <span className="text-sm text-slate-300">·</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
     </main>
   );
 }
