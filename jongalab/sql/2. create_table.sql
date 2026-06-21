@@ -118,6 +118,26 @@ CREATE TABLE IF NOT EXISTS strategy_config (
     CHECK (id = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 주간 매매성과 기반 가중치 튜닝 제안 (GPT 제안 → 수동 승인 후 strategy_config 반영)
+CREATE TABLE IF NOT EXISTS weight_tuning_proposal (
+    id                 INT AUTO_INCREMENT PRIMARY KEY,
+    week_start         DATE NOT NULL,                       -- 분석 대상 주의 월요일
+    week_end           DATE NOT NULL,                       -- 분석 대상 주의 금요일
+    status             VARCHAR(10) NOT NULL DEFAULT 'pending', -- pending / approved / rejected
+    sample_count       INT DEFAULT 0,                       -- 분석에 쓴 매매 종목 수
+    winners_count      INT DEFAULT 0,
+    losers_count       INT DEFAULT 0,
+    total_realized_pnl BIGINT DEFAULT 0,                    -- 주간 실현손익 합(원)
+    current_weights    JSON NOT NULL,                       -- 제안 시점의 종합점수 구성 가중치
+    proposed_weights   JSON NOT NULL,                       -- GPT가 제안(+클램프)한 가중치
+    rationale          TEXT,                                -- GPT 근거 설명
+    dataset            JSON,                                -- winners/losers 지표 요약(감사·표시용)
+    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    applied_at         TIMESTAMP NULL DEFAULT NULL,
+    UNIQUE KEY uq_week (week_start),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS daily_sector_report (
     id             INT AUTO_INCREMENT PRIMARY KEY,
     report_date    DATE NOT NULL,

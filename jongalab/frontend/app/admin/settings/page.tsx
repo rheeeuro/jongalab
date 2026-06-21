@@ -41,6 +41,13 @@ interface StrategyConfig {
   THEME_PERIOD_DAYS: string;
   THEME_STOCK_BONUS: number;
   CONTENT_SCORE_MAX: number;
+  SCORE_SUPPLY_BONUS: number;
+  SCORE_MA_ALIGNED_BONUS: number;
+  SCORE_NEAR_HIGH_BONUS: number;
+  SCORE_PREFERRED_VALUE_BONUS: number;
+  SCORE_MIN_VALUE_BONUS: number;
+  SCORE_LEADER_BONUS: number;
+  SCORE_EXTRA_SUPPLY_DAY_BONUS: number;
   EXCLUDE_KEYWORDS: string[];
 }
 
@@ -114,6 +121,18 @@ const SECTIONS = [
       { key: "THEME_PERIOD_DAYS", label: "테마 수익률 기간", unit: "일", type: "text" as const },
       { key: "THEME_STOCK_BONUS", label: "테마주 가산점", unit: "점", type: "number" as const },
       { key: "CONTENT_SCORE_MAX", label: "콘텐츠 분석 최대 점수", unit: "점", type: "number" as const },
+    ],
+  },
+  {
+    title: "종합점수 구성 가중치 (주간 튜닝 대상)",
+    fields: [
+      { key: "SCORE_SUPPLY_BONUS", label: "수급 가점", unit: "점", type: "number" as const },
+      { key: "SCORE_MA_ALIGNED_BONUS", label: "정배열 가점", unit: "점", type: "number" as const },
+      { key: "SCORE_NEAR_HIGH_BONUS", label: "신고가 근처 가점", unit: "점", type: "number" as const },
+      { key: "SCORE_PREFERRED_VALUE_BONUS", label: "거래대금 우선 가점", unit: "점", type: "number" as const },
+      { key: "SCORE_MIN_VALUE_BONUS", label: "거래대금 최소 가점", unit: "점", type: "number" as const },
+      { key: "SCORE_LEADER_BONUS", label: "대장주 가점", unit: "점", type: "number" as const },
+      { key: "SCORE_EXTRA_SUPPLY_DAY_BONUS", label: "장기 연속수급 가점(일당)", unit: "점", type: "number" as const },
     ],
   },
   {

@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass, field
 from ollama import Client
 
-from core.config import OLLAMA_HOST, OLLAMA_MODEL
+from core.config import OLLAMA_HOST, OLLAMA_MODEL, OPENAI_API_KEY, OPENAI_MODEL
 from core.ai_utils import parse_ai_json
 
 
@@ -66,4 +66,37 @@ def analyze_content(prompt: str, model: str | None = None, **chat_options) -> An
         return None
     except Exception as e:
         logging.error(f"AI 분석 에러: {e}")
+        return None
+
+
+_openai_client = None
+
+
+def _get_openai_client():
+    """OpenAI 클라이언트 지연 초기화 (키 없으면 사용처에서만 실패하도록)."""
+    global _openai_client
+    if _openai_client is None:
+        from openai import OpenAI
+        _openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    return _openai_client
+
+
+def complete_json(prompt: str, *, model: str | None = None, temperature: float = 0.1) -> dict | None:
+    """OpenAI(GPT)에 프롬프트를 보내 JSON 응답을 파싱해 dict 로 반환 (실패 시 None).
+
+    일일 다이제스트와 동일하게 OpenAI 를 쓰되, 워커가 SDK 를 직접 부르지 않도록 이 추상화를 경유한다.
+    구조화된 의사결정(예: 주간 가중치 튜닝 제안)에 사용.
+    """
+    try:
+        client = _get_openai_client()
+        response = client.chat.completions.create(
+            model=model or OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+        )
+        raw_content = response.choices[0].message.content
+        logging.info(f"GPT 원본 응답:\n{raw_content}")
+        return parse_ai_json(raw_content)
+    except Exception as e:
+        logging.error(f"GPT 응답 에러: {e}")
         return None

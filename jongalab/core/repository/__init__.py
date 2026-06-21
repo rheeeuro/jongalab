@@ -53,6 +53,20 @@ from core.repository.sector_report import (
 from core.repository.strategy_config import (
     get_strategy_config,
     update_strategy_config,
+    SCORE_WEIGHT_KEYS,
+)
+
+from core.repository.trade_result import (
+    get_weekly_trade_results,
+)
+
+from core.repository.weight_tuning import (
+    save_proposal,
+    get_proposal,
+    get_latest_proposal,
+    list_proposals,
+    mark_applied,
+    mark_rejected,
 )
 
 from core.repository.telegram_user import (

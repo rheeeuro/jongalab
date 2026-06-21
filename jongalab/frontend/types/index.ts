@@ -188,3 +188,39 @@ export interface MentionStats {
   dropped_unmapped_count: number;
   sectors: MentionSector[];
 }
+export type WeightMap = Record<string, number>;
+
+export interface WeightTuningSample {
+  stk_cd: string;
+  name: string;
+  trade_date: string;
+  realized_pnl: number;
+  outcome: 'WIN' | 'LOSS' | 'FLAT';
+  score: number;
+  supply_score: number;
+  ma_aligned: boolean;
+  near_high: boolean;
+  trading_value: number;
+  is_leader: boolean;
+  is_theme_stock: boolean;
+  supply_days: number;
+  content_score: number;
+  change_pct: number;
+}
+
+export interface WeightTuningProposal {
+  id: number;
+  week_start: string;
+  week_end: string;
+  status: 'pending' | 'approved' | 'rejected' | 'expired';
+  sample_count: number;
+  winners_count: number;
+  losers_count: number;
+  total_realized_pnl: number;
+  current_weights: WeightMap;
+  proposed_weights: WeightMap;
+  rationale: string | null;
+  dataset: WeightTuningSample[] | null;
+  created_at: string;
+  applied_at: string | null;
+}

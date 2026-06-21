@@ -133,3 +133,50 @@ DAILY_DIGEST_PROMPT = """
 }}
 ```
 """
+
+# 주간 가중치 튜닝 프롬프트 (current_weights + dataset_table 플레이스홀더)
+WEIGHT_TUNING_PROMPT = """당신은 한국 주식 종가베팅 전략의 퀀트 분석가입니다.
+종가베팅은 '당일 종가에 매수 → 익일 아침에 매도'하는 단기 전략이며, 매수 후보는 아래 지표들을
+가중합한 '종합점수'로 선정됩니다. 지난 한 주간 실제 매매된 종목들의 종합점수 지표와 실현손익을
+분석해, 오른 종목(WIN)과 떨어진 종목(LOSS)을 가른 지표가 무엇인지 파악하고 가중치를 세부 조정하세요.
+
+[현재 종합점수 구성 가중치]
+{current_weights}
+
+가중치 의미 (모든 값은 가점이며 소수 첫째자리까지 가능. 최종 종합점수는 가점들의 최대 합으로 100점 만점 환산됨):
+- SCORE_SUPPLY_BONUS: 5일 수급점수(0~100) 비율만큼 부여되는 최대 가점 (종합점수 기여의 핵심)
+- SCORE_MA_ALIGNED_BONUS: 이동평균 정배열 가점
+- SCORE_NEAR_HIGH_BONUS: 신고가 근처 가점
+- SCORE_PREFERRED_VALUE_BONUS / SCORE_MIN_VALUE_BONUS: 거래대금 상위/최소 기준 충족 가점
+- SCORE_LEADER_BONUS: 섹터 대장주 가점
+- SCORE_EXTRA_SUPPLY_DAY_BONUS: 5일 초과 장기 연속 수급 1일당 가점
+- THEME_STOCK_BONUS: 오늘의 테마주 가점
+- CONTENT_SCORE_MAX: 콘텐츠(유튜브/텔레그램) 분석 가점 상한
+
+[지난 주 매매 결과 — 종목별]
+{dataset_table}
+
+[조정 규칙]
+1. WIN 종목에서 높고 LOSS 종목에서 낮았던 지표의 가중치는 올리고, 그 반대는 내립니다.
+2. 각 가중치는 현재값 대비 최대 ±15% 까지만 조정합니다(표본이 한 주뿐이므로 과감한 변경 금지).
+3. SCORE_SUPPLY_BONUS 는 수급 중심 전략의 핵심이므로 10~80 범위를 벗어나지 않습니다.
+4. 모든 값은 소수 첫째자리까지만 사용합니다.
+5. 표본이 적거나 지표 간 차이가 불분명하면 현재값을 유지합니다.
+
+반드시 아래 JSON 형식으로만 답하세요. weights 에는 위 9개 키를 모두 포함하고, rationale 에는
+어떤 지표가 승패를 갈랐고 왜 그렇게 조정했는지 2~4문장으로 한국어로 설명하세요.
+{{
+    "weights": {{
+        "SCORE_SUPPLY_BONUS": 40,
+        "SCORE_MA_ALIGNED_BONUS": 10,
+        "SCORE_NEAR_HIGH_BONUS": 10,
+        "SCORE_PREFERRED_VALUE_BONUS": 15,
+        "SCORE_MIN_VALUE_BONUS": 8,
+        "SCORE_LEADER_BONUS": 10,
+        "SCORE_EXTRA_SUPPLY_DAY_BONUS": 3,
+        "THEME_STOCK_BONUS": 15,
+        "CONTENT_SCORE_MAX": 10
+    }},
+    "rationale": "..."
+}}
+"""

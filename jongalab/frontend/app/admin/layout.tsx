@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
-import { Lock, Tags, SlidersHorizontal, Rss, Send } from "lucide-react";
+import { Lock, Tags, SlidersHorizontal, Rss, Send, Scale } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -10,6 +10,7 @@ const ADMIN_TABS = [
   { href: "/admin/sources", label: "소스 관리", icon: Rss },
   { href: "/admin/telegram-users", label: "텔레그램 유저", icon: Send },
   { href: "/admin/settings", label: "전략 설정", icon: SlidersHorizontal },
+  { href: "/admin/weight-tuning", label: "가중치 튜닝", icon: Scale },
 ];
 
 export default function AdminLayout({

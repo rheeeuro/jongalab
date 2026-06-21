@@ -43,11 +43,34 @@ _DEFAULTS = {
     "THEME_PERIOD_DAYS": "10",
     "THEME_STOCK_BONUS": 15,
     "CONTENT_SCORE_MAX": 10,
+    # 종합점수 구성 가중치 (주간 매매성과 기반 GPT 튜닝 대상) — score_candidate() 가 사용
+    "SCORE_SUPPLY_BONUS": 40.0,
+    "SCORE_MA_ALIGNED_BONUS": 10,
+    "SCORE_NEAR_HIGH_BONUS": 10,
+    "SCORE_PREFERRED_VALUE_BONUS": 15,
+    "SCORE_MIN_VALUE_BONUS": 8,
+    "SCORE_LEADER_BONUS": 10,
+    "SCORE_EXTRA_SUPPLY_DAY_BONUS": 3,
     "EXCLUDE_KEYWORDS": [
         "ETF", "ETN", "KODEX", "TIGER", "KBSTAR",
         "ARIRANG", "SOL", "HANARO", "RISE",
     ],
 }
+
+
+# 종합점수 구성 가중치 키 (주간 매매성과 기반 GPT 튜닝 대상) — 워커/라우터가 공유.
+# score_candidate() 가 종합점수를 합산할 때 쓰는 비중만 모은 화이트리스트.
+SCORE_WEIGHT_KEYS = [
+    "SCORE_SUPPLY_BONUS",
+    "SCORE_MA_ALIGNED_BONUS",
+    "SCORE_NEAR_HIGH_BONUS",
+    "SCORE_PREFERRED_VALUE_BONUS",
+    "SCORE_MIN_VALUE_BONUS",
+    "SCORE_LEADER_BONUS",
+    "SCORE_EXTRA_SUPPLY_DAY_BONUS",
+    "THEME_STOCK_BONUS",
+    "CONTENT_SCORE_MAX",
+]
 
 
 def get_strategy_config() -> dict:

@@ -77,6 +77,17 @@ class StrategyConfig:
     # ---- 콘텐츠 분석 가산점 ----
     CONTENT_SCORE_MAX = 10            # 콘텐츠 분석 최대 가산점
 
+    # ---- 종합점수 구성 가중치 (주간 매매성과 기반 GPT 튜닝 대상) ----
+    # score_candidate() 가 각 지표에 부여하는 가점(최대값). 최종 종합점수는 이 가점들의 최대 합으로
+    # 정규화해 항상 0~100 으로 환산된다. 소수 첫째자리까지 조정 가능.
+    SCORE_SUPPLY_BONUS = 40.0         # 5일 수급점수(0~100) 비율만큼 부여하는 최대 가점
+    SCORE_MA_ALIGNED_BONUS = 10       # 정배열 가점
+    SCORE_NEAR_HIGH_BONUS = 10        # 신고가 근처 가점
+    SCORE_PREFERRED_VALUE_BONUS = 15  # 거래대금 우선 기준 충족 가점
+    SCORE_MIN_VALUE_BONUS = 8         # 거래대금 최소 기준 충족 가점
+    SCORE_LEADER_BONUS = 10           # 대장주 가점
+    SCORE_EXTRA_SUPPLY_DAY_BONUS = 3  # 5일 초과 장기 연속 수급 1일당 가점
+
     def load_from_db(self):
         """DB에서 전략 설정값을 로드하여 인스턴스에 덮어씀"""
         try:
@@ -591,37 +602,37 @@ class AnalysisEngine:
 
     # ── 종합 스코어링 ──
     def score_candidate(self, c: StockCandidate) -> float:
-        score = 0.0
+        raw = 0.0
 
-        # 5일 수급 점수 (40점 만점) — 0~100점 → 0~40점 선형 환산
-        score += c.supply_score * 0.4
+        # 5일 수급 가점 — 수급점수(0~100) 비율만큼 최대 가점 부여
+        raw += c.supply_score / 100 * self.cfg.SCORE_SUPPLY_BONUS
 
-        # 정배열 + 신고가 (20점)
+        # 정배열 + 신고가
         if c.ma_aligned:
-            score += 10
+            raw += self.cfg.SCORE_MA_ALIGNED_BONUS
         if c.near_high:
-            score += 10
+            raw += self.cfg.SCORE_NEAR_HIGH_BONUS
 
-        # 거래대금 (15점)
+        # 거래대금
         if c.trading_value >= self.cfg.PREFERRED_TRADING_VALUE:
-            score += 15
+            raw += self.cfg.SCORE_PREFERRED_VALUE_BONUS
         elif c.trading_value >= self.cfg.MIN_TRADING_VALUE:
-            score += 8
+            raw += self.cfg.SCORE_MIN_VALUE_BONUS
 
-        # 대장주 (10점)
+        # 대장주
         if c.is_leader:
-            score += 10
+            raw += self.cfg.SCORE_LEADER_BONUS
 
         # 오늘의 테마주 가산점
         if c.is_theme_stock:
-            score += self.cfg.THEME_STOCK_BONUS
+            raw += self.cfg.THEME_STOCK_BONUS
 
-        # 5일 초과 연속 수급 보너스 (15점)
+        # 5일 초과 연속 수급 보너스
         # 5일 이내 연속성은 supply_score에 이미 반영되므로, 6~10일+ 장기 연속만 가산
         extra_days = max(c.supply_days - 5, 0)
-        score += min(extra_days, 5) * 3
+        raw += min(extra_days, 5) * self.cfg.SCORE_EXTRA_SUPPLY_DAY_BONUS
 
-        # 콘텐츠 분석 (10점): 언급 횟수 + 평균 감성 점수
+        # 콘텐츠 분석: 언급 횟수 + 평균 감성 점수
         if c.content_count > 0:
             mention_bonus = min(c.content_count, 3) * 2  # max 6
             sentiment_bonus = (
@@ -629,7 +640,19 @@ class AnalysisEngine:
                 else 2 if c.content_avg_score >= 50
                 else 0
             )
-            score += min(mention_bonus + sentiment_bonus, self.cfg.CONTENT_SCORE_MAX)
+            raw += min(mention_bonus + sentiment_bonus, self.cfg.CONTENT_SCORE_MAX)
 
-        c.score = score
-        return score
+        # 100점 만점 환산 — 각 가점의 최대 합으로 정규화(가중치 튜닝과 무관하게 항상 0~100).
+        # 단조 변환이라 후보 간 순위는 보존된다.
+        max_possible = (
+            self.cfg.SCORE_SUPPLY_BONUS
+            + self.cfg.SCORE_MA_ALIGNED_BONUS
+            + self.cfg.SCORE_NEAR_HIGH_BONUS
+            + self.cfg.SCORE_PREFERRED_VALUE_BONUS
+            + self.cfg.SCORE_LEADER_BONUS
+            + self.cfg.THEME_STOCK_BONUS
+            + 5 * self.cfg.SCORE_EXTRA_SUPPLY_DAY_BONUS
+            + self.cfg.CONTENT_SCORE_MAX
+        )
+        c.score = round(raw / max_possible * 100, 1) if max_possible else 0.0
+        return c.score

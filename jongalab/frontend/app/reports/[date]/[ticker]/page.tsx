@@ -644,7 +644,7 @@ export default async function StockReportPage({
                   총합
                 </span>
                 <span className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
-                  {r.score.toFixed(0)} / 125
+                  {r.score.toFixed(0)} / 100
                 </span>
               </div>
             </div>

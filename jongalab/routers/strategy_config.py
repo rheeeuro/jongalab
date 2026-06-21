@@ -50,6 +50,14 @@ class StrategyConfigResponse(BaseModel):
     THEME_STOCK_BONUS: int = 15
     # 콘텐츠 분석
     CONTENT_SCORE_MAX: int = 10
+    # 종합점수 구성 가중치 (주간 매매성과 기반 GPT 튜닝 대상)
+    SCORE_SUPPLY_BONUS: float = 40.0
+    SCORE_MA_ALIGNED_BONUS: int = 10
+    SCORE_NEAR_HIGH_BONUS: int = 10
+    SCORE_PREFERRED_VALUE_BONUS: int = 15
+    SCORE_MIN_VALUE_BONUS: int = 8
+    SCORE_LEADER_BONUS: int = 10
+    SCORE_EXTRA_SUPPLY_DAY_BONUS: int = 3
     # 제외 키워드
     EXCLUDE_KEYWORDS: List[str] = []
 
