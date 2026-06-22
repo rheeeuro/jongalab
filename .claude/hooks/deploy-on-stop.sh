@@ -3,7 +3,9 @@
 #   - 프론트 변경 → npm run build 후 jongalab-fe 재시작
 #   - api.py/routers/core 변경 → jongalab-be 재시작
 #   - core 공유 변경 / telegram_listener 변경 → jongalab-telegram 재시작
-#   - cron 워커 변경 → 재시작하지 않음(다음 cron 실행 때 자동 반영) — 안내만
+#   - trading: api/core → trading-api 재시작, frontend → 빌드+trading-fe 재시작
+#   - cron 워커(trading-monitor 포함) 변경 → 재시작하지 않음(다음 cron 실행 때 자동 반영) — 안내만
+# 변경된 앱만, 그리고 그 앱이 online 일 때만 재시작한다(다른 서비스는 건드리지 않음).
 # pm2 가 없거나 해당 앱이 online 이 아니면 조용히 건너뛴다.
 # 빌드 실패 시 stop 을 막아(decision:block) Claude 가 이어서 고치게 한다.
 set -uo pipefail
@@ -23,7 +25,7 @@ except Exception: print("0")
 # 변경 파일 중복 제거
 mapfile -t FILES < <(sort -u "$PENDING")
 
-NEED_WEB=0; NEED_API=0; NEED_TG=0; NEED_KIWOOM=0; NEED_TAPI=0; NEED_TWEB=0; NEED_TMON=0
+NEED_WEB=0; NEED_API=0; NEED_TG=0; NEED_KIWOOM=0; NEED_TAPI=0; NEED_TWEB=0
 declare -A CRON_HIT=()
 
 for f in "${FILES[@]}"; do
@@ -39,7 +41,8 @@ for f in "${FILES[@]}"; do
     */jongalab/workers/telegram_listener.py)      NEED_TG=1 ;;
     */jongalab/workers/youtube_collector.py)      CRON_HIT[jongalab-collector]=1 ;;
     */jongalab/workers/daily_digest.py)           CRON_HIT[jongalab-daily-report]=1 ;;
-    */jongalab/workers/gap_check.py)              CRON_HIT[jongalab-gap-check]=1 ;;
+    */jongalab/workers/gap_check.py)              CRON_HIT[jongalab-gap-check]=1; CRON_HIT[jongalab-gap-check-retry]=1 ;;  # 같은 스크립트(--retry)
+    */jongalab/workers/weight_tuner.py)           CRON_HIT[jongalab-weight-tuner]=1 ;;
     */jongalab/workers/closing_bet.py)            CRON_HIT[jongalab-closing-bet]=1 ;;
   esac
   # ── kiwoom (데이터 전용 서버) ──
@@ -50,8 +53,8 @@ for f in "${FILES[@]}"; do
   # ── trading (자동매매 집행 전용 도메인) ──
   case "$f" in
     */trading/frontend/*)                         NEED_TWEB=1 ;;
-    */trading/api.py|*/trading/core/*.py)         NEED_TAPI=1; NEED_TMON=1 ;;  # core 는 모니터도 공유
-    */trading/workers/monitor.py)                 NEED_TMON=1 ;;               # 상시 워커 → 재시작
+    */trading/api.py|*/trading/core/*.py)         NEED_TAPI=1; CRON_HIT[trading-monitor]=1 ;;  # core 는 cron 모니터도 공유(재시작 안 함)
+    */trading/workers/monitor.py)                 CRON_HIT[trading-monitor]=1 ;;  # cron 워커(08:05~09:30) → 다음 스케줄 때 반영
     */trading/workers/signal_executor.py)         CRON_HIT[trading-buy-krx]=1; CRON_HIT[trading-buy-nxt]=1 ;;
     */trading/workers/settle.py)                  CRON_HIT[trading-settle-nxt]=1; CRON_HIT[trading-settle-krx]=1 ;;
     */trading/workers/reconcile.py)               CRON_HIT[trading-reconcile]=1 ;;
@@ -118,15 +121,6 @@ if [ "$NEED_TAPI" = "1" ]; then
     pm2 restart trading-api >/dev/null 2>&1 && NOTES+=("✅ trading-api 재시작")
   else
     NOTES+=("ℹ️ trading-api 변경됨(앱이 online 아님 — 재시작 생략)")
-  fi
-fi
-
-# 2-2b) 트레이딩 모니터 (상시 워커)
-if [ "$NEED_TMON" = "1" ]; then
-  if is_online trading-monitor; then
-    pm2 restart trading-monitor >/dev/null 2>&1 && NOTES+=("✅ trading-monitor 재시작")
-  else
-    NOTES+=("ℹ️ trading-monitor 변경됨(앱이 online 아님 — 재시작 생략)")
   fi
 fi
 
