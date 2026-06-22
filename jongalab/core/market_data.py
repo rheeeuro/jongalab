@@ -40,38 +40,35 @@ def _get_kis():
     return _kis_api
 
 
-_NIGHT_FRESH_SEC = 300  # 야간 WS 행이 5분 이내 갱신이면 '야간세션 진행 중'으로 본다
-
-
 def _kospi200_night_future() -> dict:
     """코스피200 야간선물 현재가.
 
-    1) 야간 WS 워커가 갱신한 kis_night_future 행이 신선하면(5분 이내) 그 값(야간 체결가).
-    2) 아니면(주간/세션 종료) KIS REST 주간 현재가로 폴백.
+    야간 WS 워커(kis_night_futures_ws)가 kis_night_future 단일행을 갱신한다.
+    야간세션 중엔 실시간 체결가, 세션 종료 후엔 '마지막 야간 종가'를 다음
+    세션까지 그대로 유지한다(주간선물 종가로 갈아타지 않는다 — 주간 시세는
+    _kospi200_day_future 가 별도 카드로 제공).
     """
     base = {"symbol": "K200NF", "name": "코스피200 야간선물"}
     none = {**base, "price": None, "change": None, "change_percent": None}
-
-    # 1) 야간 실시간(WS) 우선
     try:
         from core.repository.kis_night_future import get_night_future
         row = get_night_future()
-        if (
-            row
-            and row.get("price") is not None
-            and row.get("age_sec") is not None
-            and row["age_sec"] <= _NIGHT_FRESH_SEC
-        ):
-            return {
-                **base,
-                "price": float(row["price"]),
-                "change": float(row["change_val"]) if row.get("change_val") is not None else None,
-                "change_percent": float(row["change_percent"]) if row.get("change_percent") is not None else None,
-            }
     except Exception:
-        pass
+        return none
+    if not row or row.get("price") is None:
+        return none
+    return {
+        **base,
+        "price": float(row["price"]),
+        "change": float(row["change_val"]) if row.get("change_val") is not None else None,
+        "change_percent": float(row["change_percent"]) if row.get("change_percent") is not None else None,
+    }
 
-    # 2) 주간 REST 폴백
+
+def _kospi200_day_future() -> dict:
+    """코스피200 주간선물 현재가 (KIS REST). 주간장 중엔 실시간, 장외엔 직전 종가."""
+    base = {"symbol": "K200DF", "name": "코스피200 주간선물"}
+    none = {**base, "price": None, "change": None, "change_percent": None}
     try:
         from core.kis_client import kospi200_front_month_code
         q = _get_kis().inquire_futures_price(kospi200_front_month_code())
@@ -320,7 +317,11 @@ def fetch_market_indices() -> dict:
         grouped[category] = results[idx : idx + len(items)]
         idx += len(items)
 
-    # 코스피200 야간선물(KIS)을 선물 섹션 맨 앞에 합류 — 국장 시초가에 가장 직접적.
-    grouped["FUTURES"] = [_kospi200_night_future()] + grouped.get("FUTURES", [])
+    # 코스피200 야간선물(마지막 야간 종가 유지) + 주간선물(실시간 REST)을
+    # 선물 섹션 맨 앞에 합류 — 국장 시초가에 가장 직접적.
+    grouped["FUTURES"] = [
+        _kospi200_night_future(),
+        _kospi200_day_future(),
+    ] + grouped.get("FUTURES", [])
 
     return grouped

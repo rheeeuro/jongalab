@@ -46,8 +46,14 @@ export default async function HistoryPage() {
               <ul className="divide-y divide-slate-100 dark:divide-slate-800">
                 {list.map((o) => {
                   const buy = o.side === "buy";
+                  const filled = o.status === "filled";
                   return (
-                    <li key={o.id} className="flex items-center justify-between px-5 py-3.5">
+                    <li
+                      key={o.id}
+                      className={`flex items-center justify-between px-5 py-3.5 ${
+                        filled ? "" : "opacity-45 grayscale"
+                      }`}
+                    >
                       <div className="flex min-w-0 items-center gap-3">
                         <span
                           className={`shrink-0 rounded-lg px-2 py-1 text-xs font-bold ${
