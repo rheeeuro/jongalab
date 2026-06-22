@@ -226,7 +226,7 @@ def day_detail(date: str | None = None):
         "date": d,
         "realized_pnl": state.get("realized_pnl") or 0,
         "orders_count": state.get("orders_count") or 0,
-        "buys": [o for o in orders if o["side"] == "buy"],
+        "buys": [o for o in orders if o["side"] == "buy" and (o.get("filled_qty") or 0) > 0],
         "sells": sells,
         "plans": list(plans.values()),       # 갭상승/하락 여부
         "realized_by_stock": realized_map,    # 종목별 실현손익

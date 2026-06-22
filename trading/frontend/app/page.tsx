@@ -20,6 +20,9 @@ export default async function TodayPage() {
   const nm = (code: string) => names[code] || code;
   const buys = day?.buys ?? [];
   const trips = day?.roundtrips ?? [];
+  const tripsTotal = trips.reduce((s, t) => s + t.sell_qty * t.sell_price, 0); // 매도금액 합계
+  const buysTotal = buys.reduce((s, o) => s + o.qty * (o.fill_price ?? o.price), 0); // 매수금액 합계
+  const posTotal = positions.reduce((s, p) => s + (p.eval_amt ?? (p.cur_prc ?? 0) * p.qty), 0); // 평가금액 합계
   const live = health?.mode === "live";
   const auto = !health?.kill_switch; // 킬스위치 OFF = 자동매매 작동중
 
@@ -52,7 +55,7 @@ export default async function TodayPage() {
       </section>
 
       {/* 오늘 청산 결과 — 어제 산 종목을 오늘 얼마에 팔았나 (오늘 실현손익의 출처) */}
-      <Card title="오늘 청산한 종목" count={trips.length}>
+      <Card title="오늘 청산한 종목" count={trips.length} total={tripsTotal}>
         {trips.length === 0 ? (
           <Empty>오늘 청산한 종목이 없어요.</Empty>
         ) : (
@@ -64,7 +67,7 @@ export default async function TodayPage() {
       </Card>
 
       {/* 오늘 매수 종목 */}
-      <Card title="오늘 매수한 종목" count={buys.length}>
+      <Card title="오늘 매수한 종목" count={buys.length} total={buysTotal}>
         {buys.length === 0 ? (
           <Empty>오늘 매수한 종목이 없어요.</Empty>
         ) : (
@@ -86,7 +89,7 @@ export default async function TodayPage() {
       </Card>
 
       {/* 보유 중 */}
-      <Card title="보유 중인 종목" count={positions.length}>
+      <Card title="보유 중인 종목" count={positions.length} total={posTotal}>
         {positions.length === 0 ? (
           <Empty>보유 중인 종목이 없어요.</Empty>
         ) : (
@@ -131,13 +134,26 @@ export default async function TodayPage() {
 
 /* ---------- 공통 UI ---------- */
 
-function Card({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
+function Card({
+  title,
+  count,
+  total,
+  children,
+}: {
+  title: string;
+  count?: number;
+  total?: number;
+  children: React.ReactNode;
+}) {
   return (
     <section className="mt-4 rounded-2xl bg-white p-5 shadow-sm dark:bg-slate-900">
-      <div className="mb-1 flex items-center justify-between">
-        <h2 className="text-base font-bold">{title}</h2>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <h2 className="shrink-0 text-base font-bold">{title}</h2>
         {count !== undefined && count > 0 && (
-          <span className="text-sm font-medium text-slate-400">{count}</span>
+          <span className="min-w-0 truncate text-right text-sm font-medium text-slate-400 tabular-nums">
+            {count}종목
+            {total !== undefined && ` · ${wonExact(total)}`}
+          </span>
         )}
       </div>
       {children}
