@@ -13,6 +13,7 @@ from core.logging_setup import setup_logging
 from core.kiwoom_order_client import KiwoomOrderClient, TokenUnavailable
 from core.kiwoom_data_client import to_int
 from core.repository import position as position_repo
+from core.repository import blocklist as blocklist_repo
 from core.repository import audit_log
 from core.notifications import notify_admin
 
@@ -26,7 +27,13 @@ def _alert_admin(summary: str) -> None:
 
 
 def main() -> int:
-    trade_date = datetime.now().strftime("%Y%m%d")
+    now = datetime.now()
+    # 실행 윈도우 가드: 평일 20시에만 동작(pm2 재시작 시 즉시 오실행 방지).
+    if now.weekday() >= 5 or now.hour != 20:
+        logger.info("실행 윈도우(평일 20시)가 아님 — 스킵 (%s)", now.strftime("%a %H:%M"))
+        return 0
+
+    trade_date = now.strftime("%Y%m%d")
     logger.info("포지션 정합성 점검 시작 (거래일 %s)", trade_date)
     client = KiwoomOrderClient()
 
@@ -51,11 +58,17 @@ def main() -> int:
 
     local = {p["stk_cd"]: p["qty"] for p in position_repo.get_open_positions()}
 
-    drift = []
+    # 자동매매 이전 수동 보유분(blocklist)은 봇 관리 대상이 아니므로 drift 에서 제외한다.
+    blocked = blocklist_repo.get_codes()
+    drift, ignored = [], []
     for code in set(broker) | set(local):
         b, l = broker.get(code, 0), local.get(code, 0)
         if b != l:
-            drift.append({"stk_cd": code, "broker": b, "local": l})
+            (ignored if code in blocked else drift).append(
+                {"stk_cd": code, "broker": b, "local": l})
+
+    if ignored:
+        logger.info("blocklist 보유분 drift 무시 %d종목: %s", len(ignored), ignored)
 
     if drift:
         logger.warning("정합성 불일치 %d종목: %s", len(drift), drift)
