@@ -27,6 +27,61 @@ def _get_kiwoom():
     return _kiwoom_api
 
 
+# ── 한국투자증권(KIS) 클라이언트 (코스피200 야간선물 시세 — lazy singleton) ──
+_kis_api = None
+
+
+def _get_kis():
+    """선물 시세 조회용 KIS 클라이언트 (lazy init). 토큰은 클라이언트가 보장."""
+    global _kis_api
+    if _kis_api is None:
+        from core.kis_client import KisRestClient
+        _kis_api = KisRestClient()
+    return _kis_api
+
+
+_NIGHT_FRESH_SEC = 300  # 야간 WS 행이 5분 이내 갱신이면 '야간세션 진행 중'으로 본다
+
+
+def _kospi200_night_future() -> dict:
+    """코스피200 야간선물 현재가.
+
+    1) 야간 WS 워커가 갱신한 kis_night_future 행이 신선하면(5분 이내) 그 값(야간 체결가).
+    2) 아니면(주간/세션 종료) KIS REST 주간 현재가로 폴백.
+    """
+    base = {"symbol": "K200NF", "name": "코스피200 야간선물"}
+    none = {**base, "price": None, "change": None, "change_percent": None}
+
+    # 1) 야간 실시간(WS) 우선
+    try:
+        from core.repository.kis_night_future import get_night_future
+        row = get_night_future()
+        if (
+            row
+            and row.get("price") is not None
+            and row.get("age_sec") is not None
+            and row["age_sec"] <= _NIGHT_FRESH_SEC
+        ):
+            return {
+                **base,
+                "price": float(row["price"]),
+                "change": float(row["change_val"]) if row.get("change_val") is not None else None,
+                "change_percent": float(row["change_percent"]) if row.get("change_percent") is not None else None,
+            }
+    except Exception:
+        pass
+
+    # 2) 주간 REST 폴백
+    try:
+        from core.kis_client import kospi200_front_month_code
+        q = _get_kis().inquire_futures_price(kospi200_front_month_code())
+    except Exception:
+        return none
+    if not q or q.get("price") is None:
+        return none
+    return {**base, **q}
+
+
 def _parse_num(val) -> float:
     """키움 응답 가격 문자열("+53,500", "-1200") → float. 빈값/이상치는 0."""
     if val is None:
@@ -61,6 +116,11 @@ MARKET_INDICES = {
         {"symbol": "GC=F", "name": "금"},
         {"symbol": "CL=F", "name": "WTI 원유"},
         {"symbol": "BTC-USD", "name": "비트코인"},
+    ],
+    # 종가베팅 전 '내일 한국장 갭' 참고 지표.
+    # 나스닥100 선물(NQ=F)은 yfinance, 코스피200 야간선물은 KIS REST(아래 병합)에서 조회한다.
+    "FUTURES": [
+        {"symbol": "NQ=F", "name": "나스닥100 선물"},
     ],
 }
 
@@ -259,5 +319,8 @@ def fetch_market_indices() -> dict:
     for category, items in MARKET_INDICES.items():
         grouped[category] = results[idx : idx + len(items)]
         idx += len(items)
+
+    # 코스피200 야간선물(KIS)을 선물 섹션 맨 앞에 합류 — 국장 시초가에 가장 직접적.
+    grouped["FUTURES"] = [_kospi200_night_future()] + grouped.get("FUTURES", [])
 
     return grouped

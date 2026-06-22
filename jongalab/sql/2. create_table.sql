@@ -164,3 +164,33 @@ CREATE TABLE IF NOT EXISTS telegram_users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 한국투자증권(KIS) 액세스 토큰 단일행 보관 테이블 (id = 1)
+-- 시장 탭 선물 시세 조회(core.kis_client)가 ensure_token()으로 공유.
+-- 매일 1회 cron(jongalab-kis-token-refresh)으로 갱신, 만료 임박 시 on-demand 재발급.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS kis_token (
+    id           INT PRIMARY KEY DEFAULT 1,
+    access_token VARCHAR(512) NOT NULL,
+    expires_dt   VARCHAR(32),                            -- KIS access_token_token_expired (YYYY-MM-DD HH:MM:SS)
+    issued_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CHECK (id = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 코스피200 야간선물 실시간 시세 단일행 (id = 1)
+-- workers/kis_night_futures_ws.py 가 KIS WebSocket H0MFCNT0 체결 틱으로 갱신.
+-- market_data 가 행의 신선도(updated_at)로 야간(WS) ↔ 주간(REST) 표시를 전환한다.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS kis_night_future (
+    id             INT PRIMARY KEY DEFAULT 1,
+    symbol         VARCHAR(20),                            -- 근월물 단축코드 (예: A01609)
+    price          DECIMAL(12,2),                          -- 야간 체결가
+    change_val     DECIMAL(12,2),                          -- 전일대비 (부호 반영)
+    change_percent DECIMAL(8,2),                           -- 전일대비율 (%)
+    quote_time     VARCHAR(8),                             -- 체결 시각 HHMMSS
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CHECK (id = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -43,3 +43,15 @@ OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5.4-nano')
 
 # 키움 데이터 서버 (별도 FastAPI, localhost) — core.kiwoom_client 가 호출
 KIWOOM_BASE_URL = os.getenv('KIWOOM_BASE_URL', 'http://127.0.0.1:8001')
+
+# 한국투자증권(KIS) Open API — 시장 탭 선물 시세(코스피200 야간선물) 조회용.
+# core.kis_client.KisRestClient 가 사용하며, 토큰은 kis_token 테이블에 단일행 보관.
+KIS_APP_KEY = os.getenv('KIS_APP_KEY', '')
+KIS_SECRET_KEY = os.getenv('KIS_SECRET_KEY', '')
+KIS_BASE_URL = os.getenv('KIS_BASE_URL', 'https://openapi.koreainvestment.com:9443')
+# 코스피200 선물 근월물 단축코드(예: 'A01609' = 2026년 9월물). 보통은 비워두면
+# kis_client.kospi200_front_month_code() 가 분기 만기 기준으로 근월물을 자동 산출한다.
+# 강제 지정이 필요할 때만 .env 로 설정. 야간세션(KRX 야간거래)도 동일 근월물 코드를 쓴다.
+KIS_KOSPI200_FUT_CODE = os.getenv('KIS_KOSPI200_FUT_CODE', '')
+# KIS 실시간 WebSocket 접속 주소 (야간선물 실시간체결 H0MFCNT0 구독용).
+KIS_WS_URL = os.getenv('KIS_WS_URL', 'ws://ops.koreainvestment.com:21000')

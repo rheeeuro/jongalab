@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import type { MarketIndices } from "@/types";
 import { AnimatedMarketIndexCard } from "./AnimatedMarketIndexCard";
-import { Landmark, Gem, Globe } from "lucide-react";
+import { Landmark, Gem, Globe, TrendingUp } from "lucide-react";
 
 const CACHE_KEY = "market-indices-cache";
 const POLL_INTERVAL = 60_000; // 1분
-const EMPTY_INDICES: MarketIndices = { US: [], KR: [], COMMODITIES: [] };
+const EMPTY_INDICES: MarketIndices = { US: [], KR: [], COMMODITIES: [], FUTURES: [] };
 
 function readCachedMarketIndices(): MarketIndices | null {
   if (typeof window === "undefined") return null;
@@ -119,6 +119,21 @@ export function MarketIndicesSection() {
       >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {(displayData.KR ?? []).map((item) => (
+            <AnimatedMarketIndexCard
+              key={item.symbol}
+              item={item}
+              animate={animate}
+            />
+          ))}
+        </div>
+      </Section>
+
+      <Section
+        icon={<TrendingUp className="h-5 w-5 text-emerald-500" />}
+        title="📊 선물 (내일 갭 참고)"
+      >
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {(displayData.FUTURES ?? []).map((item) => (
             <AnimatedMarketIndexCard
               key={item.symbol}
               item={item}

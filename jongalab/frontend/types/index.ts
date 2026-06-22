@@ -48,6 +48,7 @@ export interface MarketIndices {
   US: MarketIndex[];
   KR: MarketIndex[];
   COMMODITIES: MarketIndex[];
+  FUTURES: MarketIndex[];
 }
 
 export interface Source {
