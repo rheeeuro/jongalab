@@ -17,7 +17,6 @@ from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.seed_allocator import allocate
 from core.kiwoom_data_client import to_int
-from core.notifications import notify_admin
 from core.repository import trade_signal as signal_repo
 from core.repository import blocklist as blocklist_repo
 
@@ -86,10 +85,6 @@ def main() -> int:
     logger.info("가용현금 %d × (거래소점수 %.0f / 전체 %.0f) → 시드 %d원, 후보 %d종목",
                 cash, venue_score, total_score, seed, len(venue_items))
 
-    # 알림용 거래소별 시드 분해 (이 거래소=seed, 반대편=잔여 점수 몫)
-    other_seed = int(cash * (total_score - venue_score) / total_score) if total_score > 0 else 0
-    krx_seed, nxt_seed = (seed, other_seed) if args.venue == "krx" else (other_seed, seed)
-
     cands: list[dict] = [
         {"sig": sig, "stk_cd": stk, "score": score,
          "price": engine.data.get_current_price(stk)}
@@ -98,7 +93,6 @@ def main() -> int:
     allocate(seed, cands)
 
     # 3) 배분 수량으로 집행
-    bought = []  # 텔레그램 매수현황용
     for c in cands:
         sig, stk = c["sig"], c["stk_cd"]
         if c["shares"] < 1:
@@ -110,44 +104,14 @@ def main() -> int:
             signal_repo.update_status(sig["id"], "executing")
             resp = engine.execute_buy(trade_date, sized, dmst_stex_tp=cfg["exchange"])
             signal_repo.update_status(sig["id"], "done" if resp else "skipped")
-            if resp:
-                bought.append({"nm": sig.get("stk_nm") or stk, "cd": stk,
-                               "qty": c["shares"], "price": c["price"]})
         except Exception as e:
             logger.error("시그널 %s 집행 실패: %s", sig["id"], e)
             signal_repo.update_status(sig["id"], "rejected", note=str(e))
 
-    # 4) 관리자 텔레그램 매수 현황 전송
-    _notify_buys(args.venue.upper(), trade_date, seed, cash, krx_seed, nxt_seed, bought)
-
+    # 4) 관리자 알림은 체결 직후 fills_sync 워커가 실체결가로 전송한다
+    #    (KRX 15:31 / NXT 19:55) — 종가 단일가/IOC 체결가는 이 시점엔 아직 미확정이라 여기서 보내지 않는다.
     logger.info("매수 집행 종료 [%s]", args.venue.upper())
     return 0
-
-
-def _notify_buys(venue: str, trade_date: str, seed: int, cash: int,
-                 krx_seed: int, nxt_seed: int, bought: list[dict]) -> None:
-    """매수 현황을 관리자에게 텔레그램 전송 (paper/live 무관, 전송 실패는 무시)."""
-    try:
-        d = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
-        breakdown = f"전체시드 {cash:,}원 (KRX {krx_seed:,} / NXT {nxt_seed:,})"
-        if not bought:
-            msg = (f"🛒 *[{venue}] 매수 현황* {d}\n{breakdown}\n"
-                   f"시드 {seed:,}원 — 매수된 종목 없음")
-        else:
-            total = sum(b["qty"] * b["price"] for b in bought)
-            lines = "\n".join(
-                f"• {b['nm']}(`{b['cd']}`) {b['qty']}주 @{b['price']:,} = {b['qty']*b['price']:,}원"
-                for b in bought
-            )
-            msg = (
-                f"🛒 *[{venue}] 매수 현황* {d}\n"
-                f"{breakdown}\n"
-                f"시드 {seed:,}원 → {len(bought)}종목 / 매수액 {total:,}원\n"
-                f"──────────────────\n{lines}"
-            )
-        notify_admin(msg)
-    except Exception as e:
-        logger.error("매수현황 알림 실패: %s", e)
 
 
 if __name__ == "__main__":
