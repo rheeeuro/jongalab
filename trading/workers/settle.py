@@ -2,11 +2,11 @@
 
 전략:
   [NXT 08:05]  NXT 시초가 vs 매수 평단으로 갭 판정 → 절반 매도, 잔량 감시계획(settle_plan) 기록
-     - 갭상승: 스탑선 = 시초가(절반 매도가)  → 이탈 시 1분 모니터가 즉시 전량 매도
-     - 갭하락: 저가이탈선 = 시초가          → 이탈 시 1분 모니터가 즉시 전량 매도
-  [KRX 09:05]  잔량 처리
+     - 갭상승: 스탑선 = 절반매도 체결가(버퍼 없음) → 이탈 시 모니터가 즉시 전량 매도
+     - 갭하락: 저가이탈선 = 시초가 - 버퍼          → 이탈 시 모니터가 즉시 전량 매도
+  [KRX 09:05]  잔량 처리 — 갭 방향 무관 전량 매도(잔량 보유 안 함)
      - 갭상승: 전량 매도
-     - 갭하락: 시초가 회복 못하면(현재가 < 시초가) 전량 매도, 회복 시 보유 유지(모니터 계속 감시)
+     - 갭하락: 시초가 회복 여부와 무관하게 전량 매도
 
 가정(미세 조정 가능): '시초가'는 각 단계 실행 시점의 현재가로 근사. '저가 이탈선'은 NXT 시초가.
 """
@@ -21,6 +21,7 @@ from core.execution_engine import ExecutionEngine
 from core.fill_sync import sync_fills
 from core.repository import audit_log
 from core.repository import order as order_repo
+from core.repository import fill as fill_repo
 from core.repository import position as position_repo
 from core.repository import settle_plan as plan_repo
 from core.repository import trade_signal as signal_repo
@@ -28,6 +29,24 @@ from core.notifications import notify_admin
 
 setup_logging()
 logger = logging.getLogger("Settle")
+
+
+def _half_sell_fill_price(trade_date: str, stk_cd: str, fallback: int) -> int:
+    """NXT 절반매도(tag='nxt')의 실체결 수량가중평균가. 미체결/조회불가면 fallback(시초가).
+
+    live 는 체결이 ka10076 으로 사후 반영되므로 호출 전 sync_fills 필요.
+    paper 는 주문 참조가(=시초가)로 즉시 체결돼 fallback 과 동일하게 수렴한다.
+    """
+    key = ExecutionEngine.idempotency_key(trade_date, 0, f"sell:nxt:{stk_cd}")
+    order = order_repo.find_by_idempotency_key(key)
+    if not order:
+        return fallback
+    fills = fill_repo.get_fills_by_order(order["id"])
+    tot_qty = sum(int(f["qty"]) for f in fills)
+    if tot_qty <= 0:
+        return fallback
+    amount = sum(int(f["qty"]) * int(f["price"]) for f in fills)
+    return round(amount / tot_qty)
 
 
 def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
@@ -54,10 +73,15 @@ def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
                                     dmst_stex_tp="NXT", tag="nxt")  # NXT → 최유리IOC
             remaining = qty - half
             if remaining > 0:
-                # 잔량 감시계획 스탑/저가이탈선 = 시초가에서 STOP_BUFFER_PCT% 아래(버퍼).
-                # 시초가를 그대로 잡으면 절반 매도 직후 한 틱만 눌려도 잔량이 즉시 털리므로,
-                # 갭상승(추가상승 여지)·갭하락(시초가 회복 대기) 모두 약간의 버퍼를 둔다.
-                stop_price = round(nxt_open * (1 - STOP_BUFFER_PCT / 100))
+                if gap_dir == "up":
+                    # 갭상승: 스탑선 = 절반매도 체결가(버퍼 없음). 잔량이 절반 판 가격 아래로
+                    # 내려가면 모니터가 즉시 전량 매도해 확보한 이익선을 지킨다.
+                    sync_fills(engine.client)  # 절반매도 체결 반영(live) 후 실체결가 확인
+                    stop_price = _half_sell_fill_price(trade_date, stk_cd, fallback=nxt_open)
+                else:
+                    # 갭하락: 저가이탈선 = 시초가에서 STOP_BUFFER_PCT% 아래(버퍼). 시초가를 그대로
+                    # 잡으면 한 틱만 눌려도 잔량이 즉시 털리므로 시초가 회복 대기를 위한 버퍼를 둔다.
+                    stop_price = round(nxt_open * (1 - STOP_BUFFER_PCT / 100))
                 plan_repo.upsert_plan(trade_date, stk_cd, gap_dir, avg, nxt_open,
                                       stop_price=stop_price, note=f"nxt half={half}")
                 logger.info("[NXT] %s 갭%s 절반매도 %d주 @%d (잔량 %d, 스탑 %d)",
@@ -70,7 +94,7 @@ def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
 
 
 def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
-    """KRX 09:05 — 잔량 처리(갭상승 전량 / 갭하락 회복 실패 시 전량).
+    """KRX 09:05 — 잔량 처리(갭 방향 무관 전량 매도 — 잔량 보유 안 함).
 
     청산 완료 후, 당일 NXT(08:05)+KRX(09:05) 매도를 합산한 최종 현황을 관리자에게 텔레그램 전송한다.
     """
@@ -93,15 +117,13 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
                                     dmst_stex_tp="KRX", tag="krx")
                 plan_repo.deactivate(plan["trade_date"], stk_cd, "갭상승 KRX 전량매도")
                 logger.info("[KRX] %s 갭상승 전량매도 %d주 @%d", stk_cd, pos["qty"], cur)
-            else:  # 갭하락
-                if cur < plan["nxt_open"]:  # 시초가 회복 못함
-                    engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
-                                        dmst_stex_tp="KRX", tag="krx")
-                    plan_repo.deactivate(plan["trade_date"], stk_cd, "갭하락 회복실패 전량매도")
-                    logger.info("[KRX] %s 갭하락 회복실패 전량매도 %d주 @%d", stk_cd, pos["qty"], cur)
-                else:
-                    logger.info("[KRX] %s 갭하락 시초가 회복(%d≥%d) — 보유 유지(모니터 감시)",
-                                stk_cd, cur, plan["nxt_open"])
+            else:  # 갭하락 — 회복 여부와 무관하게 전량 매도(잔량 보유 안 함)
+                engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
+                                    dmst_stex_tp="KRX", tag="krx")
+                reason = ("갭하락 시초가회복 전량매도" if cur >= plan["nxt_open"]
+                          else "갭하락 회복실패 전량매도")
+                plan_repo.deactivate(plan["trade_date"], stk_cd, reason)
+                logger.info("[KRX] %s %s %d주 @%d", stk_cd, reason, pos["qty"], cur)
         except Exception as e:
             logger.error("[KRX] 청산 실패 [%s]: %s", stk_cd, e)
 

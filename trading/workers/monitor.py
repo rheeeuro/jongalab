@@ -1,10 +1,13 @@
-"""장중 스탑/저가이탈 감시 워커 (1분 폴링, 상시 실행).
+"""시초가 청산 윈도우 스탑/저가이탈 감시 워커 (30초 폴링).
 
-settle(NXT 08:05)가 기록한 활성 청산계획(settle_plan)을 1분마다 점검:
+settle(NXT 08:05)가 기록한 활성 청산계획(settle_plan)을 30초마다 점검:
   현재가가 스탑/저가이탈선(stop_price) 이하로 내려가면 **즉시 잔량 전량 매도**.
-세션 시간(평일 08:00~20:00, NXT 운영시간) 밖에서는 쉰다.
 
-pm2 상시 워커(autorestart). 키움 스톱주문 대신 폴링으로 '즉시 매도'를 근사한다.
+가동 구간은 평일 08:05~09:30 (NXT 절반매도 ~ KRX 잔량청산 + 여유)으로 한정한다.
+KRX 청산(settle 09:05)이 갭 방향 무관하게 모든 잔량을 정리하므로 그 이후엔 감시할 plan 이 없다.
+
+pm2 cron 워커(autorestart:false, cron_restart '5 8 * * 1-5'): 08:05 에 기동돼 가동 구간이
+끝나면 스스로 종료하고, 다음 평일 아침 cron 으로 재기동된다. 키움 스톱주문 대신 폴링으로 근사한다.
 """
 import time
 import logging
@@ -20,12 +23,14 @@ from core.repository import settle_plan as plan_repo
 setup_logging()
 logger = logging.getLogger("Monitor")
 
-POLL_SEC = 60
+POLL_SEC = 30
 
 
-def in_session(now: datetime) -> bool:
-    """평일 08:00~20:00 (NXT 운영시간)."""
-    return now.weekday() < 5 and 8 <= now.hour < 20
+def in_window(now: datetime) -> bool:
+    """모니터 가동 구간: 평일 08:05~09:30 (NXT 절반매도 ~ KRX 잔량청산 + 여유)."""
+    if now.weekday() >= 5:
+        return False
+    return (8, 5) <= (now.hour, now.minute) <= (9, 30)
 
 
 def sell_venue(now: datetime) -> str:
@@ -61,16 +66,19 @@ def check_once(engine: ExecutionEngine) -> None:
 
 
 def main() -> int:
-    logger.info("스탑/저가이탈 모니터 시작 (1분 폴링)")
+    if not in_window(datetime.now()):
+        logger.info("가동 구간(평일 08:05~09:30) 밖 — 종료")
+        return 0
+    logger.info("스탑/저가이탈 모니터 시작 (30초 폴링, 09:30 자동 종료)")
     engine = ExecutionEngine()
-    while True:
-        now = datetime.now()
-        if in_session(now):
-            try:
-                check_once(engine)
-            except Exception as e:
-                logger.error("모니터 루프 오류: %s", e)
+    while in_window(datetime.now()):
+        try:
+            check_once(engine)
+        except Exception as e:
+            logger.error("모니터 루프 오류: %s", e)
         time.sleep(POLL_SEC)
+    logger.info("가동 구간 종료 — 모니터 종료")
+    return 0
 
 
 if __name__ == "__main__":

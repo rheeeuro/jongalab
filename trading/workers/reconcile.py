@@ -14,9 +14,15 @@ from core.kiwoom_order_client import KiwoomOrderClient, TokenUnavailable
 from core.kiwoom_data_client import to_int
 from core.repository import position as position_repo
 from core.repository import audit_log
+from core.notifications import notify_admin
 
 setup_logging()
 logger = logging.getLogger("Reconcile")
+
+
+def _alert_admin(summary: str) -> None:
+    """reconcile 오류를 관리자 텔레그램으로 전송. notify_admin 이 예외를 삼키므로 안전."""
+    notify_admin(f"🚨 *reconcile 오류* {datetime.now():%Y-%m-%d %H:%M}\n{summary}")
 
 
 def main() -> int:
@@ -29,9 +35,11 @@ def main() -> int:
         balance = client.get_balance()
     except TokenUnavailable as e:
         logger.error("토큰 없음 — 정합성 점검 불가: %s", e)
+        _alert_admin(f"토큰 없음 — 정합성 점검 불가: `{e}`")
         return 1
     except Exception as e:
         logger.error("잔고 조회 실패: %s", e)
+        _alert_admin(f"잔고 조회(kt00018) 실패: `{e}`")
         return 1
 
     # 키움 보유: stk_cd 는 접두어 1자리(A 등) + 6자리 → 접두어 제거
@@ -52,6 +60,14 @@ def main() -> int:
     if drift:
         logger.warning("정합성 불일치 %d종목: %s", len(drift), drift)
         audit_log.append("reconcile_drift", None, {"trade_date": trade_date, "drift": drift})
+        lines = "\n".join(
+            f"• `{d['stk_cd']}` 키움 {d['broker']} / 로컬 {d['local']}" for d in drift
+        )
+        notify_admin(
+            f"⚠️ *reconcile 정합성 불일치* {datetime.now():%Y-%m-%d %H:%M}\n"
+            f"{len(drift)}종목 (키움↔로컬 보유수량 불일치)\n"
+            f"──────────────────\n{lines}"
+        )
     else:
         logger.info("정합성 OK — 로컬 %d종목, 키움 %d종목 일치", len(local), len(broker))
 
@@ -64,10 +80,17 @@ def main() -> int:
         )
     except Exception as e:
         logger.warning("실현손익(ka10074) 조회 실패: %s", e)
+        _alert_admin(f"실현손익(ka10074) 조회 실패: `{e}`")
 
     logger.info("포지션 정합성 점검 종료")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        rc = main()
+    except Exception as e:
+        logger.exception("reconcile 비정상 종료")
+        _alert_admin(f"비정상 종료(예외): `{e}`")
+        rc = 1
+    sys.exit(rc)
