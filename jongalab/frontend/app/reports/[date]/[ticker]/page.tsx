@@ -599,52 +599,49 @@ export default async function StockReportPage({
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              <ScoreRow
-                label="수급 점수"
-                value={Math.round((r.supply_score ?? 0) * 0.4)}
-                max={40}
-              />
-              <ScoreRow
-                label="이평선 정배열"
-                value={r.ma_aligned ? 10 : 0}
-                max={10}
-              />
-              <ScoreRow
-                label="52주 신고가 근접"
-                value={r.near_high ? 10 : 0}
-                max={10}
-              />
-              <ScoreRow
-                label="거래대금"
-                value={
-                  r.trading_value >= 200_000_000_000
-                    ? 15
-                    : r.trading_value >= 100_000_000_000
-                    ? 8
-                    : 0
-                }
-                max={15}
-              />
-              <ScoreRow
-                label="섹터 대장주"
-                value={r.is_leader ? 10 : 0}
-                max={10}
-              />
-              <ScoreRow
-                label="오늘의 테마주"
-                value={r.is_theme_stock ? 15 : 0}
-                max={15}
-              />
-              <ScoreRow
-                label="연속 수급"
-                value={Math.min(r.supply_days, 5) * 3}
-                max={15}
-              />
-              <ScoreRow
-                label="콘텐츠 분석"
-                value={r.content_score}
-                max={10}
-              />
+              {(() => {
+                // 백엔드 score_candidate(trading_engine.py)의 가점·정규화와 일치시킨다.
+                // 각 항목의 raw 가점을 최대 합(SCORE_MAX=135)로 나눠 100점 환산 →
+                // 항목 합이 총점(r.score)과 정확히 맞는다.
+                const SCORE_MAX = 135;
+                const rows = [
+                  {
+                    label: "수급 점수",
+                    raw: ((r.supply_score ?? 0) / 100) * 40,
+                    rawMax: 40,
+                  },
+                  { label: "이평선 정배열", raw: r.ma_aligned ? 10 : 0, rawMax: 10 },
+                  { label: "52주 신고가 근접", raw: r.near_high ? 10 : 0, rawMax: 10 },
+                  {
+                    label: "거래대금",
+                    raw:
+                      r.trading_value >= 200_000_000_000
+                        ? 15
+                        : r.trading_value >= 100_000_000_000
+                        ? 8
+                        : 0,
+                    rawMax: 15,
+                  },
+                  { label: "섹터 대장주", raw: r.is_leader ? 10 : 0, rawMax: 10 },
+                  { label: "프로그램 양매수", raw: r.prog_net_buy > 0 ? 10 : 0, rawMax: 10 },
+                  { label: "오늘의 테마주", raw: r.is_theme_stock ? 15 : 0, rawMax: 15 },
+                  {
+                    // 1~5일 연속성은 supply_score에 반영 → 6일째(초과분)부터 가점
+                    label: "연속 수급",
+                    raw: Math.min(Math.max(r.supply_days - 5, 0), 5) * 3,
+                    rawMax: 15,
+                  },
+                  { label: "콘텐츠 분석", raw: r.content_score, rawMax: 10 },
+                ];
+                return rows.map((row) => (
+                  <ScoreRow
+                    key={row.label}
+                    label={row.label}
+                    value={Math.round((row.raw / SCORE_MAX) * 100)}
+                    max={Math.round((row.rawMax / SCORE_MAX) * 100)}
+                  />
+                ));
+              })()}
               <div className="pt-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
                 <span className="font-bold text-slate-800 dark:text-slate-200">
                   총합
