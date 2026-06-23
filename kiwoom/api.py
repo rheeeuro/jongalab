@@ -131,6 +131,11 @@ def program_trade_by_stock(b: ProgramTrade):
     return api().get_program_trade_by_stock(mrkt_tp=b.mrkt_tp)
 
 
+@app.post("/program-trade/daily-trend")
+def program_trade_daily_trend(b: StkCd):
+    return api().get_program_daily_trend(b.stk_cd)
+
+
 @app.post("/inst-foreign/consecutive")
 def inst_foreign_consecutive(b: MarketTp):
     return api().get_inst_foreign_consecutive(mrkt_tp=b.mrkt_tp)

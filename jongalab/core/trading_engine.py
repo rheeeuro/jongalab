@@ -490,6 +490,20 @@ class AnalysisEngine:
             "supply_history": [],
         }
 
+        # (a-prog) 일별 프로그램 순매수 추이 (ka90013) — 종목별 일자 시계열
+        #          {YYYYMMDD: 프로그램순매수(원)} 맵을 만들어 (a) 5일 추이/오늘값에 사용.
+        prog_by_date: dict[str, int] = {}
+        try:
+            prog_data = self.api.get_program_daily_trend(stk_cd)
+            for item in prog_data.get("stk_daly_prm_trde_trnsn", []):
+                dt = item.get("dt", "")
+                if dt:
+                    # 키움은 음수를 이중부호("--803514")로 줄 때가 있어 정규화한다.
+                    amt = item.get("prm_netprps_amt", "0").replace("--", "-")
+                    prog_by_date[dt] = self.parse_price(amt) * 1_000_000
+        except Exception as e:
+            logger.warning(f"프로그램매매 추이 조회 실패 [{stk_cd}]: {e}")
+
         # (a) 장중 투자자별 매매 (ka10059) — 14:30 이후 잠정치
         try:
             inv_data = self.api.get_intraday_investor(stk_cd)
@@ -502,6 +516,7 @@ class AnalysisEngine:
                     today.get("frgnr_invsr", "0")) * 1_000_000
                 result["indv_net_buy"] = self.parse_price(
                     today.get("ind_invsr", "0")) * 1_000_000
+                result["prog_net_buy"] = prog_by_date.get(today.get("dt", ""), 0)
 
                 # 최근 5일 수급 현황 추출
                 for item in items[:5]:
@@ -515,23 +530,12 @@ class AnalysisEngine:
                         "inst_net_buy": self.parse_price(item.get("orgn", "0")) * 1_000_000,
                         "frgn_net_buy": self.parse_price(item.get("frgnr_invsr", "0")) * 1_000_000,
                         "indv_net_buy": self.parse_price(item.get("ind_invsr", "0")) * 1_000_000,
+                        "prog_net_buy": prog_by_date.get(raw_dt, 0),
                     })
             else:
                 logger.debug(f"[{stk_cd}] ka10059 stk_invsr_orgn 비어있음")
         except Exception as e:
             logger.warning(f"장중투자자 조회 실패 [{stk_cd}]: {e}")
-
-        # (b) 프로그램 매매 현황 (ka90004)
-        try:
-            prog_data = self.api.get_program_trade_by_stock()
-            items = prog_data.get("stk_prm_trde_prst", [])
-            for item in items:
-                if item.get("stk_cd", "") == stk_cd:
-                    result["prog_net_buy"] = self.parse_price(
-                        item.get("netprps_prica", "0")) * 1_000_000
-                    break
-        except Exception as e:
-            logger.warning(f"프로그램매매 조회 실패 [{stk_cd}]: {e}")
 
         # (c) 기관외국인 연속매매현황 (ka10131)
         try:

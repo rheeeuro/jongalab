@@ -148,6 +148,15 @@ class ClosingBetStrategy:
             c.supply_days = supply["supply_days"]
             c.supply_history = supply.get("supply_history", [])
 
+            # 프로그램 양매수(순매수 > 0) 필수 — 종가배팅 선정 조건(무조건)
+            #   프로그램 데이터 조회 실패 시 prog_net_buy=0 → 보수적으로 제외한다.
+            if c.prog_net_buy <= 0:
+                logger.debug(
+                    f"프로그램 양매수 아님 → 제외: {c.name} "
+                    f"(prog={c.prog_net_buy/1e8:+.1f}억)"
+                )
+                continue
+
             # 1시간봉 캔들 데이터 조회
             c.hourly_candles = self.engine.fetch_hourly_candles(c.code)
             logger.debug(f"[{c.name}] 1시간봉 {len(c.hourly_candles)}개 수집")

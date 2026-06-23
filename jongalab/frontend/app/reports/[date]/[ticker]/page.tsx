@@ -123,8 +123,8 @@ function BoolBadge({ value, trueText, falseText }: { value: boolean; trueText: s
   );
 }
 
-function NetBuyCell({ value }: { value: number }) {
-  const b = value / 1e8;
+function NetBuyCell({ value }: { value: number | null | undefined }) {
+  const b = (value ?? 0) / 1e8;
   const isPositive = b > 0;
   const isNegative = b < 0;
   return (
@@ -409,6 +409,9 @@ export default async function StockReportPage({
                     <th className="text-right py-3 px-2 text-slate-500 font-medium">
                       기관
                     </th>
+                    <th className="text-right py-3 px-2 text-slate-500 font-medium">
+                      프로그램
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -439,12 +442,15 @@ export default async function StockReportPage({
                         <td className="text-right py-3 px-2">
                           <NetBuyCell value={h.inst_net_buy} />
                         </td>
+                        <td className="text-right py-3 px-2">
+                          <NetBuyCell value={h.prog_net_buy} />
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
                       <td
-                        colSpan={4}
+                        colSpan={5}
                         className="py-8 text-center text-slate-400"
                       >
                         수급 이력 데이터가 없습니다

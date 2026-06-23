@@ -52,6 +52,9 @@ class KiwoomRestClient:
     def get_program_trade_by_stock(self, mrkt_tp: str = "P00101") -> dict:
         return self._post("/program-trade/by-stock", {"mrkt_tp": mrkt_tp})
 
+    def get_program_daily_trend(self, stk_cd: str) -> dict:
+        return self._post("/program-trade/daily-trend", {"stk_cd": stk_cd})
+
     def get_inst_foreign_consecutive(self, mrkt_tp: str = "001") -> dict:
         return self._post("/inst-foreign/consecutive", {"mrkt_tp": mrkt_tp})
 

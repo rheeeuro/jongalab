@@ -85,6 +85,7 @@ export interface SupplyHistoryItem {
   inst_net_buy: number;
   frgn_net_buy: number;
   indv_net_buy: number;
+  prog_net_buy: number;
 }
 
 export interface HourlyCandleItem {
