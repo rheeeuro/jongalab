@@ -59,6 +59,12 @@ SELL_EXCHANGE = os.getenv('SELL_EXCHANGE', 'SOR')
 # 갭상승 스탑선·갭하락 저가이탈선 양쪽에 동일 적용.
 STOP_BUFFER_PCT = float(os.getenv('STOP_BUFFER_PCT', '0.5'))
 
+# ── 하드 손절(칼손절) ──
+# 시초가 변동성이 큰 정각~settle(:05) 구간을 포함해, 모니터 가동 내내 평단(avg_price) 대비
+# 현재가가 이 %만큼 아래로 떨어지면 settle_plan 유무와 무관하게 즉시 전량 매도한다.
+# settle(08:05/09:05)가 손실을 정리하기 전에 갭하락으로 손실이 커지는 것을 막는 안전망.
+HARD_STOP_LOSS_PCT = float(os.getenv('HARD_STOP_LOSS_PCT', '2.0'))
+
 # ── ⚠️ 매매 안전장치 ──
 # 'paper': 모의(주문 미전송, 의도만 로깅·기록) / 'live': 실주문 전송. 기본값은 paper.
 TRADING_MODE = os.getenv('TRADING_MODE', 'paper').lower()
