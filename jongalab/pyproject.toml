@@ -13,7 +13,6 @@ dependencies = [
     "ollama>=0.6.1",
     "openai>=1.0.0",
     "pydantic>=2.12.5",
-    "pykrx>=1.2.4",
     "python-dotenv>=1.0.0",
     "requests>=2.32.5",
     "telethon>=1.42.0",

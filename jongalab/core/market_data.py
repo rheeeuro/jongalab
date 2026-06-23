@@ -1,7 +1,8 @@
 """
 시장 데이터 서비스
 - 개별 종목(시세/차트/종목명/주도주): 키움 REST API (6자리 종목코드 기준)
-- 주요 지수(미국지수·국내지수·원자재·환율): yfinance
+- 국내지수(코스피/코스닥)·선물: 한국투자증권(KIS) REST API
+- 그 외 지수(미국지수·원자재·환율): yfinance
 """
 import math
 import re
@@ -9,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import yfinance as yf
-from pykrx import stock as pykrx_stock
 
 from core.repository.ticker import lookup_name_by_ticker
 
@@ -104,9 +104,9 @@ MARKET_INDICES = {
         {"symbol": "^VIX", "name": "VIX (공포지수)"},
         {"symbol": "DX-Y.NYB", "name": "달러 인덱스"},
     ],
+    # 코스피/코스닥은 KIS REST(아래 KIS_INDICES)에서 조회해 그룹 앞에 합류.
+    # 환율만 yfinance.
     "KR": [
-        {"symbol": "^KS11", "name": "코스피"},
-        {"symbol": "^KQ11", "name": "코스닥"},
         {"symbol": "USDKRW=X", "name": "원/달러 환율"},
     ],
     "COMMODITIES": [
@@ -120,6 +120,25 @@ MARKET_INDICES = {
         {"symbol": "NQ=F", "name": "나스닥100 선물"},
     ],
 }
+
+# 국내 지수 — KIS 국내업종 현재가(FID_INPUT_ISCD 업종코드)로 조회. KR 그룹 맨 앞에 합류.
+KIS_INDICES = [
+    {"symbol": "^KS11", "name": "코스피", "index_code": "0001"},
+    {"symbol": "^KQ11", "name": "코스닥", "index_code": "1001"},
+]
+
+
+def _kis_index_quote(item: dict) -> dict:
+    """국내 지수(코스피/코스닥) 현재가 (KIS REST). 장중 실시간, 장외엔 직전 종가."""
+    base = {"symbol": item["symbol"], "name": item["name"]}
+    none = {**base, "price": None, "change": None, "change_percent": None}
+    try:
+        q = _get_kis().inquire_index_price(item["index_code"])
+    except Exception:
+        return none
+    if not q or q.get("price") is None:
+        return none
+    return {**base, **q}
 
 def _safe_float(val) -> float | None:
     """nan/inf를 None으로 변환하여 JSON 직렬화 안전하게 처리"""
@@ -269,7 +288,7 @@ def fetch_stock_history(ticker: str, period: str = "7d") -> list[dict]:
 
 
 def fetch_stock_name(ticker: str) -> str:
-    """티커로 종목명 조회 (dictionary → pykrx → 키움 순서, 국장 전용)"""
+    """티커로 종목명 조회 (dictionary → 키움 순서, 국장 전용)"""
     original_ticker = ticker
     ticker = (ticker or "").strip().upper()
 
@@ -282,15 +301,7 @@ def fetch_stock_name(ticker: str) -> str:
     if not re.match(r"^\d{6}$", code):
         return original_ticker
 
-    # 2) pykrx로 한글명 조회
-    try:
-        kr_name = pykrx_stock.get_market_ticker_name(code)
-        if kr_name:
-            return kr_name
-    except Exception:
-        pass
-
-    # 3) 키움 ka10001 폴백
+    # 2) 키움 ka10001 폴백
     try:
         info = _get_kiwoom().get_stock_basic_info(code)
         name = (info.get("stk_nm") or "").strip()
@@ -316,6 +327,9 @@ def fetch_market_indices() -> dict:
     for category, items in MARKET_INDICES.items():
         grouped[category] = results[idx : idx + len(items)]
         idx += len(items)
+
+    # 코스피·코스닥(KIS REST)을 KR 그룹 맨 앞에 합류 — 환율만 yfinance.
+    grouped["KR"] = [_kis_index_quote(it) for it in KIS_INDICES] + grouped.get("KR", [])
 
     # 코스피200 야간선물(마지막 야간 종가 유지) + 주간선물(실시간 REST)을
     # 선물 섹션 맨 앞에 합류 — 국장 시초가에 가장 직접적.

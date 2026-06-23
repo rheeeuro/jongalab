@@ -2,23 +2,36 @@ import re
 import logging
 import warnings
 from ddgs import DDGS
-from pykrx import stock as pykrx_stock
 
 from core.repository import lookup_ticker, save_ticker
 
 warnings.filterwarnings("ignore")
 
 
+# 종목 검증용 키움 HTTP 클라이언트 (lazy singleton)
+_kiwoom_api = None
+
+
+def _get_kiwoom():
+    """코드 검증용 키움 클라이언트 (lazy init). 토큰은 데이터 서버가 보장."""
+    global _kiwoom_api
+    if _kiwoom_api is None:
+        from core.kiwoom_client import KiwoomRestClient
+        _kiwoom_api = KiwoomRestClient()
+    return _kiwoom_api
+
+
 def _is_valid_kr_code(code: str) -> bool:
-    """pykrx로 6자리 코드가 실제 상장 종목인지 검증 (코스피/코스닥 공통)"""
+    """키움으로 6자리 코드가 실제 상장 종목인지 검증 (코스피/코스닥 공통)"""
     try:
-        return bool(pykrx_stock.get_market_ticker_name(code))
+        info = _get_kiwoom().get_stock_basic_info(code)
+        return bool((info.get("stk_nm") or "").strip())
     except Exception:
         return False
 
 
 def _search_ticker_online(company_name):
-    """DuckDuckGo 검색으로 6자리 종목코드 추출 → pykrx 검증 (국장 전용)"""
+    """DuckDuckGo 검색으로 6자리 종목코드 추출 → 키움 검증 (국장 전용)"""
     with DDGS() as ddgs:
         query = f"{company_name} 코스피 코스닥 종목코드"
 

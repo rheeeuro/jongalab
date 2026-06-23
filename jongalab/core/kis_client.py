@@ -34,6 +34,8 @@ _TIMEOUT = 10
 _EXPIRY_MARGIN = timedelta(minutes=5)
 _FUTURES_TR_ID = "FHMIF10000000"
 _FUTURES_PATH = "/uapi/domestic-futureoption/v1/quotations/inquire-price"
+_INDEX_TR_ID = "FHPUP02100000"
+_INDEX_PATH = "/uapi/domestic-stock/v1/quotations/inquire-index-price"
 
 
 def _is_token_expired(expires_dt: str | None) -> bool:
@@ -166,6 +168,51 @@ class KisRestClient:
             return None
         change = _to_float(out.get("futs_prdy_vrss"))
         pct = _to_float(out.get("futs_prdy_ctrt"))
+
+        # prdy_vrss_sign: 1 상한 / 2 상승 / 3 보합 / 4 하한 / 5 하락
+        sign = str(out.get("prdy_vrss_sign") or "")
+        if sign in ("4", "5"):
+            change = -abs(change) if change is not None else None
+            pct = -abs(pct) if pct is not None else None
+        elif sign in ("1", "2"):
+            change = abs(change) if change is not None else None
+            pct = abs(pct) if pct is not None else None
+
+        return {
+            "price": round(price, 2),
+            "change": round(change, 2) if change is not None else None,
+            "change_percent": round(pct, 2) if pct is not None else None,
+        }
+
+    def inquire_index_price(self, index_code: str) -> dict | None:
+        """국내 업종/지수 현재가 조회. {price, change, change_percent} 또는 None.
+
+        index_code: 코스피 종합 '0001', 코스닥 종합 '1001'(KRX 업종 코드).
+        REST 사양: GET /uapi/domestic-stock/v1/quotations/inquire-index-price
+                   tr_id=FHPUP02100000, FID_COND_MRKT_DIV_CODE=U, FID_INPUT_ISCD=<업종코드>
+        정규장 세션 기준 시세이며, 장외 시간엔 직전 종가를 반환한다.
+        """
+        self.ensure_token()
+        url = f"{self.base_url}{_INDEX_PATH}"
+        headers = {
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.secret_key,
+            "tr_id": _INDEX_TR_ID,
+            "custtype": "P",
+            "Content-Type": "application/json; charset=UTF-8",
+        }
+        params = {"FID_COND_MRKT_DIV_CODE": "U", "FID_INPUT_ISCD": index_code}
+        resp = self.session.get(url, headers=headers, params=params, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        out = data.get("output") or {}
+
+        price = _to_float(out.get("bstp_nmix_prpr"))
+        if price is None or price == 0:
+            return None
+        change = _to_float(out.get("bstp_nmix_prdy_vrss"))
+        pct = _to_float(out.get("bstp_nmix_prdy_ctrt"))
 
         # prdy_vrss_sign: 1 상한 / 2 상승 / 3 보합 / 4 하한 / 5 하락
         sign = str(out.get("prdy_vrss_sign") or "")
