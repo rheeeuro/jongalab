@@ -22,6 +22,7 @@ class SupplyHistoryItem(BaseModel):
     inst_net_buy: int = 0
     frgn_net_buy: int = 0
     indv_net_buy: int = 0
+    prog_net_buy: int = 0
 
 
 class HourlyCandleItem(BaseModel):

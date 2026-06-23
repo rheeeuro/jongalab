@@ -70,6 +70,8 @@ def _build_dataset(results: list[dict]) -> list[dict]:
             "is_leader": bool(rpt.get("is_leader")),
             "is_theme_stock": bool(rpt.get("is_theme_stock")),
             "supply_days": int(rpt.get("supply_days") or 0),
+            "prog_net_buy": int(rpt.get("prog_net_buy") or 0),
+            "prog_buy": int(rpt.get("prog_net_buy") or 0) > 0,
             "content_score": round(float(rpt.get("content_score") or 0), 1),
             "change_pct": round(float(rpt.get("change_pct") or 0), 2),
         })
@@ -85,7 +87,7 @@ def _build_prompt(current_weights: dict, dataset: list[dict]) -> str:
             f"정배열={'Y' if d['ma_aligned'] else 'N'} 신고가={'Y' if d['near_high'] else 'N'} "
             f"거래대금={d['trading_value']:,} 대장주={'Y' if d['is_leader'] else 'N'} "
             f"테마={'Y' if d['is_theme_stock'] else 'N'} 연속수급일={d['supply_days']} "
-            f"콘텐츠={d['content_score']}"
+            f"프로그램양매수={'Y' if d['prog_buy'] else 'N'} 콘텐츠={d['content_score']}"
         )
     return WEIGHT_TUNING_PROMPT.format(
         current_weights=json.dumps(current_weights, ensure_ascii=False, indent=2),

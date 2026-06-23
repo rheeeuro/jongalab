@@ -87,6 +87,7 @@ class StrategyConfig:
     SCORE_MIN_VALUE_BONUS = 8         # 거래대금 최소 기준 충족 가점
     SCORE_LEADER_BONUS = 10           # 대장주 가점
     SCORE_EXTRA_SUPPLY_DAY_BONUS = 3  # 5일 초과 장기 연속 수급 1일당 가점
+    SCORE_PROGRAM_BUY_BONUS = 10      # 프로그램 양매수(prog_net_buy>0) 가점 (구 필수 조건 → 가산점화)
 
     def load_from_db(self):
         """DB에서 전략 설정값을 로드하여 인스턴스에 덮어씀"""
@@ -627,6 +628,10 @@ class AnalysisEngine:
         if c.is_leader:
             raw += self.cfg.SCORE_LEADER_BONUS
 
+        # 프로그램 양매수 가점 — 과거 필수 조건이었으나 가산점으로 전환
+        if c.prog_net_buy > 0:
+            raw += self.cfg.SCORE_PROGRAM_BUY_BONUS
+
         # 오늘의 테마주 가산점
         if c.is_theme_stock:
             raw += self.cfg.THEME_STOCK_BONUS
@@ -654,6 +659,7 @@ class AnalysisEngine:
             + self.cfg.SCORE_NEAR_HIGH_BONUS
             + self.cfg.SCORE_PREFERRED_VALUE_BONUS
             + self.cfg.SCORE_LEADER_BONUS
+            + self.cfg.SCORE_PROGRAM_BUY_BONUS
             + self.cfg.THEME_STOCK_BONUS
             + 5 * self.cfg.SCORE_EXTRA_SUPPLY_DAY_BONUS
             + self.cfg.CONTENT_SCORE_MAX
