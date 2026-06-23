@@ -144,8 +144,10 @@ def signals(date: str | None = None):
 
 
 @app.get("/orders")
-def orders(limit: int = 50):
-    """최근 주문 목록."""
+def orders(limit: int = 50, month: str | None = None):
+    """주문 목록. month=YYYYMM 이면 그 달 전체(최신순), 아니면 최근 limit 건."""
+    if month:
+        return order_repo.list_by_month(month)
     return order_repo.list_recent(limit)
 
 

@@ -7,7 +7,7 @@ export function won(v: number): string {
   const sign = n > 0 ? "+" : "-";
   const a = Math.abs(n);
   if (a >= 100_000_000) return `${sign}${(a / 100_000_000).toLocaleString(undefined, { maximumFractionDigits: 1 })}억원`;
-  if (a >= 10_000) return `${sign}${Math.round(a / 10_000).toLocaleString()}만원`;
+  if (a >= 10_000) return `${sign}${(a / 10_000).toLocaleString(undefined, { maximumFractionDigits: 1 })}만원`;
   return `${sign}${a.toLocaleString()}원`;
 }
 
@@ -17,13 +17,17 @@ export function wonExact(v: number): string {
 }
 
 // 달력 칸용 초압축 표기 (+/- 부호, 천/만/억, '원' 생략). 0 은 빈 문자열.
-export function wonCompact(v: number): string {
+// precise=true 면 만 단위를 소수점 1자리까지 표기(넓은 화면용).
+export function wonCompact(v: number, precise = false): string {
   const n = Math.round(v || 0);
   if (n === 0) return "";
   const sign = n > 0 ? "+" : "-";
   const a = Math.abs(n);
   if (a >= 100_000_000) return `${sign}${(a / 100_000_000).toFixed(1)}억`;
-  if (a >= 10_000) return `${sign}${Math.round(a / 10_000)}만`;
+  if (a >= 10_000)
+    return `${sign}${
+      precise ? (a / 10_000).toLocaleString(undefined, { maximumFractionDigits: 1 }) : Math.round(a / 10_000)
+    }만`;
   if (a >= 1_000) return `${sign}${Math.round(a / 1_000)}천`;
   return `${sign}${a}`;
 }

@@ -45,7 +45,7 @@ LLM 은 용도에 따라 나눠 씁니다. 콘텐츠 분석은 로컬 Ollama 로
 ## 기술 스택
 
 - **백엔드** — Python 3.12+, FastAPI, `uv`
-- **데이터/분석** — pykrx, yfinance, telethon, youtube-transcript-api, feedparser
+- **데이터/분석** — yfinance, telethon, youtube-transcript-api, feedparser
 - **LLM** — Ollama(로컬), OpenAI
 - **프론트엔드** — Next.js 16, React 19, Tailwind 4, recharts (모바일 우선)
 - **인프라** — MariaDB, Ollama, PM2

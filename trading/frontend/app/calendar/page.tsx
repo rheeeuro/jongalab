@@ -152,7 +152,8 @@ export default function CalendarPage() {
                 </span>
                 {has && v !== 0 && (
                   <span className={`mt-0.5 text-[9px] font-bold leading-none ${pnlClass(v)}`}>
-                    {wonCompact(v)}
+                    <span className="sm:hidden">{wonCompact(v)}</span>
+                    <span className="hidden sm:inline">{wonCompact(v, true)}</span>
                   </span>
                 )}
                 {has && v === 0 && <span className="mt-0.5 text-[9px] leading-none text-slate-300">·</span>}

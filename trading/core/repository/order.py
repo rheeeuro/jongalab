@@ -27,6 +27,26 @@ def list_recent(limit: int = 50) -> list[dict]:
         return cursor.fetchall()
 
 
+def list_by_month(month: str) -> list[dict]:
+    """해당 월(YYYYMM) 주문 — 거래내역 월별 보기용 (최신순).
+
+    fill_price = 실제 체결 수량가중평균가(미체결 NULL). price 는 주문 시점 참조가.
+    """
+    first_day = f"{month[:4]}-{month[4:6]}-01"
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT o.id, o.idempotency_key, o.stk_cd, o.side, o.qty, o.price, o.ord_type, "
+            "o.mode, o.status, o.kiwoom_ord_no, o.created_at, "
+            "ROUND(SUM(f.qty * f.price) / NULLIF(SUM(f.qty), 0)) AS fill_price, "
+            "COALESCE(SUM(f.qty), 0) AS filled_qty "
+            "FROM `order` o LEFT JOIN fill f ON f.order_id = o.id "
+            "WHERE o.created_at >= %s AND o.created_at < %s + INTERVAL 1 MONTH "
+            "GROUP BY o.id ORDER BY o.id DESC",
+            (first_day, first_day),
+        )
+        return cursor.fetchall()
+
+
 def get_open_sent() -> list[dict]:
     """live 전송 완료(미체결 반영 전) 주문 — 체결 동기화 대상."""
     with get_db() as (conn, cursor):
