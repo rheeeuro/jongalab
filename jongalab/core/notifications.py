@@ -5,7 +5,7 @@ import logging
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from core.config import TELEGRAM_TOKEN
+from core.config import TELEGRAM_BOT_TOKEN
 from core.repository import get_active_chat_ids
 
 
@@ -23,7 +23,7 @@ _session.mount("https://", HTTPAdapter(max_retries=_retry))
 
 
 def _post(chat_id: str, message: str):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": chat_id,
         "text": message,

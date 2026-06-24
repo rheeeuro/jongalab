@@ -34,7 +34,7 @@ KIWOOM_DB_CONFIG = {**_DB_BASE, 'database': os.getenv('KIWOOM_DB_NAME', 'kiwoom'
 JONGALAB_DB_CONFIG = {**_DB_BASE, 'database': os.getenv('JONGALAB_DB_NAME', 'jongalab')}
 
 # 텔레그램 봇 토큰 (관리자 매수현황 알림). jongalab 과 동일 .env 값.
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
 
 # 대시보드 접속 비밀번호 (프론트 로그인 → 백엔드 /admin/login 검증).
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', '')

@@ -26,7 +26,6 @@ DB_CONFIG = {
 TRADING_DB_CONFIG = {**DB_CONFIG, 'database': os.getenv('TRADING_DB_NAME', 'trading')}
 
 # 텔레그램 설정
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
 
 # 텔레그램 API (Telethon)
