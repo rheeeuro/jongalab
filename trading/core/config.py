@@ -59,6 +59,13 @@ SELL_EXCHANGE = os.getenv('SELL_EXCHANGE', 'SOR')
 # 갭상승 스탑선·갭하락 저가이탈선 양쪽에 동일 적용.
 STOP_BUFFER_PCT = float(os.getenv('STOP_BUFFER_PCT', '0.5'))
 
+# ── 트레일링 스탑(고점 추종) ──
+# 절반매도 후 잔량을 09:28 데드라인까지 들고 가며, 모니터가 매 틱 스탑선을 고점 추종으로
+# 끌어올린다(단조 증가, 절대 내리지 않음): stop = max(기존 stop, 현재가*(1 - TRAIL_PCT/100)).
+# 고점 대비 TRAIL_PCT% 빠지면 트레일링 스탑에 걸려 잔량을 매도해 상승분을 최대한 확보한다.
+# 값이 작을수록 고점 가까이에서 청산(잦은 조기 청산), 클수록 더 들고 간다(되돌림 손실↑).
+TRAIL_PCT = float(os.getenv('TRAIL_PCT', '1.0'))
+
 # ── 하드 손절(칼손절) ──
 # 시초가 변동성이 큰 정각~settle(:05) 구간을 포함해, 모니터 가동 내내 평단(avg_price) 대비
 # 현재가가 이 %만큼 아래로 떨어지면 settle_plan 유무와 무관하게 즉시 전량 매도한다.

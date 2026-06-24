@@ -48,6 +48,24 @@ def get_active_plans() -> list[dict]:
         return cursor.fetchall()
 
 
+def raise_stop(trade_date: str, stk_cd: str, new_stop: int, note: str = "") -> bool:
+    """트레일링 스탑 — 새 스탑선이 기존보다 높을 때만 끌어올린다(단조 증가, 절대 내리지 않음).
+
+    고점 추종 트레일링은 stop = max(기존 stop, 현재가*(1-TRAIL_PCT/100)) 로 충분하다:
+    상수배의 시간축 max == (max 현재가=고점)의 상수배 이므로 별도 peak 컬럼이 필요 없다.
+    active=1 인 계획만, 그리고 실제로 더 높을 때만 갱신해 멱등·하향불가를 보장한다.
+    실제로 끌어올렸으면 True.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """UPDATE settle_plan SET stop_price=%s, note=%s
+               WHERE trade_date=%s AND stk_cd=%s AND active=1 AND %s > stop_price""",
+            (new_stop, note, trade_date, stk_cd, new_stop),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
 def deactivate(trade_date: str, stk_cd: str, note: str = "") -> None:
     """청산 완료/중단 — 감시 해제."""
     with get_db() as (conn, cursor):

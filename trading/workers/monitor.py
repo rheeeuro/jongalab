@@ -1,16 +1,20 @@
-"""시초가 청산 윈도우 스탑/저가이탈 + 하드 손절 감시 워커 (30초 폴링).
+"""시초가 청산 윈도우 트레일링 스탑 + 하드 손절 감시 워커 (15초 폴링).
 
-30초마다 모든 보유 포지션을 점검:
+15초마다 모든 보유 포지션을 점검:
   1) 하드 손절(칼손절): 현재가가 평단(avg_price) 대비 HARD_STOP_LOSS_PCT% 아래면
      settle_plan 유무와 무관하게 **즉시 전량 매도**. 08:01~settle(:05) 사이
      갭하락으로 손실이 커지기 전에 끊는 안전망.
   2) 스탑/저가이탈: settle(NXT 08:05)가 기록한 활성 청산계획(settle_plan)의 stop_price
      이하로 내려가면 **즉시 잔량 전량 매도**.
+  3) 트레일링 스탑(고점 추종): 위 둘 다 미발동(=잔량 보유 지속)이면, stop_price 를
+     max(기존, 현재가*(1 - TRAIL_PCT/100)) 로 끌어올린다(단조 증가, 절대 내리지 않음).
+     KRX 정규장(09:00~) 상승을 잔량으로 따라가며 고점 대비 TRAIL_PCT% 되돌리면 (2)에 걸려
+     상승분을 최대한 확보한 가격에 청산한다.
 
-가동 구간은 평일 08:01~09:30 (NXT 개장 직후 ~ KRX 잔량청산 + 여유)으로 한정한다.
+가동 구간은 평일 08:01~09:30 (NXT 개장 직후 ~ KRX 데드라인 + 여유)으로 한정한다.
 08:00 정각은 NXT 시초 호가가 얇아 한 틱 스파이크로 칼손절이 오발동하기 쉬워 08:01 부터
-감시한다(settle 08:05 이전 구간도 하드 손절로 보호). KRX 청산(settle 09:05)이 갭 방향
-무관하게 모든 잔량을 정리하므로 그 이후엔 stop_price 감시할 plan 이 없다.
+감시한다(settle 08:05 이전 구간도 하드 손절로 보호). settle KRX 단계(09:28)가 데드라인으로
+미체결 잔량을 강제 청산하므로, 09:05~09:28 구간은 이 트레일링이 잔량을 들고 가며 관리한다.
 
 pm2 cron 워커(autorestart:false, cron_restart '1 8 * * 1-5'): 08:01 에 기동돼 가동 구간이
 끝나면 스스로 종료하고, 다음 평일 아침 cron 으로 재기동된다. 키움 스톱주문 대신 폴링으로 근사한다.
@@ -19,7 +23,7 @@ import time
 import logging
 from datetime import datetime
 
-from core.config import HARD_STOP_LOSS_PCT
+from core.config import HARD_STOP_LOSS_PCT, TRAIL_PCT
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.fill_sync import sync_fills
@@ -30,7 +34,7 @@ from core.repository import settle_plan as plan_repo
 setup_logging()
 logger = logging.getLogger("Monitor")
 
-POLL_SEC = 30
+POLL_SEC = 15
 
 
 def in_window(now: datetime) -> bool:
@@ -92,6 +96,14 @@ def check_once(engine: ExecutionEngine) -> None:
                                      f"스탑/저가이탈 즉시매도 @{cur}(<= {plan['stop_price']})")
                 logger.info("스탑 발동 [%s] 전량매도 %d주 @%d (선 %d)",
                             stk_cd, pos["qty"], cur, plan["stop_price"])
+            # 3) 트레일링 스탑: 매도 미발동(잔량 보유 지속) 시 고점 추종으로 스탑선 상향.
+            #    cur > stop_price 가 보장되는 분기라 같은 틱 재발동 없음(새 스탑 = cur*(1-pct) < cur).
+            elif plan:
+                trail_stop = round(cur * (1 - TRAIL_PCT / 100))
+                if trail_stop > plan["stop_price"] and plan_repo.raise_stop(
+                        plan["trade_date"], stk_cd, trail_stop, note=f"trail @{cur}"):
+                    logger.info("트레일링 [%s] 스탑 상향 %d→%d (현재가 %d, -%.1f%%)",
+                                stk_cd, plan["stop_price"], trail_stop, cur, TRAIL_PCT)
         except Exception as e:
             logger.error("모니터 점검 실패 [%s]: %s", stk_cd, e)
 
@@ -100,7 +112,7 @@ def main() -> int:
     if not in_window(datetime.now()):
         logger.info("가동 구간(평일 08:00~09:30) 밖 — 종료")
         return 0
-    logger.info("하드손절(-%.1f%%)/스탑 모니터 시작 (30초 폴링, 08:01 기동, 09:30 자동 종료)",
+    logger.info("하드손절(-%.1f%%)/스탑 모니터 시작 (15초 폴링, 08:01 기동, 09:30 자동 종료)",
                 HARD_STOP_LOSS_PCT)
     engine = ExecutionEngine()
     while in_window(datetime.now()):
