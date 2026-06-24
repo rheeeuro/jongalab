@@ -2,7 +2,9 @@
 
 두 도메인(jongalab 분석 ↔ trading 집행)의 유일한 결합점. trading 이 소비한다.
 closing_bet 은 9~18시 30분마다 재실행되므로 (trade_date, stk_cd) UNIQUE 로 멱등 처리:
-재실행 시 점수·순위만 갱신하고 status 는 보존한다(이미 done/skipped 면 재집행하지 않음).
+재실행 시 점수·순위를 갱신하고 status 는 보존하되, 이전에 'expired' 로 정리됐다가 이번
+top-N 에 다시 든 종목은 'pending' 으로 되살린다(done/skipped/rejected/executing 은 보존 →
+이미 집행했거나 처리한 종목은 재집행하지 않음).
 이번 top-N 에서 빠진 잔여 pending 은 'expired' 로 정리한다 — 그러지 않으면 하루 중
 한 번이라도 top-N 에 들었던 종목이 매수 큐에 계속 남아(리포트와 불일치) 의도치 않게 집행된다.
 """
@@ -17,7 +19,8 @@ def push_trade_signals(trade_date: str, candidates: list[dict]) -> int:
     """후보 목록을 trade_signal 에 upsert. 반영된 행 수 반환.
 
     candidates: [{stk_cd, stk_nm, rank_no, score}, ...]
-    신규는 status='pending' 으로 삽입, 기존은 stk_nm/rank_no/score 만 갱신(status 보존).
+    신규는 status='pending' 으로 삽입, 기존은 stk_nm/rank_no/score 갱신 + expired→pending 복귀
+    (done/skipped/rejected/executing 보존).
     """
     if not candidates:
         return 0
@@ -41,6 +44,7 @@ def push_trade_signals(trade_date: str, candidates: list[dict]) -> int:
                    stk_nm = VALUES(stk_nm),
                    rank_no = VALUES(rank_no),
                    score = VALUES(score),
+                   status = IF(status = 'expired', 'pending', status),
                    updated_at = CURRENT_TIMESTAMP""",
             rows,
         )
