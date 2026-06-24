@@ -48,10 +48,11 @@ def apply_buy_fill(stk_cd: str, qty: int, price: int) -> None:
         conn.commit()
 
 
-def apply_sell_fill(stk_cd: str, qty: int, price: int) -> int:
+def apply_sell_fill(stk_cd: str, qty: int, price: int, fee: int = 0) -> int:
     """매도 체결 반영 — 수량 차감 + 실현손익 누적. 실현손익(원) 반환.
 
-    실현손익 = (체결가 - 평단) * 매도수량. 평단은 부분매도 시 유지.
+    실현손익 = (체결가 - 평단) * 매도수량 - fee. 평단은 부분매도 시 유지.
+    fee 는 이 매도 체결분의 매매수수료+세금(원). live 만 채우고 paper 는 0.
     """
     with get_db() as (conn, cursor):
         cursor.execute(
@@ -61,7 +62,7 @@ def apply_sell_fill(stk_cd: str, qty: int, price: int) -> int:
         if not row or row["qty"] <= 0:
             return 0
         sell_qty = min(qty, row["qty"])
-        realized = (price - row["avg_price"]) * sell_qty
+        realized = (price - row["avg_price"]) * sell_qty - fee
         new_qty = row["qty"] - sell_qty
         cursor.execute(
             "UPDATE position SET qty = %s, realized_pnl = realized_pnl + %s WHERE stk_cd = %s",

@@ -37,7 +37,9 @@ def sync_fills(client) -> int:
         logger.error("체결 조회(ka10076) 실패: %s", e)
         return 0
 
-    # ord_no → 누적 체결수량·금액·미체결수량
+    # ord_no → 누적 체결수량·금액·수수료·세금·미체결수량.
+    # tdy_trde_cmsn/tdy_trde_tax 는 각 체결 row별 금액(당일 누적 아님, 실측 확인)이므로
+    # cntr_qty/금액과 동일하게 row 합산 → 주문별 총수수료·총세금.
     agg: dict[str, dict] = {}
     for c in resp.get("cntr", []) or []:
         ono = c.get("ord_no")
@@ -45,9 +47,11 @@ def sync_fills(client) -> int:
         if not ono or q <= 0:
             continue
         p = to_int(c.get("cntr_pric"))
-        a = agg.setdefault(ono, {"qty": 0, "amt": 0, "oso": 0})
+        a = agg.setdefault(ono, {"qty": 0, "amt": 0, "cmsn": 0, "tax": 0, "oso": 0})
         a["qty"] += q
         a["amt"] += q * p
+        a["cmsn"] += to_int(c.get("tdy_trde_cmsn"))
+        a["tax"] += to_int(c.get("tdy_trde_tax"))
         a["oso"] = to_int(c.get("oso_qty"))  # 마지막 값(잔여 미체결)
 
     today = datetime.now().strftime("%Y%m%d")
@@ -60,18 +64,26 @@ def sync_fills(client) -> int:
         delta = info["qty"] - already
         if delta > 0:
             price = round(info["amt"] / info["qty"]) if info["qty"] else 0
-            fill_repo.record_fill(o["id"], o["stk_cd"], delta, price)
+            # 수수료·세금도 수량과 동일하게 증분(이번 동기화분)만 기록 → 부분체결·반복실행 멱등.
+            rec = fill_repo.recorded_fees(o["id"])
+            cmsn = max(0, info["cmsn"] - rec["cmsn"])
+            tax = max(0, info["tax"] - rec["tax"])
+            fill_repo.record_fill(o["id"], o["stk_cd"], delta, price, cmsn, tax)
             if o["side"] == "buy":
                 position_repo.apply_buy_fill(o["stk_cd"], delta, price)
                 audit_log.append("buy_filled_live", o["stk_cd"],
-                                 {"order_id": o["id"], "qty": delta, "price": price})
+                                 {"order_id": o["id"], "qty": delta, "price": price,
+                                  "cmsn": cmsn, "tax": tax})
             else:
-                realized = position_repo.apply_sell_fill(o["stk_cd"], delta, price)
+                # 실현손익은 매도 측 수수료+세금을 차감한 순액. risk·audit 모두 순액으로 일치.
+                realized = position_repo.apply_sell_fill(o["stk_cd"], delta, price, cmsn + tax)
                 risk_repo.add_realized_pnl(today, realized)
                 audit_log.append("sell_filled_live", o["stk_cd"],
-                                 {"order_id": o["id"], "qty": delta, "price": price, "realized": realized})
+                                 {"order_id": o["id"], "qty": delta, "price": price,
+                                  "cmsn": cmsn, "tax": tax, "realized": realized})
             applied += 1
-            logger.info("체결 반영 [%s] %s %d주 @%d", o["stk_cd"], o["side"], delta, price)
+            logger.info("체결 반영 [%s] %s %d주 @%d (수수료 %d, 세금 %d)",
+                        o["stk_cd"], o["side"], delta, price, cmsn, tax)
         if info["oso"] == 0:
             order_repo.mark_sent(o["id"], o["kiwoom_ord_no"], "filled")
     return applied

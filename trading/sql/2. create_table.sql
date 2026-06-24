@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS fill (
     stk_cd      VARCHAR(20) NOT NULL,
     qty         INT NOT NULL,
     price       INT NOT NULL,
+    cmsn        INT NOT NULL DEFAULT 0,             -- 매매수수료(원) — live 키움 ka10076 tdy_trde_cmsn, paper=0
+    tax         INT NOT NULL DEFAULT 0,             -- 매매세금(원, 매도 시) — ka10076 tdy_trde_tax, paper=0
     filled_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_order (order_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -102,6 +102,14 @@ export interface DayDetail {
   realized_by_stock: Record<string, number>;
   roundtrips: RoundTrip[];
   invested: number; // 오늘 청산 원금(Σ 매수가×매도수량) — 실현손익 수익률의 분모
+  fees: Fees; // 당일 수수료·세금
+}
+
+/** 당일 매매수수료·세금 합계(원). 실현손익(realized_pnl)은 이미 매도 측 수수료·세금이 차감된 순액. */
+export interface Fees {
+  cmsn: number; // 매매수수료
+  tax: number; // 매매세금(매도)
+  total: number; // cmsn + tax
 }
 
 export interface DailySummary {
@@ -111,4 +119,5 @@ export interface DailySummary {
   breaker_tripped: boolean;
   open_positions: number;
   kill_switch: boolean | null;
+  fees: Fees; // 당일 수수료·세금
 }

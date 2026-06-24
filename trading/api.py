@@ -19,6 +19,7 @@ from core.repository import position as position_repo
 from core.repository import risk_config as risk_config_repo
 from core.repository import trade_signal as signal_repo
 from core.repository import order as order_repo
+from core.repository import fill as fill_repo
 from core.repository import audit_log
 from core.repository import blocklist as blocklist_repo
 from core.repository import settle_plan as settle_plan_repo
@@ -224,6 +225,7 @@ def day_detail(date: str | None = None):
     roundtrips = _build_roundtrips(dash, sells, realized_map)  # 매수가→매도가→실현손익
     # 청산 원금 = 오늘 판 수량의 매수원금 합(Σ 매수가×매도수량). 실현손익의 분모(수익률 기준).
     invested = sum(t["buy_price"] * t["sell_qty"] for t in roundtrips)
+    fees = fill_repo.fees_by_date(dash)       # 당일 체결 수수료·세금(원). 실현손익은 이미 차감된 순액.
     return {
         "date": d,
         "realized_pnl": state.get("realized_pnl") or 0,
@@ -234,6 +236,7 @@ def day_detail(date: str | None = None):
         "realized_by_stock": realized_map,    # 종목별 실현손익
         "roundtrips": roundtrips,
         "invested": invested,                 # 오늘 청산 원금(수익률 분모)
+        "fees": fees,                         # {cmsn, tax, total} — 당일 수수료·세금
     }
 
 
@@ -242,6 +245,7 @@ def summary(date: str | None = None):
     """일일 요약 — 실현손익·주문수·서킷브레이커·보유종목수·킬스위치."""
     trade_date = date or datetime.now().strftime("%Y%m%d")
     state = risk_repo.get_state(trade_date) or {}
+    dash = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
     return {
         "trade_date": trade_date,
         "realized_pnl": state.get("realized_pnl") or 0,
@@ -249,6 +253,7 @@ def summary(date: str | None = None):
         "breaker_tripped": bool(state.get("breaker_tripped")),
         "open_positions": len(position_repo.get_open_positions()),
         "kill_switch": risk_repo.get_kill_switch(),
+        "fees": fill_repo.fees_by_date(dash),   # {cmsn, tax, total} — 당일 수수료·세금
     }
 
 

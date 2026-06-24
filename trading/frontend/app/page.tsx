@@ -16,6 +16,7 @@ export default async function TodayPage() {
 
   const pnl = summary?.realized_pnl ?? 0;
   const invested = day?.invested ?? 0;
+  const fees = day?.fees?.total ?? summary?.fees?.total ?? 0; // 당일 수수료+세금 (실현손익엔 이미 반영됨)
   const pnlPct = pct(pnl, invested); // 청산 원금 대비 수익률 (원금 0이면 null)
   const nm = (code: string) => names[code] || code;
   const buys = day?.buys ?? [];
@@ -46,6 +47,11 @@ export default async function TodayPage() {
         {pnlPct && (
           <p className="mt-1 text-xs text-slate-400 tabular-nums">
             청산 원금 {wonExact(invested)} 대비
+          </p>
+        )}
+        {fees > 0 && (
+          <p className="mt-0.5 text-xs text-slate-400 tabular-nums">
+            수수료·세금 {wonExact(fees)} 차감 후 순손익
           </p>
         )}
         <div className="mt-3 flex flex-wrap gap-2">
