@@ -40,6 +40,22 @@ def get_pending_signals(trade_date: str) -> list[dict]:
         return cursor.fetchall()
 
 
+def has_fresh_signals(trade_date: str, since: str) -> bool:
+    """since(YYYY-MM-DD HH:MM:SS) 이후 갱신된 시그널 존재 여부.
+
+    closing_bet 은 30분마다 재실행하며 push 때 updated_at 을 항상 갱신한다.
+    매수 워커가 윈도우 시작(15:00/19:30) 이후 갱신을 감지하면 그 회차 closing_bet 가
+    종목 추천을 마쳤다는 신호로 쓴다(같은 분에 동시 기동되는 경쟁 방지).
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT COUNT(*) AS n FROM trade_signal "
+            "WHERE trade_date = %s AND updated_at >= %s",
+            (trade_date, since),
+        )
+        return (cursor.fetchone() or {}).get("n", 0) > 0
+
+
 def update_status(signal_id: int, status: str, note: Optional[str] = None) -> None:
     """시그널 상태 전이."""
     with get_db() as (conn, cursor):

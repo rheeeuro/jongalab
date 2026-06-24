@@ -40,7 +40,8 @@ def push_trade_signals(trade_date: str, candidates: list[dict]) -> int:
                ON DUPLICATE KEY UPDATE
                    stk_nm = VALUES(stk_nm),
                    rank_no = VALUES(rank_no),
-                   score = VALUES(score)""",
+                   score = VALUES(score),
+                   updated_at = CURRENT_TIMESTAMP""",
             rows,
         )
         upserted = cursor.rowcount
