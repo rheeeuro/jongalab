@@ -110,7 +110,7 @@ def send_daily_digest_alert(date: str, buy: str, buy_reason: str, sell: str, sel
 def send_gap_check_alert(
     report_date: str, check_time: str, rows: list[dict], is_retry: bool = False
 ):
-    """갭상승 체크 리포트 — ADMIN 유저에게만 전송
+    """갭상승 체크 리포트 — 활성 상태인 모든 유저에게 전송
 
     초기(8:10) rows: [{rank, name, report_price, now_price, pct, error?, pending?}]
     재조회(9:10) rows: [{rank, name, report_price,
@@ -222,7 +222,7 @@ def send_gap_check_alert(
                 + "\n\n".join(sections)
             )
 
-        count = _send_telegram_admin(message)
+        count = _send_telegram_message(message)
         logging.info(
             f"📨 갭 체크 전송 완료 -> {count}개 채팅방 "
             f"({wins}승 {losses}패)"
