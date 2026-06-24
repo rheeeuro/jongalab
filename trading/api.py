@@ -124,8 +124,9 @@ def positions():
     if rows:
         dc = KiwoomDataClient()
         for p in rows:
-            cur = dc.get_current_price(p["stk_cd"])
+            cur, is_nxt = dc.get_display_price(p["stk_cd"])
             p["cur_prc"] = cur
+            p["is_nxt"] = is_nxt
             p["eval_amt"] = cur * p["qty"]
             p["unrealized_pnl"] = (cur - p["avg_price"]) * p["qty"] if cur else 0
     return rows

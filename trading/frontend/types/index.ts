@@ -17,6 +17,8 @@ export interface Position {
   updated_at: string;
   // /positions 에서 현재가로 평가 (조회 실패 시 0)
   cur_prc?: number;
+  // cur_prc 가 NXT(넥스트레이드) 보드 시세이면 true
+  is_nxt?: boolean;
   eval_amt?: number;
   unrealized_pnl?: number;
 }

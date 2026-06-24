@@ -111,7 +111,12 @@ export default async function TodayPage() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-semibold tabular-nums">
+                    <p className="flex items-center justify-end gap-1 font-semibold tabular-nums">
+                      {p.is_nxt && p.cur_prc ? (
+                        <span className="rounded bg-indigo-100 px-1 py-0.5 text-[10px] font-bold leading-none text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300">
+                          NXT
+                        </span>
+                      ) : null}
                       {p.cur_prc ? wonExact(p.cur_prc) : "-"}
                     </p>
                     <p className={`text-xs font-semibold tabular-nums ${pnlClass(up)}`}>{won(up)}</p>
