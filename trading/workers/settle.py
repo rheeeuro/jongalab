@@ -68,7 +68,7 @@ def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
                 logger.warning("[NXT] 현재가 조회 실패 — 보류 [%s]", stk_cd)
                 continue
             gap_dir = "up" if nxt_open > avg else "down"
-            half = (qty + 1) // 2  # 올림(소숫점 올림) — 1주는 전량(=1)
+            half = qty // 2  # 내림(소숫점 내림) — 1주는 절반=0(매도 안 함, 전량 보유로 회복 대기)
             if half >= 1:
                 engine.execute_sell(trade_date, stk_cd, half, nxt_open,
                                     dmst_stex_tp="NXT", tag="nxt")  # NXT → 최유리IOC
