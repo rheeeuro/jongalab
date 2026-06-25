@@ -26,7 +26,7 @@ export default async function TodayPage() {
   const buys = day?.buys ?? [];
   const trips = day?.roundtrips ?? [];
   const tripsTotal = trips.reduce((s, t) => s + t.sell_qty * t.sell_price, 0); // 매도금액 합계
-  const buysTotal = buys.reduce((s, o) => s + o.qty * (o.fill_price ?? o.price), 0); // 매수금액 합계
+  const buysTotal = buys.reduce((s, o) => s + (o.filled_qty || o.qty) * (o.fill_price ?? o.price), 0); // 매수금액 합계(체결수량 기준)
   const posTotal = positions.reduce((s, p) => s + (p.eval_amt ?? (p.cur_prc ?? 0) * p.qty), 0); // 평가금액 합계
   const live = health?.mode === "live";
   const auto = !health?.kill_switch; // 킬스위치 OFF = 자동매매 작동중
@@ -92,7 +92,7 @@ export default async function TodayPage() {
                   <p className="text-xs text-slate-400">{o.stk_cd}</p>
                 </div>
                 <div className="text-right">
-                  <p className="font-semibold tabular-nums">{o.qty}주</p>
+                  <p className="font-semibold tabular-nums">{o.filled_qty || o.qty}주</p>
                   <p className="text-xs text-slate-400 tabular-nums">{wonExact(o.fill_price ?? o.price)}</p>
                 </div>
               </li>
