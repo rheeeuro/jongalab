@@ -38,19 +38,30 @@ POLL_SEC = 15
 
 
 def in_window(now: datetime) -> bool:
-    """모니터 가동 구간: 평일 08:01~09:30 (NXT 개장 직후 ~ KRX 잔량청산 + 여유).
+    """모니터 가동 구간: 평일 08:00~09:30 (NXT 개장 ~ KRX 잔량청산 + 여유).
 
-    08:00 정각은 NXT 시초 호가가 얇아 한 틱 스파이크로 칼손절이 오발동하기 쉬워
-    08:01 부터 감시한다."""
+    08:00·09:00 개장 직후 1분은 시가 체결 전 stale 가격 오발동 위험이 있어
+    in_open_warmup() 으로 평가를 스킵한다(가동 자체는 08:00부터)."""
     if now.weekday() >= 5:
         return False
-    return (8, 1) <= (now.hour, now.minute) <= (9, 30)
+    return (8, 0) <= (now.hour, now.minute) <= (9, 30)
 
 
 def sell_venue(now: datetime) -> str:
     """매도 거래소: KRX 정규장(09:00~15:30)이면 KRX(시장가), 그 외 NXT 시간대면 NXT(최유리IOC)."""
     hm = (now.hour, now.minute)
     return "KRX" if (9, 0) <= hm < (15, 30) else "NXT"
+
+
+def in_open_warmup(now: datetime) -> bool:
+    """거래소 개장 직후 1분(NXT 08:00~08:01, KRX 09:00~09:01)은 평가를 스킵한다.
+
+    시가 단일가 체결이 ka10001 `cur_prc`에 반영되기 전이라, 이 구간엔 cur_prc 가
+    실시간가가 아니라 기준가(=전일 종가)를 돌려줄 수 있다. 그 stale 값으로 스탑/손절을
+    판정하면 실제 시장이 스탑 위에 있어도 오발동해 잔량을 강제 청산한다(반대로 진짜
+    갭하락 날엔 갭 바닥에 시장가로 던질 위험). 시가가 체결돼 가격이 안정되는 1분간 대기."""
+    hm = (now.hour, now.minute)
+    return hm == (8, 0) or hm == (9, 0)
 
 
 def check_once(engine: ExecutionEngine) -> None:
@@ -74,28 +85,36 @@ def check_once(engine: ExecutionEngine) -> None:
         plan = plans.get(stk_cd)
         trade_date = plan["trade_date"] if plan else datetime.now().strftime("%Y%m%d")
         try:
-            cur = engine.data.get_current_price(stk_cd)
+            cur = engine.data.get_market_price(stk_cd)
             if cur <= 0:
                 continue
             # 1) 하드 손절(칼손절): 평단 대비 -HARD_STOP_LOSS_PCT% 이하면 plan 유무 무관 전량매도
             hard_stop = round(pos["avg_price"] * (1 - HARD_STOP_LOSS_PCT / 100))
             if cur <= hard_stop:
-                engine.execute_sell(trade_date, stk_cd, pos["qty"], cur,
-                                    dmst_stex_tp=sell_venue(datetime.now()), tag="hardstop")
-                if plan:
-                    plan_repo.deactivate(plan["trade_date"], stk_cd,
-                                         f"하드손절 즉시매도 @{cur}(<= {hard_stop}, 평단 {pos['avg_price']})")
-                logger.info("하드손절 발동 [%s] 전량매도 %d주 @%d (선 %d, 평단 %d, -%.1f%%)",
-                            stk_cd, pos["qty"], cur, hard_stop, pos["avg_price"], HARD_STOP_LOSS_PCT)
+                sold = engine.execute_sell(trade_date, stk_cd, pos["qty"], cur,
+                                           dmst_stex_tp=sell_venue(datetime.now()), tag="hardstop")
+                if sold:
+                    if plan:
+                        plan_repo.deactivate(plan["trade_date"], stk_cd,
+                                             f"하드손절 즉시매도 @{cur}(<= {hard_stop}, 평단 {pos['avg_price']})")
+                    logger.info("하드손절 발동 [%s] 전량매도 %d주 @%d (선 %d, 평단 %d, -%.1f%%)",
+                                stk_cd, pos["qty"], cur, hard_stop, pos["avg_price"], HARD_STOP_LOSS_PCT)
+                else:
+                    logger.warning("하드손절 매도 거부/미전송 [%s] @%d (선 %d) — plan 유지, 다음 폴링 재시도",
+                                   stk_cd, cur, hard_stop)
                 continue
             # 2) 스탑/저가이탈: settle_plan 의 stop_price 이하면 잔량 전량매도
             if plan and cur <= plan["stop_price"]:
-                engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
-                                    dmst_stex_tp=sell_venue(datetime.now()), tag="stop")
-                plan_repo.deactivate(plan["trade_date"], stk_cd,
-                                     f"스탑/저가이탈 즉시매도 @{cur}(<= {plan['stop_price']})")
-                logger.info("스탑 발동 [%s] 전량매도 %d주 @%d (선 %d)",
-                            stk_cd, pos["qty"], cur, plan["stop_price"])
+                sold = engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
+                                           dmst_stex_tp=sell_venue(datetime.now()), tag="stop")
+                if sold:
+                    plan_repo.deactivate(plan["trade_date"], stk_cd,
+                                         f"스탑/저가이탈 즉시매도 @{cur}(<= {plan['stop_price']})")
+                    logger.info("스탑 발동 [%s] 전량매도 %d주 @%d (선 %d)",
+                                stk_cd, pos["qty"], cur, plan["stop_price"])
+                else:
+                    logger.warning("스탑 매도 거부/미전송 [%s] @%d (선 %d) — plan 유지, 다음 폴링 재시도",
+                                   stk_cd, cur, plan["stop_price"])
             # 3) 트레일링 스탑: 매도 미발동(잔량 보유 지속) 시 고점 추종으로 스탑선 상향.
             #    cur > stop_price 가 보장되는 분기라 같은 틱 재발동 없음(새 스탑 = cur*(1-pct) < cur).
             elif plan:
@@ -112,10 +131,16 @@ def main() -> int:
     if not in_window(datetime.now()):
         logger.info("가동 구간(평일 08:00~09:30) 밖 — 종료")
         return 0
-    logger.info("하드손절(-%.1f%%)/스탑 모니터 시작 (15초 폴링, 08:01 기동, 09:30 자동 종료)",
+    logger.info("하드손절(-%.1f%%)/스탑 모니터 시작 (15초 폴링, 08:00 기동, 08:00·09:00 워밍업 스킵, 09:30 자동 종료)",
                 HARD_STOP_LOSS_PCT)
     engine = ExecutionEngine()
     while in_window(datetime.now()):
+        now = datetime.now()
+        if in_open_warmup(now):
+            logger.info("개장 워밍업 %02d:%02d — 시가 체결 전 stale 가격 오발동 방지 위해 평가 스킵",
+                        now.hour, now.minute)
+            time.sleep(POLL_SEC)
+            continue
         try:
             check_once(engine)
         except Exception as e:

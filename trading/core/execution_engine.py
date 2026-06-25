@@ -60,7 +60,7 @@ class ExecutionEngine:
             return int(signal["_qty"] or 0), int(signal.get("_price") or 0)
 
         stk_cd = signal["stk_cd"]
-        price = self.data.get_current_price(stk_cd)
+        price = self.data.get_market_price(stk_cd)
         if price <= 0:
             return 0, 0
         avail = to_int(self.client.get_deposit().get("ord_alow_amt"))

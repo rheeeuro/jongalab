@@ -136,7 +136,7 @@ def main() -> int:
     # 3) 윈도우 시작 시점 현재가로 시드 배분 → 종목별 매수 수량 확정 (이후 눌려도 수량 고정)
     cands: list[dict] = [
         {"sig": sig, "stk_cd": stk, "score": score,
-         "price": engine.data.get_current_price(stk), "high": 0, "bought": False}
+         "price": engine.data.get_market_price(stk), "high": 0, "bought": False}
         for sig, stk, score in venue_items
     ]
     for c in cands:
@@ -156,7 +156,7 @@ def main() -> int:
             if c["bought"]:
                 continue
             try:
-                cur = engine.data.get_current_price(c["stk_cd"])
+                cur = engine.data.get_market_price(c["stk_cd"])
             except Exception as e:
                 logger.warning("현재가 조회 실패 [%s]: %s", c["stk_cd"], e)
                 continue
@@ -179,7 +179,7 @@ def main() -> int:
         if c["bought"]:
             continue
         try:
-            cur = engine.data.get_current_price(c["stk_cd"])
+            cur = engine.data.get_market_price(c["stk_cd"])
             if cur > 0:
                 c["price"] = cur
         except Exception as e:

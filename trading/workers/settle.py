@@ -63,7 +63,7 @@ def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
             logger.info("[NXT] %s 비-NXT — 08:05 단계 건너뜀(09:05 KRX 청산)", stk_cd)
             continue
         try:
-            nxt_open = engine.data.get_current_price(stk_cd)
+            nxt_open = engine.data.get_market_price(stk_cd)
             if nxt_open <= 0:
                 logger.warning("[NXT] 현재가 조회 실패 — 보류 [%s]", stk_cd)
                 continue
@@ -111,18 +111,19 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
             plan_repo.deactivate(plan["trade_date"], stk_cd, "이미 청산됨")
             continue
         try:
-            cur = engine.data.get_current_price(stk_cd)
+            cur = engine.data.get_market_price(stk_cd)
             if cur <= 0:
                 logger.warning("[KRX] 현재가 조회 실패 — 보류 [%s]", stk_cd)
                 continue
+            sold = engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
+                                       dmst_stex_tp="KRX", tag="krx")
+            if not sold:
+                logger.warning("[KRX] %s 전량매도 거부/미전송 @%d — plan 유지, 다음 단계 재시도", stk_cd, cur)
+                continue
             if plan["gap_dir"] == "up":
-                engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
-                                    dmst_stex_tp="KRX", tag="krx")
                 plan_repo.deactivate(plan["trade_date"], stk_cd, "갭상승 KRX 전량매도")
                 logger.info("[KRX] %s 갭상승 전량매도 %d주 @%d", stk_cd, pos["qty"], cur)
             else:  # 갭하락 — 회복 여부와 무관하게 전량 매도(잔량 보유 안 함)
-                engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
-                                    dmst_stex_tp="KRX", tag="krx")
                 reason = ("갭하락 시초가회복 전량매도" if cur >= plan["nxt_open"]
                           else "갭하락 회복실패 전량매도")
                 plan_repo.deactivate(plan["trade_date"], stk_cd, reason)
@@ -136,7 +137,7 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
         if plan_repo.get_plan(trade_date, stk_cd):
             continue  # plan 있는 NXT 종목은 위에서 처리됨
         try:
-            cur = engine.data.get_current_price(stk_cd)
+            cur = engine.data.get_market_price(stk_cd)
             if cur <= 0:
                 logger.warning("[KRX] 현재가 조회 실패 — 보류 [%s]", stk_cd)
                 continue

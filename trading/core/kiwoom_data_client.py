@@ -115,3 +115,13 @@ class KiwoomDataClient:
             if nxt:
                 return nxt, True
         return self.get_current_price(stk_cd), False
+
+    def get_market_price(self, stk_cd: str) -> int:
+        """체결·청산 판정용 현재가(원, 양수). 조회 실패 시 0.
+
+        정규장 외(NXT 시간대)에는 ka10001 `cur_prc` 가 NXT 시세가 아니라 기준가
+        (=전일 KRX 종가)를 돌려주므로, 그대로 쓰면 settle/monitor 가 NXT 실시간가를
+        못 보고 죽은 기준가로 손절·스탑·트레일링을 판정한다. get_display_price 와
+        동일한 NXT-aware 판정(정규장 외 + NXT 가능 → NXT 최근 체결가, 그 외 KRX)을
+        써서 실제 거래 가능한 시세를 돌려준다."""
+        return self.get_display_price(stk_cd)[0]

@@ -147,10 +147,24 @@ def create_intended(
 
 
 def mark_sent(order_id: int, kiwoom_ord_no: Optional[str], status: str) -> None:
-    """키움 전송 결과 반영."""
+    """키움 전송 결과 반영.
+
+    거부(rejected)면 멱등키 뒤에 ':x{id}' 를 붙여 유니크하게 바꿔 베이스 키를 풀어준다.
+    거부된 주문은 체결되지 않았으므로(키움이 return_code≠0/주문번호 없음으로 반려)
+    같은 키의 재시도는 중복 전송이 아니다. 이렇게 안 하면 거부 행이 UNIQUE 멱등키를
+    영구 점유해 당일 동일 (거래일·시그널·tag) 매도/매수 재시도가 전부 차단된다
+    (예: 휴장시간 stop 매도 거부 → 같은 종목 stop 재시도 불가). 거부 행 자체는
+    감사 로그로 그대로 보존된다. sent/filled 등은 키를 유지해 중복 전송을 계속 막는다."""
     with get_db() as (conn, cursor):
-        cursor.execute(
-            "UPDATE `order` SET kiwoom_ord_no = %s, status = %s WHERE id = %s",
-            (kiwoom_ord_no, status, order_id),
-        )
+        if status == "rejected":
+            cursor.execute(
+                "UPDATE `order` SET kiwoom_ord_no = %s, status = %s, "
+                "idempotency_key = CONCAT(idempotency_key, ':x', id) WHERE id = %s",
+                (kiwoom_ord_no, status, order_id),
+            )
+        else:
+            cursor.execute(
+                "UPDATE `order` SET kiwoom_ord_no = %s, status = %s WHERE id = %s",
+                (kiwoom_ord_no, status, order_id),
+            )
         conn.commit()
