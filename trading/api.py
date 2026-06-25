@@ -23,7 +23,9 @@ from core.repository import fill as fill_repo
 from core.repository import audit_log
 from core.repository import blocklist as blocklist_repo
 from core.repository import settle_plan as settle_plan_repo
-from core.kiwoom_data_client import KiwoomDataClient
+from core.kiwoom_data_client import KiwoomDataClient, to_int
+from core.kiwoom_order_client import KiwoomOrderClient
+from core.seed_allocator import allocate
 
 setup_logging()
 logger = logging.getLogger("TradingAPI")
@@ -143,6 +145,88 @@ def signals(date: str | None = None):
     """거래일 시그널 목록 (기본: 오늘)."""
     trade_date = date or datetime.now().strftime("%Y%m%d")
     return signal_repo.get_signals_by_date(trade_date)
+
+
+@app.get("/buy-preview")
+def buy_preview(date: str | None = None):
+    """오늘 매수 예정 종목 미리보기 (KRX/NXT 거래소별 시드 배분·예상 수량).
+
+    pending 시그널을 NXT 상장 여부로 KRX(15:00~15:20)/NXT(19:30~19:50) 윈도우에 나누고,
+    가용현금(100stk_ord_alow_amt)을 거래소 점수비례로 분할해 seed_allocator 로 종목별 예상
+    수량을 계산한다. signal_executor 와 동일 로직이지만 **읽기 전용** — DB/주문은 건드리지 않는다.
+    가격·현금·NXT 여부는 호출 시점의 실시간 값이라 실제 집행 결과와 다를 수 있다(미리보기).
+    """
+    trade_date = date or datetime.now().strftime("%Y%m%d")
+    signals = signal_repo.get_pending_signals(trade_date)
+    block = blocklist_repo.get_codes()
+
+    # 1) blocklist 제외 후 거래소·점수·현재가 분류 (executor 와 동일)
+    dc = KiwoomDataClient()
+    classified = []  # {sig, is_nxt, price}
+    for sig in signals:
+        stk = sig["stk_cd"]
+        if stk in block:
+            continue
+        try:
+            price = dc.get_market_price(stk)
+        except Exception as e:
+            logger.warning("buy-preview 현재가 조회 실패 [%s]: %s", stk, e)
+            price = 0
+        try:
+            is_nxt = dc.is_nxt_enabled(stk)
+        except Exception as e:
+            logger.warning("buy-preview NXT 여부 조회 실패 [%s]: %s", stk, e)
+            is_nxt = False
+        classified.append({
+            "sig": sig,
+            "score": max(float(sig.get("score") or 0), 0),
+            "price": price,
+            "is_nxt": is_nxt,
+        })
+
+    total_score = sum(c["score"] for c in classified)
+    try:
+        cash = to_int(KiwoomOrderClient().get_deposit().get("100stk_ord_alow_amt"))
+    except Exception as e:
+        logger.warning("buy-preview 가용현금 조회 실패: %s", e)
+        cash = 0
+
+    # 2) 거래소별 시드 = 가용현금 × (거래소 점수합 / 전체 점수합), 그 안에서 점수가중 배분
+    venues = []
+    for exchange, want_nxt, window in (("KRX", False, "15:00~15:20"), ("NXT", True, "19:30~19:50")):
+        items = [c for c in classified if c["is_nxt"] == want_nxt]
+        venue_score = sum(c["score"] for c in items)
+        seed = int(cash * venue_score / total_score) if total_score > 0 else 0
+        cands = [{"stk_cd": c["sig"]["stk_cd"], "score": c["score"], "price": c["price"]} for c in items]
+        allocate(seed, cands)
+        stocks = []
+        for c, a in zip(items, cands):
+            sig = c["sig"]
+            shares, cost = a.get("shares", 0), a.get("cost", 0)
+            note = ("현재가 없음" if c["price"] <= 0
+                    else "배분 0주(시드 부족)" if shares < 1
+                    else None)
+            stocks.append({
+                "stk_cd": sig["stk_cd"],
+                "stk_nm": sig.get("stk_nm"),
+                "rank_no": sig.get("rank_no"),
+                "score": c["score"],
+                "price": c["price"],
+                "shares": shares,
+                "cost": cost,
+                "note": note,
+            })
+        stocks.sort(key=lambda s: (s["rank_no"] is None, s["rank_no"] or 0))
+        venues.append({
+            "exchange": exchange,
+            "window": window,
+            "seed": seed,
+            "invested": sum(s["cost"] for s in stocks),
+            "count": sum(1 for s in stocks if s["shares"] >= 1),
+            "stocks": stocks,
+        })
+
+    return {"trade_date": trade_date, "cash": cash, "total_score": total_score, "venues": venues}
 
 
 @app.get("/orders")

@@ -114,6 +114,34 @@ export interface Fees {
   total: number; // cmsn + tax
 }
 
+/** 매수 예정 미리보기 — pending 시그널을 거래소별로 나눠 시드 배분·예상 수량을 계산(읽기 전용). */
+export interface BuyPreviewStock {
+  stk_cd: string;
+  stk_nm: string | null;
+  rank_no: number | null;
+  score: number;
+  price: number; // 호출 시점 현재가 (0이면 조회 실패)
+  shares: number; // 예상 배분 수량
+  cost: number; // 예상 매수금액 (shares × price)
+  note: string | null; // "배분 0주(시드 부족)" / "현재가 없음" / null(매수 예정)
+}
+
+export interface BuyPreviewVenue {
+  exchange: "KRX" | "NXT";
+  window: string; // 매수 윈도우 (예: "15:00~15:20")
+  seed: number; // 이 거래소 몫 시드 (가용현금 × 점수비율)
+  invested: number; // 예상 매수금액 합계
+  count: number; // 실제 매수 예정 종목 수 (1주 이상)
+  stocks: BuyPreviewStock[];
+}
+
+export interface BuyPreview {
+  trade_date: string;
+  cash: number; // 가용현금 (현금주문가능금액)
+  total_score: number;
+  venues: BuyPreviewVenue[];
+}
+
 export interface DailySummary {
   trade_date: string;
   realized_pnl: number;

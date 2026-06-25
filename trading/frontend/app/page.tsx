@@ -1,17 +1,21 @@
 import { apiFetch } from "@/lib/api";
 import { won, wonExact, pnlClass, pct, fmtDate, todayYYYYMMDD } from "@/lib/format";
-import type { HealthStatus, Position, DayDetail, DailySummary, NameMap } from "@/types";
+import type { HealthStatus, Position, DayDetail, DailySummary, NameMap, BuyPreview } from "@/types";
 import RoundTrips from "@/components/RoundTrips";
 
 export const dynamic = "force-dynamic";
 
 export default async function TodayPage() {
-  const [health, summary, positions, day, names] = await Promise.all([
+  // 매수 예정 탭은 매수 윈도우대(15:00~20:00)에만 노출 — 그 밖엔 키움 호출도 생략.
+  // (KRX 15:00~15:20 / NXT 19:30~19:50 을 포함하는 구간. 매수 완료로 pending 이 비면 탭은 자동으로 사라짐)
+  const inPreviewWindow = new Date().getHours() >= 15 && new Date().getHours() < 20;
+  const [health, summary, positions, day, names, preview] = await Promise.all([
     apiFetch<HealthStatus | null>("/health", null),
     apiFetch<DailySummary | null>("/summary", null),
     apiFetch<Position[]>("/positions", []),
     apiFetch<DayDetail | null>("/day", null),
     apiFetch<NameMap>("/names", {}),
+    inPreviewWindow ? apiFetch<BuyPreview | null>("/buy-preview", null) : Promise.resolve(null),
   ]);
 
   const pnl = summary?.realized_pnl ?? 0;
@@ -26,6 +30,11 @@ export default async function TodayPage() {
   const posTotal = positions.reduce((s, p) => s + (p.eval_amt ?? (p.cur_prc ?? 0) * p.qty), 0); // 평가금액 합계
   const live = health?.mode === "live";
   const auto = !health?.kill_switch; // 킬스위치 OFF = 자동매매 작동중
+  const previewVenues = (preview?.venues ?? []).filter((v) => v.stocks.length > 0);
+  const previewTotal = previewVenues.reduce((s, v) => s + v.invested, 0); // 예상 매수금액 합계
+  const previewCount = previewVenues.reduce((s, v) => s + v.count, 0); // 매수 예정 종목 수
+  // 윈도우대 안 + 아직 집행 대기(pending) 종목이 있을 때만 노출. 매수가 끝나면 pending 이 비어 사라짐.
+  const showPreview = inPreviewWindow && previewVenues.length > 0;
 
   return (
     <main className="mx-auto w-full max-w-2xl px-5 pt-8">
@@ -72,11 +81,9 @@ export default async function TodayPage() {
         )}
       </Card>
 
-      {/* 오늘 매수 종목 */}
-      <Card title="오늘 매수한 종목" count={buys.length} total={buysTotal}>
-        {buys.length === 0 ? (
-          <Empty>오늘 매수한 종목이 없어요.</Empty>
-        ) : (
+      {/* 오늘 매수 종목 — 없으면 카드 숨김 */}
+      {buys.length > 0 && (
+        <Card title="오늘 매수한 종목" count={buys.length} total={buysTotal}>
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {buys.map((o) => (
               <li key={o.id} className="flex items-center justify-between py-3">
@@ -91,14 +98,85 @@ export default async function TodayPage() {
               </li>
             ))}
           </ul>
-        )}
-      </Card>
+        </Card>
+      )}
 
-      {/* 보유 중 */}
-      <Card title="보유 중인 종목" count={positions.length} total={posTotal}>
-        {positions.length === 0 ? (
-          <Empty>보유 중인 종목이 없어요.</Empty>
-        ) : (
+      {/* 오늘 매수 예정 — pending 시그널을 거래소별로 시드 배분한 예상 수량(실시간 미리보기).
+          매수 윈도우대(15~20시)에 아직 집행 대기 종목이 있을 때만 노출. */}
+      {showPreview && (
+        <Card title="오늘 매수 예정" count={previewCount} total={previewTotal}>
+          <div className="space-y-4">
+            <p className="-mt-1 text-xs text-slate-400 tabular-nums">
+              가용현금 {wonExact(preview?.cash ?? 0)} 기준 예상 배분
+            </p>
+            {previewVenues.map((v) => (
+              <div key={v.exchange}>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none ${
+                        v.exchange === "NXT"
+                          ? "bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300"
+                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                      }`}
+                    >
+                      {v.exchange}
+                    </span>
+                    <span className="text-xs text-slate-400 tabular-nums">{v.window}</span>
+                  </div>
+                  <span className="min-w-0 truncate text-right text-xs text-slate-400 tabular-nums">
+                    시드 {wonExact(v.seed)}
+                  </span>
+                </div>
+                <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {v.stocks.map((s) => {
+                    const buying = s.shares >= 1;
+                    return (
+                      <li
+                        key={s.stk_cd}
+                        className={`flex items-center justify-between gap-2 py-3 ${buying ? "" : "opacity-50"}`}
+                      >
+                        <div className="min-w-0">
+                          <p className="flex items-center gap-1.5 truncate font-semibold">
+                            {s.rank_no != null && (
+                              <span className="shrink-0 text-xs font-bold text-slate-400 tabular-nums">
+                                {s.rank_no}
+                              </span>
+                            )}
+                            <span className="truncate">{nm(s.stk_cd)}</span>
+                          </p>
+                          <p className="text-xs text-slate-400 tabular-nums">
+                            {s.stk_cd} · {s.score.toFixed(1)}점
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          {buying ? (
+                            <>
+                              <p className="font-semibold tabular-nums">{s.shares}주</p>
+                              <p className="text-xs text-slate-400 tabular-nums">
+                                {wonExact(s.cost)}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-xs text-slate-400">{s.note ?? "매수 안 함"}</p>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+            <p className="text-[11px] leading-relaxed text-slate-400">
+              현재가·가용현금 기준 예상치입니다. 실제 수량은 매수 윈도우(KRX 15:00 / NXT 19:30) 시점에 확정돼요.
+            </p>
+          </div>
+        </Card>
+      )}
+
+      {/* 보유 중 — 없으면 카드 숨김 */}
+      {positions.length > 0 && (
+        <Card title="보유 중인 종목" count={positions.length} total={posTotal}>
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {positions.map((p) => {
               const up = p.unrealized_pnl ?? 0;
@@ -125,8 +203,8 @@ export default async function TodayPage() {
               );
             })}
           </ul>
-        )}
-      </Card>
+        </Card>
+      )}
 
       {/* 오늘 요약 */}
       <div className="mt-4 grid grid-cols-2 gap-3">
