@@ -36,6 +36,8 @@ _FUTURES_TR_ID = "FHMIF10000000"
 _FUTURES_PATH = "/uapi/domestic-futureoption/v1/quotations/inquire-price"
 _INDEX_TR_ID = "FHPUP02100000"
 _INDEX_PATH = "/uapi/domestic-stock/v1/quotations/inquire-index-price"
+_FUTURES_CHART_TR_ID = "FHKIF03020100"
+_FUTURES_CHART_PATH = "/uapi/domestic-futureoption/v1/quotations/inquire-daily-fuopchartprice"
 
 
 def _is_token_expired(expires_dt: str | None) -> bool:
@@ -183,6 +185,45 @@ class KisRestClient:
             "change": round(change, 2) if change is not None else None,
             "change_percent": round(pct, 2) if pct is not None else None,
         }
+
+    def inquire_futures_daily_closes(self, symbol: str, count: int = 30) -> list[float]:
+        """국내선물 일별 종가 시계열 (오래된→최신 순). 카드 배경 스파크라인용.
+
+        inquire-daily-fuopchartprice(FHKIF03020100) 일봉 output2 에서 종가(futs_prpr)만
+        추출한다. 실패하거나 데이터가 없으면 빈 리스트를 반환한다(호출부에서 graceful 처리).
+        """
+        self.ensure_token()
+        url = f"{self.base_url}{_FUTURES_CHART_PATH}"
+        headers = {
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.secret_key,
+            "tr_id": _FUTURES_CHART_TR_ID,
+            "custtype": "P",
+            "Content-Type": "application/json; charset=UTF-8",
+        }
+        # 거래일 기준 count개를 확보하기 위해 달력일은 넉넉히(주말·휴장 감안) 잡는다.
+        end = datetime.now()
+        start = end - timedelta(days=count * 2 + 15)
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "F",
+            "FID_INPUT_ISCD": symbol,
+            "FID_INPUT_DATE_1": start.strftime("%Y%m%d"),
+            "FID_INPUT_DATE_2": end.strftime("%Y%m%d"),
+            "FID_PERIOD_DIV_CODE": "D",
+        }
+        resp = self.session.get(url, headers=headers, params=params, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        rows = resp.json().get("output2") or []
+
+        dated = []
+        for row in rows:
+            close = _to_float(row.get("futs_prpr"))
+            d = row.get("stck_bsop_date") or ""
+            if close is not None and close != 0 and d:
+                dated.append((d, round(close, 2)))
+        dated.sort(key=lambda x: x[0])  # 날짜 오름차순(오래된→최신)
+        return [c for _, c in dated][-count:]
 
     def inquire_index_price(self, index_code: str) -> dict | None:
         """국내 업종/지수 현재가 조회. {price, change, change_percent} 또는 None.

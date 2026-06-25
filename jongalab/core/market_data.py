@@ -48,7 +48,7 @@ def _kospi200_night_future() -> dict:
     세션까지 그대로 유지한다(주간선물 종가로 갈아타지 않는다 — 주간 시세는
     _kospi200_day_future 가 별도 카드로 제공).
     """
-    base = {"symbol": "K200NF", "name": "코스피200 야간선물"}
+    base = {"symbol": "K200NF", "name": "코스피200 야간선물", "sparkline": None}
     none = {**base, "price": None, "change": None, "change_percent": None}
     try:
         from core.repository.kis_night_future import get_night_future
@@ -67,7 +67,7 @@ def _kospi200_night_future() -> dict:
 
 def _kospi200_day_future() -> dict:
     """코스피200 주간선물 현재가 (KIS REST). 주간장 중엔 실시간, 장외엔 직전 종가."""
-    base = {"symbol": "K200DF", "name": "코스피200 주간선물"}
+    base = {"symbol": "K200DF", "name": "코스피200 주간선물", "sparkline": None}
     none = {**base, "price": None, "change": None, "change_percent": None}
     try:
         from core.kis_client import kospi200_front_month_code
@@ -77,6 +77,16 @@ def _kospi200_day_future() -> dict:
     if not q or q.get("price") is None:
         return none
     return {**base, **q}
+
+
+def _kospi200_futures_sparkline() -> list[float] | None:
+    """코스피200 선물 근월물 일별 종가 스파크라인 (KIS REST). 실패 시 None."""
+    try:
+        from core.kis_client import kospi200_front_month_code
+        closes = _get_kis().inquire_futures_daily_closes(kospi200_front_month_code())
+    except Exception:
+        return None
+    return closes[-30:] if closes and len(closes) >= 2 else None
 
 
 def _parse_num(val) -> float:
@@ -127,18 +137,25 @@ KIS_INDICES = [
     {"symbol": "^KQ11", "name": "코스닥", "index_code": "1001"},
 ]
 
+# yfinance에 시계열이 없는 커스텀 심볼(코스피200 선물) — 배경 스파크라인 미제공.
+_NO_SPARKLINE_SYMBOLS = {"K200NF", "K200DF"}
+
 
 def _kis_index_quote(item: dict) -> dict:
-    """국내 지수(코스피/코스닥) 현재가 (KIS REST). 장중 실시간, 장외엔 직전 종가."""
+    """국내 지수(코스피/코스닥) 현재가 (KIS REST). 장중 실시간, 장외엔 직전 종가.
+
+    배경 스파크라인은 yfinance(^KS11/^KQ11) 일봉으로 별도 조회한다.
+    """
     base = {"symbol": item["symbol"], "name": item["name"]}
-    none = {**base, "price": None, "change": None, "change_percent": None}
+    sparkline = _fetch_sparkline(item["symbol"])
+    none = {**base, "price": None, "change": None, "change_percent": None, "sparkline": sparkline}
     try:
         q = _get_kis().inquire_index_price(item["index_code"])
     except Exception:
         return none
     if not q or q.get("price") is None:
         return none
-    return {**base, **q}
+    return {**base, **q, "sparkline": sparkline}
 
 def _safe_float(val) -> float | None:
     """nan/inf를 None으로 변환하여 JSON 직렬화 안전하게 처리"""
@@ -150,20 +167,44 @@ def _safe_float(val) -> float | None:
     return round(f, 2)
 
 
+def _closes_to_sparkline(hist) -> list[float] | None:
+    """일봉 종가 시계열 → 카드 배경 스파크라인용 float 리스트 (최근 30개)."""
+    try:
+        closes = [_safe_float(c) for c in hist["Close"].tolist()]
+    except Exception:
+        return None
+    closes = [c for c in closes if c is not None]
+    return closes[-30:] if len(closes) >= 2 else None
+
+
+def _fetch_sparkline(symbol: str) -> list[float] | None:
+    """yfinance 일봉(1개월) 종가 스파크라인. 커스텀 심볼/실패 시 None."""
+    if symbol in _NO_SPARKLINE_SYMBOLS:
+        return None
+    try:
+        hist = yf.Ticker(symbol).history(period="1mo")
+        if hist.empty:
+            return None
+        return _closes_to_sparkline(hist)
+    except Exception:
+        return None
+
+
 def _fetch_quote(item: dict) -> dict:
-    """하나의 종목/지수 데이터를 yfinance에서 조회"""
-    empty = {**item, "price": None, "change": None, "change_percent": None}
+    """하나의 종목/지수 데이터를 yfinance에서 조회 (배경 스파크라인 포함)"""
+    empty = {**item, "price": None, "change": None, "change_percent": None, "sparkline": None}
     try:
         stock = yf.Ticker(item["symbol"])
-        hist = stock.history(period="5d")
+        hist = stock.history(period="1mo")
         if hist.empty:
             return empty
         current = _safe_float(hist["Close"].iloc[-1])
         if current is None:
             return empty
+        sparkline = _closes_to_sparkline(hist)
         prev = _safe_float(hist["Close"].iloc[-2]) if len(hist) >= 2 else current
         if prev is None or prev == 0:
-            return {**item, "price": current, "change": None, "change_percent": None}
+            return {**item, "price": current, "change": None, "change_percent": None, "sparkline": sparkline}
         change = round(current - prev, 2)
         change_pct = round((change / prev) * 100, 2)
         return {
@@ -171,6 +212,7 @@ def _fetch_quote(item: dict) -> dict:
             "price": current,
             "change": change,
             "change_percent": change_pct,
+            "sparkline": sparkline,
         }
     except Exception:
         return empty
@@ -333,9 +375,14 @@ def fetch_market_indices() -> dict:
 
     # 코스피200 야간선물(마지막 야간 종가 유지) + 주간선물(실시간 REST)을
     # 선물 섹션 맨 앞에 합류 — 국장 시초가에 가장 직접적.
-    grouped["FUTURES"] = [
-        _kospi200_night_future(),
-        _kospi200_day_future(),
-    ] + grouped.get("FUTURES", [])
+    # 배경 스파크라인은 KIS 선물 일봉(근월물)에서 한 번만 받아 두 카드에 공유한다
+    # (야간/주간 모두 동일 근월물 계약이라 일별 추세는 같다).
+    fut_night = _kospi200_night_future()
+    fut_day = _kospi200_day_future()
+    fut_spark = _kospi200_futures_sparkline()
+    if fut_spark:
+        fut_night["sparkline"] = fut_spark
+        fut_day["sparkline"] = fut_spark
+    grouped["FUTURES"] = [fut_night, fut_day] + grouped.get("FUTURES", [])
 
     return grouped

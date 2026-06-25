@@ -3,6 +3,7 @@
 import { MarketIndex } from "@/types";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { SlotNumber } from "./SlotNumber";
+import { Sparkline } from "./Sparkline";
 
 function formatPrice(price: number, symbol: string): string {
   if (symbol === "USDKRW=X") {
@@ -44,22 +45,34 @@ export function AnimatedMarketIndexCard({
   const changeStr = `${isUp ? "+" : ""}${item.change?.toFixed(2)}`;
   const pctStr = `(${isUp ? "+" : ""}${item.change_percent?.toFixed(2)}%)`;
 
+  const tone: "up" | "down" | "flat" = isUp ? "up" : isDown ? "down" : "flat";
+  const hasSpark = (item.sparkline?.length ?? 0) >= 2;
+
   return (
-    <div className="rounded-2xl bg-slate-50 p-4 transition-all hover:-translate-y-0.5 dark:bg-slate-800/40">
-      <div className="flex items-center justify-between">
-        <p className="truncate text-sm font-bold text-slate-500 dark:text-slate-400">
-          {item.name}
-        </p>
-        <Icon className={`h-4 w-4 ${changeColor}`} />
-      </div>
-      <div className="mt-1.5 text-xl font-extrabold tabular-nums tracking-tight text-slate-900 dark:text-slate-100">
-        <SlotNumber value={priceStr} animate={animate} />
-      </div>
-      <div
-        className={`mt-1 flex items-center gap-2 text-sm font-bold tabular-nums ${changeColor}`}
-      >
-        <SlotNumber value={changeStr} animate={animate} />
-        <SlotNumber value={pctStr} animate={animate} />
+    <div className="relative overflow-hidden rounded-2xl bg-slate-50 p-4 transition-all hover:-translate-y-0.5 dark:bg-slate-800/40">
+      {hasSpark && (
+        <Sparkline
+          data={item.sparkline!}
+          tone={tone}
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-2/3 w-full"
+        />
+      )}
+      <div className="relative">
+        <div className="flex items-center justify-between">
+          <p className="truncate text-sm font-bold text-slate-500 dark:text-slate-400">
+            {item.name}
+          </p>
+          <Icon className={`h-4 w-4 ${changeColor}`} />
+        </div>
+        <div className="mt-1.5 text-xl font-extrabold tabular-nums tracking-tight text-slate-900 dark:text-slate-100">
+          <SlotNumber value={priceStr} animate={animate} />
+        </div>
+        <div
+          className={`mt-1 flex items-center gap-2 text-sm font-bold tabular-nums ${changeColor}`}
+        >
+          <SlotNumber value={changeStr} animate={animate} />
+          <SlotNumber value={pctStr} animate={animate} />
+        </div>
       </div>
     </div>
   );

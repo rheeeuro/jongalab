@@ -37,6 +37,7 @@ export interface MarketIndex {
   price: number | null;
   change: number | null;
   change_percent: number | null;
+  sparkline?: number[] | null;
 }
 
 export interface MarketIndices {
