@@ -1,6 +1,6 @@
 import { MetadataRoute } from "next";
 import { API_BASE } from "@/lib/api";
-import { DailySummary, StockReport, TickerDictionary } from "@/types";
+import { StockReport, TickerDictionary } from "@/types";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://jongalab.com";
 const REVALIDATE_SECONDS = 3600;
@@ -47,26 +47,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
   ];
 
-  const reports = await fetchJson<DailySummary[]>(
-    "/api/daily-summary-list?limit=100",
+  const reportDates = await fetchJson<string[]>(
+    "/api/stock-report/dates?limit=100",
     []
   );
 
-  const reportMap = new Map<string, DailySummary>();
-  reports.forEach((report) => {
-    if (!reportMap.has(report.report_date)) {
-      reportMap.set(report.report_date, report);
-    }
-  });
+  const uniqueDates = Array.from(new Set(reportDates));
 
-  const reportRoutes: MetadataRoute.Sitemap = Array.from(reportMap.values()).map(
-    (report) => ({
-      url: `${baseUrl}/reports/${encodeURIComponent(report.report_date)}`,
-      lastModified: parseLastModified(report.created_at ?? report.report_date),
-      changeFrequency: "never",
-      priority: 0.8,
-    })
-  );
+  const reportRoutes: MetadataRoute.Sitemap = uniqueDates.map((date) => ({
+    url: `${baseUrl}/reports/${encodeURIComponent(date)}`,
+    lastModified: parseLastModified(date),
+    changeFrequency: "never",
+    priority: 0.8,
+  }));
 
   routes.push(...reportRoutes);
 
@@ -75,7 +68,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     timeZone: "Asia/Seoul",
   });
   const stockReportsByDate = await Promise.all(
-    Array.from(reportMap.keys())
+    uniqueDates
       .filter((date) => date < todaySeoul)
       .map((date) =>
         fetchJson<StockReport[]>(`/api/stock-report/${encodeURIComponent(date)}`, [])

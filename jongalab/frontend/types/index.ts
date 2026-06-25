@@ -11,16 +11,11 @@ export interface ContentAnalysis {
   related_tickers?: { ticker: string; name: string }[];
 }
 
-export interface DailySummary {
-  id: number;
-  report_date: string;
-  buy_stock: string;
-  buy_ticker?: string;
-  buy_reason: string;
-  sell_stock: string;
-  sell_ticker?: string;
-  sell_reason: string;
-  created_at?: string;
+// 아카이브 캘린더용 일자별 1등 종목 (/api/stock-report/top-picks)
+export interface TopPick {
+  stock_code: string;
+  stock_name: string;
+  score: number;
 }
 
 export interface PaginatedResponse<T> {
@@ -122,6 +117,7 @@ export interface StockReport {
   is_theme_stock: boolean;
   content_score: number;
   score: number;
+  reason: string;  // 종합 점수 구성요소로 자동 생성된 매수 이유
   rank_no: number;
   gap_nxt_price?: number | null;
   gap_nxt_pct?: number | null;

@@ -16,13 +16,6 @@ from core.repository.content import (
     get_mention_stats,
 )
 
-from core.repository.daily_summary import (
-    save_daily_summary,
-    get_latest_daily_summary,
-    get_daily_summary_by_date,
-    get_daily_summary_list,
-)
-
 from core.repository.source import (
     get_active_sources,
     get_youtube_sources,
@@ -41,6 +34,7 @@ from core.repository.stock_report import (
     get_stock_report_dates,
     save_gap_check_results,
     get_gap_stats_by_dates,
+    get_top_picks_by_dates,
 )
 
 from core.repository.sector_report import (

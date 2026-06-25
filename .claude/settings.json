@@ -17,7 +17,8 @@
       "Bash(curl -s http://127.0.0.1:* :*)",
       "Bash(curl -s -o /dev/null -w :*)",
       "Bash(grep :*)",
-      "Bash(rg :*)"
+      "Bash(rg :*)",
+      "Bash(grep -E \"\\\\.py$\")"
     ],
     "deny": [
       "Read(./.env)",

@@ -1,4 +1,4 @@
-import { ContentAnalysis, DailySummary, MentionStats, MarketIndex, PaginatedResponse, SectorReport } from "@/types";
+import { ContentAnalysis, StockReport, MentionStats, MarketIndex, PaginatedResponse, SectorReport } from "@/types";
 import { apiFetch } from "@/lib/api";
 import { TodayHero } from "@/components/today/TodayHero";
 import { TopPicks } from "@/components/today/TopPicks";
@@ -16,8 +16,15 @@ async function getContents(): Promise<PaginatedResponse<ContentAnalysis>> {
   });
 }
 
-async function getDailySummary(): Promise<DailySummary | null> {
-  return apiFetch(`/api/daily-summary`, null);
+// 최신 영업일의 종목 랭킹 1위(rank_no=1)를 오늘의 추천으로 사용한다.
+async function getLatestTopPick(): Promise<StockReport | null> {
+  const dates = await apiFetch<string[]>(`/api/stock-report/dates?limit=1`, []);
+  if (!dates.length) return null;
+  const reports = await apiFetch<StockReport[]>(
+    `/api/stock-report/${dates[0]}`,
+    [],
+  );
+  return reports[0] ?? null;
 }
 
 async function getMentionStats(): Promise<MentionStats | null> {
@@ -52,10 +59,10 @@ async function IndicesSection() {
 }
 
 export default async function HomePage() {
-  const [contents, summary, mentionStats, sectorReport] =
+  const [contents, topPick, mentionStats, sectorReport] =
     await Promise.all([
       getContents(),
-      getDailySummary(),
+      getLatestTopPick(),
       getMentionStats(),
       getLatestSectorReport(),
     ]);
@@ -63,8 +70,8 @@ export default async function HomePage() {
   return (
     <main className="min-h-screen">
       <div className="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6 sm:py-10 lg:space-y-10">
-        <TodayHero summary={summary} mentionStats={mentionStats} />
-        <TopPicks summary={summary} />
+        <TodayHero reportDate={topPick?.report_date ?? null} mentionStats={mentionStats} />
+        <TopPicks pick={topPick} />
         <Suspense fallback={<IndicesStripSkeleton />}>
           <IndicesSection />
         </Suspense>

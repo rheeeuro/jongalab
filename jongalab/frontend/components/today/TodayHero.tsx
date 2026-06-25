@@ -1,8 +1,8 @@
-import { DailySummary, MentionStats } from "@/types";
+import { MentionStats } from "@/types";
 import { Sparkles } from "lucide-react";
 
 interface Props {
-  summary: DailySummary | null;
+  reportDate: string | null;
   mentionStats: MentionStats | null;
 }
 
@@ -55,7 +55,7 @@ function getSentimentTone(stats: MentionStats | null): {
   return { label, tone, ratio };
 }
 
-export function TodayHero({ summary, mentionStats }: Props) {
+export function TodayHero({ reportDate, mentionStats }: Props) {
   const dateLabel = getKstDateLabel();
   const sentiment = getSentimentTone(mentionStats);
 
@@ -137,9 +137,9 @@ export function TodayHero({ summary, mentionStats }: Props) {
           </span>
         </div>
 
-        {summary?.report_date && (
+        {reportDate && (
           <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
-            리포트 기준일 · {summary.report_date}
+            리포트 기준일 · {reportDate}
           </p>
         )}
       </div>

@@ -88,25 +88,6 @@ def send_analysis_alert(channel: str, title: str, analysis: str, score: int = 50
         logging.error(f"❌ 텔레그램 에러: {e}")
 
 
-def send_daily_digest_alert(date: str, buy: str, buy_reason: str, sell: str, sell_reason: str):
-    """일일 요약 리포트 텔레그램 전송"""
-    try:
-        message = (
-            f"📅 *[{date}] 오늘의 AI 투자 전략*\n\n"
-            f"🐂 *매수(Buy): {buy}*\n"
-            f"└ {buy_reason}\n\n"
-            f"🐻 *매도(Sell): {sell}*\n"
-            f"└ {sell_reason}\n\n"
-            f"👉 [대시보드 확인하기](https://jongalab.com)"
-        )
-
-        count = _send_telegram_message(message)
-        logging.info(f"📨 텔레그램 전송 완료 -> {count}개 채팅방")
-
-    except Exception as e:
-        logging.error(f"❌ 텔레그램 전송 실패: {e}")
-
-
 def send_gap_check_alert(
     report_date: str, check_time: str, rows: list[dict], is_retry: bool = False
 ):

@@ -12,7 +12,6 @@ export type CalendarCellData = {
   dateStr: string;
   isToday: boolean;
   buyStock: string;
-  sellStock: string;
   themes: string[];
   gap: CalendarGap | null;
 } | null;
@@ -99,16 +98,6 @@ export function ReportCalendarGrid({
                 </span>
               </div>
             )}
-            {selectedCell.sellStock && (
-              <div className="flex items-center gap-2">
-                <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-extrabold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
-                  매도
-                </span>
-                <span className="text-sm font-bold text-slate-600 dark:text-slate-300">
-                  {selectedCell.sellStock}
-                </span>
-              </div>
-            )}
           </div>
 
           {selectedCell.themes.length > 0 && (
@@ -174,7 +163,7 @@ function Cell({
     return <div className="min-h-[44px] sm:min-h-[132px]" />;
   }
 
-  const hasReport = !!(cell.buyStock || cell.sellStock || cell.themes.length);
+  const hasReport = !!(cell.buyStock || cell.themes.length);
 
   // 리포트 없는 평일
   if (!hasReport) {
@@ -230,14 +219,6 @@ function Cell({
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" />
               <span className="min-w-0 truncate text-[11px] font-extrabold text-slate-900 dark:text-slate-100">
                 {cell.buyStock}
-              </span>
-            </span>
-          )}
-          {cell.sellStock && (
-            <span className="flex items-center gap-1">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
-              <span className="min-w-0 truncate text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                {cell.sellStock}
               </span>
             </span>
           )}

@@ -11,6 +11,7 @@ from core.repository import (
     get_sector_reports_by_date,
     get_content_by_stock_and_date,
     get_gap_stats_by_dates,
+    get_top_picks_by_dates,
     get_top_themes_by_dates,
 )
 
@@ -59,6 +60,7 @@ class StockReport(BaseModel):
     is_theme_stock: bool = False
     content_score: float = 0.0
     score: float = 0.0
+    reason: str = ""
     rank_no: int = 0
     gap_nxt_price: Optional[int] = None
     gap_nxt_pct: Optional[float] = None
@@ -151,6 +153,24 @@ def gap_stats(dates: str = Query(..., description="콤마 구분 YYYY-MM-DD 목�
         if not date_list:
             return {}
         return get_gap_stats_by_dates(date_list)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class TopPick(BaseModel):
+    stock_code: str
+    stock_name: str
+    score: float = 0.0
+
+
+@router.get("/stock-report/top-picks", response_model=dict[str, TopPick])
+def top_picks(dates: str = Query(..., description="콤마 구분 YYYY-MM-DD 목록")):
+    """여러 날짜의 1등 종목(rank_no=1)을 한 번에 조회 (아카이브 캘린더용)"""
+    try:
+        date_list = [d.strip() for d in dates.split(",") if d.strip()]
+        if not date_list:
+            return {}
+        return get_top_picks_by_dates(date_list)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

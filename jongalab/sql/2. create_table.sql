@@ -21,18 +21,6 @@ CREATE TABLE IF NOT EXISTS content_analysis (
     INDEX idx_external_id (external_id)
 );
 
-CREATE TABLE IF NOT EXISTS daily_summary (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    report_date DATE NOT NULL,
-    buy_stock VARCHAR(100),
-    buy_ticker VARCHAR(20),
-    buy_reason TEXT,
-    sell_stock VARCHAR(100),
-    sell_ticker VARCHAR(20),
-    sell_reason TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE IF NOT EXISTS telegram_channels (
     id INT AUTO_INCREMENT PRIMARY KEY,
     channel_identifier VARCHAR(100) NOT NULL COMMENT '채널 username(문자) 또는 ID(숫자)',

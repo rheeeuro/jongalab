@@ -1,4 +1,4 @@
-import { DailySummary } from "@/types";
+import { TopPick } from "@/types";
 import { apiFetch } from "@/lib/api";
 import Link from "next/link";
 import { FileText, ChevronLeft, ChevronRight } from "lucide-react";
@@ -9,8 +9,16 @@ import {
 
 type GapStat = { wins: number; losses: number; flats: number; total: number };
 
-async function getDailySummaryList(): Promise<DailySummary[]> {
-  return apiFetch(`/api/daily-summary-list?limit=100`, []);
+async function getReportDates(): Promise<string[]> {
+  return apiFetch(`/api/stock-report/dates?limit=100`, []);
+}
+
+async function getTopPicks(dates: string[]): Promise<Record<string, TopPick>> {
+  if (dates.length === 0) return {};
+  return apiFetch(
+    `/api/stock-report/top-picks?dates=${encodeURIComponent(dates.join(","))}`,
+    {},
+  );
 }
 
 async function getGapStats(dates: string[]): Promise<Record<string, GapStat>> {
@@ -50,12 +58,12 @@ function shiftMonth(monthStr: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-type DayCell = { day: number; dateStr: string; report: DailySummary | null } | null;
+type DayCell = { day: number; dateStr: string; pick: TopPick | null } | null;
 
 // 월~금 기준으로 한 달을 주 단위 그리드로 분해한다 (주말 제외).
 function buildWeeks(
   monthStr: string,
-  reportsByDate: Map<string, DailySummary>,
+  picksByDate: Map<string, TopPick>,
 ): DayCell[][] {
   const [y, m] = monthStr.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
@@ -73,7 +81,7 @@ function buildWeeks(
       hasEntry = false;
     }
     const dateStr = `${monthStr}-${String(d).padStart(2, "0")}`;
-    week[col] = { day: d, dateStr, report: reportsByDate.get(dateStr) ?? null };
+    week[col] = { day: d, dateStr, pick: picksByDate.get(dateStr) ?? null };
     hasEntry = true;
   }
   if (hasEntry) weeks.push(week);
@@ -86,22 +94,22 @@ export default async function ReportsArchivePage({
   searchParams: Promise<{ month?: string }>;
 }) {
   const sp = await searchParams;
-  const reports = await getDailySummaryList();
-  const dates = reports.map((r) => r.report_date);
-  const [gapStats, topThemes] = await Promise.all([
+  const dates = await getReportDates();
+  const [gapStats, topThemes, picks] = await Promise.all([
     getGapStats(dates),
     getTopThemes(dates),
+    getTopPicks(dates),
   ]);
 
-  const reportsByDate = new Map<string, DailySummary>();
-  for (const r of reports) reportsByDate.set(r.report_date, r);
+  const picksByDate = new Map<string, TopPick>();
+  for (const [date, pick] of Object.entries(picks)) picksByDate.set(date, pick);
 
   const todayStr = todayInSeoul();
   const todayMonth = todayStr.slice(0, 7);
 
   // 데이터가 있는 월 범위 + 오늘이 속한 월을 탐색 경계로 삼는다
   const monthsWithData = Array.from(
-    new Set(reports.map((r) => r.report_date.slice(0, 7))),
+    new Set(dates.map((d) => d.slice(0, 7))),
   ).sort();
   const minMonth = monthsWithData[0] ?? todayMonth;
   const maxData = monthsWithData[monthsWithData.length - 1] ?? todayMonth;
@@ -118,7 +126,7 @@ export default async function ReportsArchivePage({
   const canPrev = selectedMonth > minMonth;
   const canNext = selectedMonth < maxMonth;
 
-  const weeks = buildWeeks(selectedMonth, reportsByDate);
+  const weeks = buildWeeks(selectedMonth, picksByDate);
 
   // 클라이언트 컴포넌트로 넘길 직렬화 가능한 셀 데이터
   const cellWeeks: CalendarCellData[][] = weeks.map((week) =>
@@ -129,8 +137,7 @@ export default async function ReportsArchivePage({
         day: cell.day,
         dateStr: cell.dateStr,
         isToday: cell.dateStr === todayStr,
-        buyStock: cell.report?.buy_stock ?? "",
-        sellStock: cell.report?.sell_stock ?? "",
+        buyStock: cell.pick?.stock_name ?? "",
         themes: (topThemes[cell.dateStr] ?? []).slice(0, 3),
         gap:
           gap && gap.total > 0

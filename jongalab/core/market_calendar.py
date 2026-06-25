@@ -1,6 +1,6 @@
 """거래일(개장일) 판별 유틸.
 
-평일 전용 워커(daily_digest, gap_check, closing_bet)가 휴장일(주말·공휴일·
+평일 전용 워커(gap_check, closing_bet)가 휴장일(주말·공휴일·
 대체공휴일·근로자의날·연말휴장 등)에 실행될 때 — 예: pm2 restart 로 cron 과
 무관하게 즉시 기동 — 곧바로 종료하도록 돕는다.
 

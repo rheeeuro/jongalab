@@ -204,6 +204,41 @@ def get_gap_stats_by_dates(dates: list[str]) -> dict[str, dict]:
     return stats
 
 
+def get_top_picks_by_dates(dates: list[str]) -> dict[str, dict]:
+    """여러 날짜의 1등 종목(rank_no=1)을 한 번에 조회.
+
+    반환: {date: {stock_code, stock_name, score}}
+      - 해당 날짜 리포트가 없으면 키 없음.
+    """
+    if not dates:
+        return {}
+
+    placeholders = ",".join(["%s"] * len(dates))
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"""SELECT report_date, stock_code, stock_name, score
+                  FROM daily_stock_report
+                 WHERE report_date IN ({placeholders})
+                   AND rank_no = 1""",
+            tuple(dates),
+        )
+        rows = cursor.fetchall()
+
+    picks: dict[str, dict] = {}
+    for row in rows:
+        d = row["report_date"]
+        key = d.isoformat() if isinstance(d, (date, datetime)) else str(d)
+        score = row["score"]
+        if isinstance(score, Decimal):
+            score = float(score)
+        picks[key] = {
+            "stock_code": row["stock_code"],
+            "stock_name": row["stock_name"],
+            "score": score or 0.0,
+        }
+    return picks
+
+
 def _score_to_grade(score: float) -> str:
     """supply_score(0~100) → 등급 문자열. classify_supply_score와 임계값 동일."""
     if score >= 85:
@@ -215,6 +250,47 @@ def _score_to_grade(score: float) -> str:
     if score >= 40:
         return "C"
     return "D"
+
+
+def build_score_reason(row: dict) -> str:
+    """종합 점수 구성요소로 매수 이유 한국어 문구를 조립한다(GPT 미사용).
+
+    closing_bet 의 score_candidate 가중치 항목과 대응한다:
+    수급/정배열/신고가/대장주/프로그램/테마/콘텐츠.
+    """
+    parts: list[str] = []
+
+    score = row.get("score") or 0.0
+    parts.append(f"종합 {round(float(score))}점")
+
+    grade = row.get("supply_grade") or _score_to_grade(row.get("supply_score") or 0.0)
+    inst = row.get("inst_net_buy") or 0
+    frgn = row.get("frgn_net_buy") or 0
+    if inst > 0 and frgn > 0:
+        subject = "외국인·기관 동반 순매수"
+    elif inst > 0:
+        subject = "기관 순매수"
+    elif frgn > 0:
+        subject = "외국인 순매수"
+    else:
+        subject = ""
+    parts.append(f"수급 {grade}등급({subject})" if subject else f"수급 {grade}등급")
+
+    if row.get("is_leader"):
+        sector = (row.get("sector") or "").strip()
+        parts.append(f"{sector} 대장주" if sector else "섹터 대장주")
+    if row.get("is_theme_stock"):
+        parts.append("테마 주도주")
+    if row.get("ma_aligned"):
+        parts.append("정배열")
+    if row.get("near_high"):
+        parts.append("신고가 근처")
+    if (row.get("prog_net_buy") or 0) > 0:
+        parts.append("프로그램 순매수")
+    if (row.get("content_score") or 0) > 0:
+        parts.append("콘텐츠 다수 언급")
+
+    return " · ".join(parts)
 
 
 def _serialize_dates(row: dict):
@@ -242,3 +318,6 @@ def _serialize_dates(row: dict):
         row["hourly_candles"] = json.loads(row["hourly_candles"])
     if row.get("hourly_candles") is None:
         row["hourly_candles"] = []
+    # 종합 점수 기반 매수 이유 파생
+    if "score" in row:
+        row["reason"] = build_score_reason(row)

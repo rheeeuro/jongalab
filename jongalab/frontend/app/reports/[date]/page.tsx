@@ -1,4 +1,4 @@
-import { DailySummary, StockReport, SectorReport } from "@/types";
+import { StockReport, SectorReport } from "@/types";
 import { DailySummaryCard } from "@/components/DailySummaryCard";
 import { StockReportCard, finalGapPct } from "@/components/StockReportCard";
 import { apiFetch } from "@/lib/api";
@@ -11,10 +11,6 @@ function fetchOptions(date: string): RequestInit {
   return date >= today
     ? { cache: "no-store" }
     : ({ next: { revalidate: 600 } } as RequestInit);
-}
-
-async function getReportByDate(date: string): Promise<DailySummary | null> {
-  return apiFetch(`/api/daily-summary/${date}`, null, fetchOptions(date));
 }
 
 async function getStockReports(date: string): Promise<StockReport[]> {
@@ -31,14 +27,15 @@ export async function generateMetadata({
   params: { date: string };
 }): Promise<Metadata> {
   const resolvedParams = await params;
-  const report = await getReportByDate(resolvedParams.date);
+  const stockReports = await getStockReports(resolvedParams.date);
+  const topPick = stockReports[0] ?? null;
 
-  if (!report) {
+  if (!topPick) {
     return { title: "리포트를 찾을 수 없습니다" };
   }
 
   const title = `[${resolvedParams.date}] 투자 리포트`;
-  const description = `매수 추천: ${report.buy_stock} (${report.buy_reason}) / 매도 추천: ${report.sell_stock}. AI 주식 에이전트의 일일 브리핑을 확인하세요.`;
+  const description = `매수 추천: ${topPick.stock_name} (${topPick.reason}). AI 주식 에이전트의 일일 브리핑을 확인하세요.`;
 
   return {
     title,
@@ -75,13 +72,13 @@ export default async function ReportPage({
   const resolvedParams = await params;
   const date = resolvedParams.date;
 
-  const [report, stockReports, sectorReports] = await Promise.all([
-    getReportByDate(date),
+  const [stockReports, sectorReports] = await Promise.all([
     getStockReports(date),
     getSectorReports(date),
   ]);
+  const topPick = stockReports[0] ?? null;
 
-  if (!report && stockReports.length === 0) {
+  if (stockReports.length === 0) {
     return (
       <main className="flex min-h-screen items-center justify-center px-6">
         <div className="text-center">
@@ -124,8 +121,8 @@ export default async function ReportPage({
           </h1>
         </header>
 
-        {/* AI 투자 전략 카드 */}
-        {report && <DailySummaryCard summary={report} disableLink />}
+        {/* 오늘의 추천 종목 카드 (종목 랭킹 1위) */}
+        {topPick && <DailySummaryCard pick={topPick} disableLink />}
 
         {/* 주도 섹터 */}
         {sectorReports.length > 0 && (
@@ -277,7 +274,7 @@ export default async function ReportPage({
         })()}
 
         {/* AI 코멘트 */}
-        {report && (
+        {stockReports.length > 0 && (
           <div className="rounded-3xl bg-gradient-to-br from-indigo-50 to-violet-50 p-6 dark:from-indigo-950/30 dark:to-violet-950/30">
             <h2 className="mb-2 text-base font-extrabold text-slate-900 dark:text-slate-100">
               🤖 AI 코멘트
