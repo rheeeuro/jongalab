@@ -75,6 +75,21 @@ def mark_canceled(order_id: int) -> None:
         conn.commit()
 
 
+def void_dead_order(order_id: int) -> None:
+    """체결 0으로 소멸한 주문(브로커에 없는 'sent') 마감 + 멱등키 해제.
+
+    멱등키 끝에 ':dead' 를 붙여 해제하면, 같은 거래일·tag 의 재매도가 다시 가능해진다
+    (find_by_idempotency_key 가 상태 무관으로 키를 찾으므로, 키 자체를 비워줘야 재시도된다).
+    'sent' 한 건에만 호출되고 호출 후 status='canceled' 라 같은 주문에 두 번 붙지 않는다."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "UPDATE `order` SET status = 'canceled', "
+            "idempotency_key = CONCAT(idempotency_key, ':dead') WHERE id = %s",
+            (order_id,),
+        )
+        conn.commit()
+
+
 def list_by_date(date_dash: str) -> list[dict]:
     """해당 날짜(YYYY-MM-DD) 주문 — 일별 상세용 (생성순).
 

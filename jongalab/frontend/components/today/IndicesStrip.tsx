@@ -1,5 +1,6 @@
 import { MarketIndex } from "@/types";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Sparkline } from "@/components/Sparkline";
 
 interface Props {
   indices: {
@@ -51,14 +52,14 @@ export function IndicesStripSkeleton() {
 
       <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <div className="flex gap-2.5 pb-1 sm:grid sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
+          {Array.from({ length: 8 }).map((_, i) => (
             <div
               key={i}
               className="min-w-[160px] shrink-0 rounded-2xl bg-white p-4 dark:bg-slate-900/60 sm:min-w-0"
             >
               <div className="h-3 w-20 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
-              <div className="mt-2 h-5 w-24 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
-              <div className="mt-2 h-3 w-16 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="mt-1.5 h-5 w-24 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="mt-1 h-3 w-16 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
             </div>
           ))}
         </div>
@@ -76,6 +77,8 @@ function IndexChip({ idx }: { idx: MarketIndex }) {
       ? "text-blue-600 dark:text-blue-400"
       : "text-slate-500";
   const Icon = isUp ? TrendingUp : isDown ? TrendingDown : Minus;
+  const sparkTone: "up" | "down" | "flat" = isUp ? "up" : isDown ? "down" : "flat";
+  const hasSpark = (idx.sparkline?.length ?? 0) >= 2;
 
   const priceStr =
     idx.price === null
@@ -86,20 +89,29 @@ function IndexChip({ idx }: { idx: MarketIndex }) {
         });
 
   return (
-    <div className="min-w-[160px] shrink-0 rounded-2xl bg-white p-4 dark:bg-slate-900/60 sm:min-w-0">
-      <p className="truncate text-xs font-bold text-slate-500 dark:text-slate-400">
-        {idx.name}
-      </p>
-      <p className="mt-1.5 text-lg font-extrabold tabular-nums tracking-tight text-slate-900 dark:text-slate-100">
-        {priceStr}
-      </p>
-      <p
-        className={`mt-1 flex items-center gap-1 text-xs font-bold tabular-nums ${tone}`}
-      >
-        <Icon className="h-3 w-3" />
-        {isUp ? "+" : ""}
-        {idx.change_percent?.toFixed(2) ?? "0.00"}%
-      </p>
+    <div className="relative min-w-[160px] shrink-0 overflow-hidden rounded-2xl bg-white p-4 dark:bg-slate-900/60 sm:min-w-0">
+      {hasSpark && (
+        <Sparkline
+          data={idx.sparkline!}
+          tone={sparkTone}
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-2/3 w-full"
+        />
+      )}
+      <div className="relative">
+        <p className="truncate text-xs font-bold text-slate-500 dark:text-slate-400">
+          {idx.name}
+        </p>
+        <p className="mt-1.5 text-lg font-extrabold tabular-nums tracking-tight text-slate-900 dark:text-slate-100">
+          {priceStr}
+        </p>
+        <p
+          className={`mt-1 flex items-center gap-1 text-xs font-bold tabular-nums ${tone}`}
+        >
+          <Icon className="h-3 w-3" />
+          {isUp ? "+" : ""}
+          {idx.change_percent?.toFixed(2) ?? "0.00"}%
+        </p>
+      </div>
     </div>
   );
 }

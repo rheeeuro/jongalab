@@ -27,7 +27,7 @@ from core.config import HARD_STOP_LOSS_PCT, TRAIL_PCT
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.fill_sync import sync_fills
-from core.order_maintenance import cancel_stale_orders
+from core.order_maintenance import cancel_stale_orders, reconcile_dead_sent
 from core.repository import position as position_repo
 from core.repository import settle_plan as plan_repo
 
@@ -64,11 +64,23 @@ def in_open_warmup(now: datetime) -> bool:
     return hm == (8, 0) or hm == (9, 0)
 
 
+def _exit_confirmed(stk_cd: str) -> bool:
+    """매도 후 포지션이 실제로 청산됐는지(체결 확인). paper 는 즉시 반영돼 True,
+    live 는 다음 폴링의 sync_fills 가 체결을 반영한 뒤 True 가 된다.
+
+    '전송됨(sent)'만으로 plan 을 해제하면, 최유리IOC 가 접수돼도 0주 체결로 소멸했을 때
+    감시가 풀려 포지션이 고아가 된다. 실제 청산이 확인될 때만 감시를 해제하기 위한 게이트."""
+    p = position_repo.get_position(stk_cd)
+    return not p or p["qty"] < 1
+
+
 def check_once(engine: ExecutionEngine) -> None:
     # live 체결을 먼저 반영해 포지션을 최신화 (paper 는 no-op)
     sync_fills(engine.client)
     # 전일 잔여 미체결 자동 취소(개장 중) — 묶임 방지
     cancel_stale_orders(engine.client)
+    # 오늘 소멸한 'sent' 주문(0주 체결 IOC 등) 정리 + 멱등키 해제 → 같은 tag 재매도 허용
+    reconcile_dead_sent(engine.client)
 
     plans = {p["stk_cd"]: p for p in plan_repo.get_active_plans()}
     positions = {p["stk_cd"]: p for p in position_repo.get_open_positions()}
@@ -93,12 +105,15 @@ def check_once(engine: ExecutionEngine) -> None:
             if cur <= hard_stop:
                 sold = engine.execute_sell(trade_date, stk_cd, pos["qty"], cur,
                                            dmst_stex_tp=sell_venue(datetime.now()), tag="hardstop")
-                if sold:
+                if sold and _exit_confirmed(stk_cd):
                     if plan:
                         plan_repo.deactivate(plan["trade_date"], stk_cd,
-                                             f"하드손절 즉시매도 @{cur}(<= {hard_stop}, 평단 {pos['avg_price']})")
-                    logger.info("하드손절 발동 [%s] 전량매도 %d주 @%d (선 %d, 평단 %d, -%.1f%%)",
+                                             f"하드손절 청산완료 @{cur}(<= {hard_stop}, 평단 {pos['avg_price']})")
+                    logger.info("하드손절 청산완료 [%s] %d주 @%d (선 %d, 평단 %d, -%.1f%%)",
                                 stk_cd, pos["qty"], cur, hard_stop, pos["avg_price"], HARD_STOP_LOSS_PCT)
+                elif sold:
+                    logger.info("하드손절 매도 전송 [%s] @%d — 체결 미확인, 다음 폴링에서 재확인/재시도",
+                                stk_cd, cur)
                 else:
                     logger.warning("하드손절 매도 거부/미전송 [%s] @%d (선 %d) — plan 유지, 다음 폴링 재시도",
                                    stk_cd, cur, hard_stop)
@@ -107,11 +122,14 @@ def check_once(engine: ExecutionEngine) -> None:
             if plan and cur <= plan["stop_price"]:
                 sold = engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
                                            dmst_stex_tp=sell_venue(datetime.now()), tag="stop")
-                if sold:
+                if sold and _exit_confirmed(stk_cd):
                     plan_repo.deactivate(plan["trade_date"], stk_cd,
-                                         f"스탑/저가이탈 즉시매도 @{cur}(<= {plan['stop_price']})")
-                    logger.info("스탑 발동 [%s] 전량매도 %d주 @%d (선 %d)",
+                                         f"스탑/저가이탈 청산완료 @{cur}(<= {plan['stop_price']})")
+                    logger.info("스탑 청산완료 [%s] %d주 @%d (선 %d)",
                                 stk_cd, pos["qty"], cur, plan["stop_price"])
+                elif sold:
+                    logger.info("스탑 매도 전송 [%s] @%d — 체결 미확인, plan 유지(다음 폴링 재확인/재시도)",
+                                stk_cd, cur)
                 else:
                     logger.warning("스탑 매도 거부/미전송 [%s] @%d (선 %d) — plan 유지, 다음 폴링 재시도",
                                    stk_cd, cur, plan["stop_price"])

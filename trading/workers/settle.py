@@ -102,6 +102,7 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
     청산 완료 후, 당일 NXT(08:05)+트레일링+KRX(09:28) 매도를 합산한 최종 현황을 관리자에게 전송한다.
     """
     plans = plan_repo.get_active_plans()
+    active_codes = {plan["stk_cd"] for plan in plans}  # 아래 첫 루프가 책임지는 종목
     if not plans:
         logger.info("[KRX] 활성 청산계획 없음 — plan 없는 잔여 포지션만 정리")
     for plan in plans:
@@ -131,11 +132,13 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
         except Exception as e:
             logger.error("[KRX] 청산 실패 [%s]: %s", stk_cd, e)
 
-    # plan 없는 잔여 포지션(비-NXT + 08:05 NXT 매도 실패/누락분) → KRX 정규장 시장가 전량청산
+    # 활성 plan 없는 잔여 포지션 → KRX 정규장 시장가 전량청산 (진짜 데드라인 백스톱).
+    #   대상: 비-NXT 종목 + 08:05 NXT 매도 실패/누락분 + "전송됐으나 미체결로 plan 만 비활성화"된 잔량.
+    #   (비활성 plan 행도 get_plan 으론 잡히므로, 존재여부가 아닌 active 여부로 판정해야 '보유 안 함'이 보장된다.)
     for p in position_repo.get_open_positions():
         stk_cd = p["stk_cd"]
-        if plan_repo.get_plan(trade_date, stk_cd):
-            continue  # plan 있는 NXT 종목은 위에서 처리됨
+        if stk_cd in active_codes:
+            continue  # 활성 plan 종목은 위 루프에서 처리(또는 거부 시 재시도 대기)
         try:
             cur = engine.data.get_market_price(stk_cd)
             if cur <= 0:
