@@ -9,6 +9,9 @@
 **Python 백엔드(분석/트레이딩/워커) + Next.js 프론트(대시보드)** 하이브리드.
 
 ## 디렉터리 구조
+> 각 주요 디렉터리(`jongalab/`·`trading/`·`kiwoom/`)에는 그 도메인의 주요 로직·코드 구조를 설명하는
+> `README.md`가 있다. 이 절은 개요이고, **상세는 각 README 가 소스 오브 트루스**다(변경 시 함께 갱신).
+
 루트는 **`jongalab/`(메인 앱)** 과 **`kiwoom/`(키움 데이터 전용 서버)** 로 분리된다.
 공통 인프라는 각자 최소 복제하고, **같은 MariaDB 서버에 DB(스키마)를 분리**해 쓴다 —
 jongalab 은 `jongalab` DB(분석/리포트/소스 등), kiwoom 은 전용 `kiwoom` DB(`kiwoom_token`).
@@ -56,6 +59,21 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
 - 새 라우터는 `routers/`에 만들고 `api.py`에 `include_router` 등록.
 - 도메인 용어 유지: 수급(기관/외국인/개인/프로그램), 테마, 갭, 종가베팅, rank_no.
 
+## 설계 원칙 (로직 작성 전 먼저 따진다)
+새 기능·로직을 만들거나 고치기 **전에** 다음 5가지를 순서대로 자문하고, 답이 서지 않으면 멈추고 사용자에게 묻는다.
+1. **이 기능이 꼭 필요한가?** — 없어도 되는 기능은 만들지 않는다.
+2. **관련된 코드베이스가 이미 있는가?** — 중복 구현 대신 기존 `core/`·`repository/`·컴포넌트를 재사용/확장한다.
+3. **가장 단순한 구조는 무엇인가?** — 추상화·계층은 필요해질 때 추가한다(과설계 금지).
+4. **사용자가 가장 덜 헷갈리는 흐름은 무엇인가?** — UI/API 흐름은 최소 놀람 원칙을 따른다.
+5. **어떤 방식이 더 유지보수하기 쉬운가?** — 영리함보다 다음 사람이 읽기 쉬운 쪽을 택한다.
+
+## README 동기화 (주요 로직의 소스 오브 트루스)
+각 주요 디렉터리(`jongalab/`, `trading/`, `kiwoom/`)의 `README.md`는 그 도메인의 **주요 로직·코드 구조 설명서**다.
+- **변경 전**: 손대려는 도메인의 `README.md`를 먼저 읽어 구조·흐름·안전장치를 파악한다.
+- **변경 후**: `core/`·`routers/`·`workers/`의 주요 로직(책임·흐름·엔드포인트·안전장치)을 바꿨으면
+  같은 PR/턴에서 해당 `README.md`도 함께 갱신한다. 코드와 문서가 어긋난 채로 완료 보고하지 않는다.
+- 사소한 변경(오타·리네임·내부 헬퍼)은 갱신 불필요. 표/흐름도에 적힌 내용이 바뀌면 갱신 대상이다.
+
 ## 프론트엔드 규칙
 - **모바일 우선(mobile-first)**. 이 대시보드는 모바일에서 자주 쓰인다. 모든 UI는 작은 화면을
   먼저 만족시키고 `sm:`/`md:`로 확장한다. 데스크탑만 보고 끝내지 말 것.
@@ -89,6 +107,8 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
   (`.claude/hooks/track-changes.sh` 가 변경 파일을 누적 → `deploy-on-stop.sh` 가 분류·실행).
   - `jongalab/frontend/**` 변경 → `npm run build` 후 `jongalab-fe` 재시작(빌드 실패 시 Stop 을 막아 이어서 고치게 함).
     또한 프론트 편집마다 **모바일 최우선** 가이드가 컨텍스트로 주입된다.
+  - 백엔드 주요 로직(`*/core/**`·`*/routers/**`·`*/workers/**`·`*/api.py`) 편집마다
+    해당 도메인 `README.md` 동기화 + 설계 5원칙 점검 가이드가 컨텍스트로 주입된다(track-changes.sh).
   - `jongalab/api.py`/`jongalab/routers/**`/`jongalab/core/**` → `jongalab-be` 재시작,
     `jongalab/core/**`·`telegram_listener.py` → `jongalab-telegram` 재시작.
   - `kiwoom/api.py`/`kiwoom/core/**` → `kiwoom-api` 재시작.

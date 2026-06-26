@@ -1,36 +1,29 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# jongalab/frontend — 대시보드 (Next.js)
 
-## Getting Started
+jongalab 백엔드(`:8000`)의 리포트·종목·수급·테마·콘텐츠를 보여 주는 **모바일 우선** 웹 대시보드.
+Next.js 16 App Router + React 19 + Tailwind 4 + recharts.
 
-First, run the development server:
+> **모바일 우선이 1순위 규칙이다.** 이 대시보드는 모바일에서 자주 쓰인다. 모든 UI 는 작은 화면을
+> 먼저 만족시키고 `sm:`/`md:` 로 확장한다. 데스크탑만 보고 끝내지 말 것.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 코드 구조
+```
+frontend/
+├── app/             # App Router 페이지 (라우트 = 폴더)
+├── components/      # 재사용 UI·차트 카드 (recharts)
+├── lib/api.ts       # fetch 래퍼 (API_BASE = :8000)
+└── types/index.ts   # 타입 정의 — 백엔드 응답 shape 과 일치시킨다
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 규칙
+- 차트는 recharts, 아이콘은 lucide-react, 스타일은 Tailwind 4 유틸리티.
+- 새 카드 컴포넌트는 `/new-card` 스캐폴드를 사용한다.
+- 타입은 `types/index.ts` 에 정의하고 백엔드 응답과 어긋나지 않게 유지한다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 개발 / 검증
+```bash
+npm run dev                       # :3000 dev 서버
+npx tsc --noEmit && npm run lint  # 변경 후 필수 검증 (+ 모바일 폭 ≈375px 레이아웃 점검)
+```
+> 턴 종료 시 변경분은 `npm run build` 후 `jongalab-fe`(PM2)로 자동 반영된다(빌드 실패 시 알림).
+> 작업 규칙·가드레일은 루트 [`AGENTS.md`](../../AGENTS.md) 참고.
