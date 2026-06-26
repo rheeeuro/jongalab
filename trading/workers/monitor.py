@@ -186,6 +186,7 @@ def main() -> int:
             logger.error("모니터 루프 오류: %s", e)
         time.sleep(POLL_SEC)
     logger.info("가동 구간 종료 — 모니터 종료")
+    audit_log.mark_worker_done("monitor")  # watchdog 완료 마커(미실행 감시)
     return 0
 
 

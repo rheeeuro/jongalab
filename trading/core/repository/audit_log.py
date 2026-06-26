@@ -18,6 +18,31 @@ def append(event: str, stk_cd: Optional[str], payload: dict) -> None:
         conn.commit()
 
 
+def mark_worker_done(worker: str) -> None:
+    """워커가 '오늘 정상 완료'했음을 남기는 완료 마커 (watchdog/dead-man's switch 용).
+
+    무거래(no-op) 완료도 포함해, 마커가 없으면 곧 '해당 워커가 안 돌았다'로 단정할 수 있게 한다.
+    이 호출이 워커 본연의 결과를 가리지 않도록 예외는 삼킨다(이미 일은 끝난 시점).
+    """
+    try:
+        append("worker_done", worker, {})
+    except Exception:  # noqa: BLE001 — 마커 실패가 워커 성공/실패를 바꾸면 안 된다
+        import logging
+        logging.getLogger("audit_log").warning("worker_done 마커 기록 실패: %s", worker)
+
+
+def workers_done_today(date_dash: str) -> set[str]:
+    """오늘(YYYY-MM-DD) 완료 마커를 남긴 워커 이름 집합 — watchdog 가 누락을 판정한다."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT DISTINCT stk_cd FROM audit_log "
+            "WHERE event = 'worker_done' "
+            "AND created_at >= %s AND created_at < %s + INTERVAL 1 DAY",
+            (date_dash, date_dash),
+        )
+        return {r["stk_cd"] for r in cursor.fetchall() if r.get("stk_cd")}
+
+
 def realized_by_date(date_dash: str) -> dict:
     """해당 날짜(YYYY-MM-DD) 종목별 실현손익 합 — 일별 상세용 (paper 청산 기준)."""
     with get_db() as (conn, cursor):

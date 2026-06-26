@@ -228,6 +228,7 @@ def main() -> int:
     else:
         run_krx(engine, trade_date)
     logger.info("청산 종료 [%s]", args.venue.upper())
+    audit_log.mark_worker_done(f"settle:{args.venue}")  # watchdog 완료 마커(미실행 감시)
     return 0
 
 
