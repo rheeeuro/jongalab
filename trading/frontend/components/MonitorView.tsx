@@ -1,8 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MonitorState, MonitorEvent, NameMap } from "@/types";
 import { won, wonExact, pnlClass, ago, hhmmss } from "@/lib/format";
+
+// 폴링으로 새로 들어온 항목의 id 집합을 반환 — 첫 로드분은 제외(자동 채워진 것만 애니메이션).
+// 항목 배열(items)의 참조가 바뀔 때만(=폴링 갱신 시) 비교한다. 1초 틱 리렌더에는 반응하지 않음.
+function useNewIds<T extends { id: number }>(items: T[]): Set<number> {
+  const seen = useRef<Set<number> | null>(null);
+  const [fresh, setFresh] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    const ids = items.map((i) => i.id);
+    if (seen.current === null) {
+      seen.current = new Set(ids); // 첫 로드: 전부 '본 것'으로 등록(애니메이션 없음)
+      return;
+    }
+    const added = ids.filter((id) => !seen.current!.has(id));
+    if (added.length === 0) return;
+    added.forEach((id) => seen.current!.add(id));
+    setFresh(new Set(added));
+    const t = setTimeout(() => setFresh(new Set()), 1600); // 애니메이션(1.4s) 후 표식 해제
+    return () => clearTimeout(t);
+  }, [items]);
+  return fresh;
+}
 
 const ORDER_STATUS: Record<string, string> = {
   filled: "체결", sent: "전송", intended: "접수", rejected: "거부",
@@ -56,6 +77,10 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
   const positions = data.positions ?? [];
   const orders = data.orders ?? [];
   const events = data.events ?? [];
+
+  // 폴링으로 새로 들어온 로그/주문에 진입 애니메이션 표식
+  const newEventIds = useNewIds(events);
+  const newOrderIds = useNewIds(orders);
 
   const phaseLabel =
     data.phase === "sell" ? "매도 감시"
@@ -177,7 +202,10 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
             {events.map((e) => {
               const meta = EVENT_META[e.event];
               return (
-                <li key={e.id} className="flex items-start gap-2.5">
+                <li
+                  key={e.id}
+                  className={`flex items-start gap-2.5 ${newEventIds.has(e.id) ? "animate-log-enter" : ""}`}
+                >
                   <span className="mt-0.5 w-[52px] shrink-0 text-xs text-slate-400 tabular-nums">
                     {hhmmss(e.created_at)}
                   </span>
@@ -210,7 +238,9 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
               return (
                 <li
                   key={o.id}
-                  className={`flex items-center justify-between gap-2 py-3 ${filled ? "" : "opacity-50"}`}
+                  className={`flex items-center justify-between gap-2 py-3 ${filled ? "" : "opacity-50"} ${
+                    newOrderIds.has(o.id) ? "animate-log-enter" : ""
+                  }`}
                 >
                   <div className="flex min-w-0 items-center gap-2.5">
                     <span

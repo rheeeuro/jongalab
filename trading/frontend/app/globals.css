@@ -37,8 +37,31 @@ body {
   animation: detail-in 0.25s ease-out;
 }
 
+/* 폴링으로 새 로그가 들어올 때 — 위에서 미끄러져 들어오며 잠깐 초록 하이라이트가 점멸 */
+@keyframes log-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+    background-color: rgb(16 185 129 / 0.16);
+  }
+  70% {
+    background-color: rgb(16 185 129 / 0.16);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    background-color: transparent;
+  }
+}
+
+.animate-log-enter {
+  animation: log-enter 1.4s ease-out;
+  border-radius: 0.5rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-detail-in {
+  .animate-detail-in,
+  .animate-log-enter {
     animation: none;
   }
 }
