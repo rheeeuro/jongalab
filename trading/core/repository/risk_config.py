@@ -10,7 +10,7 @@ from core.db import get_db
 
 # RiskConfig 기본값 (DB에 값이 없을 때 사용)
 _DEFAULTS = {
-    "MAX_ORDERS_PER_DAY": 10,          # 일일 최대 주문 건수
+    "MAX_ORDERS_PER_DAY": 20,          # 일일 최대 주문 건수 (매수만 카운트, 매도 제외)
     "MAX_NOTIONAL_PER_NAME": 5_000_000,  # 종목당 최대 명목금액(원)
     "MAX_DAILY_LOSS": 3_000_000,       # 일일 최대 손실(원) → 초과 시 서킷브레이커
     "MAX_POSITIONS": 5,                # 동시 보유 종목수

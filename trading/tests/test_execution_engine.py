@@ -132,6 +132,7 @@ def test_sell_paper_records_realized_pnl(engine):
     assert len(rec.sells_applied) == 1
     assert rec.realized_added and rec.realized_added[0][0][1] == 12345
     assert "sell_filled_paper" in rec.event_types
+    assert risk.orders_recorded == 0  # 매도는 일일 주문수 한도에 카운트하지 않는다
 
 
 def test_sell_skips_when_quantity_zero(engine):

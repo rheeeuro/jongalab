@@ -7,26 +7,27 @@
 
 [검사 순서]
   1. 킬스위치 (env TRADING_KILL_SWITCH OR DB kill_switch) → 차단
-  2. 일일 주문 건수 한도
-  3. 종목당 최대 비중
-  4. 일일 최대 손실 → 초과 시 킬스위치 자동 ON (서킷브레이커)
+  2. 일일 최대 손실 → 초과 시 킬스위치 자동 ON (서킷브레이커)
+  3. 일일 주문 건수 한도
+  (종목당 명목 한도·동시 보유 종목수 한도는 제거됨 — 상위 종목 집중 배분을 위해
+   매수 거부 조건에서 빠졌고, MAX_NOTIONAL_PER_NAME·MAX_POSITIONS 는 execution_engine
+   의 폴백 사이징 용도로만 남는다.)
 """
 import logging
 from dataclasses import dataclass
 
 from core.config import TRADING_KILL_SWITCH
 from core.repository import risk_state as risk_repo
-from core.repository import position as position_repo
 
 logger = logging.getLogger("RiskEngine")
 
 
 class RiskConfig:
     """리스크 한도 파라미터. 클래스 속성은 기본값이며, load_from_db()로 대시보드 설정을 덮어쓴다."""
-    MAX_ORDERS_PER_DAY = 10
-    MAX_NOTIONAL_PER_NAME = 5_000_000      # 종목당 최대 명목금액(원)
+    MAX_ORDERS_PER_DAY = 20                 # 일일 최대 주문 건수 (매수만 카운트, 매도 제외)
+    MAX_NOTIONAL_PER_NAME = 5_000_000      # (한도 미적용) execution_engine 폴백 사이징용
     MAX_DAILY_LOSS = 3_000_000             # 일일 최대 손실(원) → 초과 시 서킷브레이커
-    MAX_POSITIONS = 5
+    MAX_POSITIONS = 5                       # (한도 미적용) execution_engine 폴백 사이징 슬롯 수
 
     def load_from_db(self) -> "RiskConfig":
         """risk_config 테이블(대시보드 설정)에서 한도를 로드해 인스턴스에 반영."""
@@ -69,20 +70,17 @@ class RiskEngine:
     def check(self, trade_date: str, stk_cd: str, notional: int) -> RiskDecision:
         """매수 주문 1건 사전 검사. allowed=False 면 집행 금지.
 
-        검사 순서: 킬스위치 → 종목당 명목 → 일일 손실(초과 시 브레이커) →
-        일일 주문수 → 동시 보유 종목수(신규 종목만).
+        검사 순서: 킬스위치 → 일일 손실(초과 시 브레이커) → 일일 주문수.
+        (종목당 명목 한도·동시 보유 종목수 한도는 제거됨 — notional·stk_cd 는
+        호출부 호환을 위해 시그니처에만 남는다.)
         """
         # 1. 킬스위치 (env OR DB)
         if self.kill_switch_on():
             return RiskDecision(False, "kill_switch ON")
 
-        # 2. 종목당 명목 한도
-        if notional > self.cfg.MAX_NOTIONAL_PER_NAME:
-            return RiskDecision(False, f"종목당 한도 초과: {notional} > {self.cfg.MAX_NOTIONAL_PER_NAME}")
-
         state = risk_repo.get_state(trade_date) or {}
 
-        # 3. 일일 손실 한도 → 초과 시 서킷브레이커 발동 후 차단
+        # 2. 일일 손실 한도 → 초과 시 서킷브레이커 발동 후 차단
         realized = state.get("realized_pnl") or 0
         if realized <= -self.cfg.MAX_DAILY_LOSS:
             self.trip_circuit_breaker(
@@ -90,19 +88,10 @@ class RiskEngine:
             )
             return RiskDecision(False, "일일 손실 한도 초과 (서킷브레이커)")
 
-        # 4. 일일 주문 건수 한도
+        # 3. 일일 주문 건수 한도
         orders = state.get("orders_count") or 0
         if orders >= self.cfg.MAX_ORDERS_PER_DAY:
             return RiskDecision(False, f"일일 주문수 한도 초과: {orders} >= {self.cfg.MAX_ORDERS_PER_DAY}")
-
-        # 5. 동시 보유 종목수 한도 (이미 보유 중인 종목 추가매수는 제외)
-        try:
-            held = {p["stk_cd"] for p in position_repo.get_open_positions()}
-        except Exception as e:
-            logger.error("포지션 조회 실패 — 안전상 차단: %s", e)
-            return RiskDecision(False, "포지션 조회 실패")
-        if stk_cd not in held and len(held) >= self.cfg.MAX_POSITIONS:
-            return RiskDecision(False, f"보유 종목수 한도 초과: {len(held)} >= {self.cfg.MAX_POSITIONS}")
 
         return RiskDecision(True)
 

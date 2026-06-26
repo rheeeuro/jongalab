@@ -6,6 +6,12 @@ import { StockReport } from "@/types";
 
 const LS_KEY_SEED = "seedAllocator_seed";
 const PREVIEW_COUNT = 8;
+// 배분 대상 후보 수 상한 — 점수 상위 N개만 매수 (trading/core/seed_allocator.py 와 동일)
+const TOP_N = 10;
+// 종목당 최대 투입 비율 — 미리보기용 기본값.
+// 실거래(trading)는 .env(SEED_MAX_NAME_PCT)로 튜닝하며,
+// 이 미리보기는 백엔드 기본값과 동일한 값으로 고정한다(프론트는 trading .env 미접근).
+const MAX_NAME_PCT = 0.5;
 
 const QUICK_AMOUNTS = [
   { label: "100만", value: 1_000_000 },
@@ -40,34 +46,48 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
 
   const allocations = useMemo<Allocation[]>(() => {
     if (seedNum <= 0 || reports.length === 0) return [];
-    const totalScore = reports.reduce(
-      (sum, r) => sum + Math.max(r.score, 0),
-      0,
-    );
-    if (totalScore <= 0) return [];
 
-    // 1차: 점수 가중치로 목표 금액 산정 → 정수 주식으로 비례 배분
-    const items = reports.map((r) => {
-      const weight = Math.max(r.score, 0) / totalScore;
-      const allocAmount = seedNum * weight;
-      const price = r.current_price > 0 ? r.current_price : 0;
-      const shares = price > 0 ? Math.floor(allocAmount / price) : 0;
-      return { report: r, weight, allocAmount, price, shares, cost: shares * price };
-    });
+    // 유효가(>0) 후보를 점수순으로 정렬해 상위 TOP_N 개만 배분 대상으로 삼는다.
+    const ranked = reports
+      .filter((r) => r.current_price > 0)
+      .sort((a, b) => Math.max(b.score, 0) - Math.max(a.score, 0))
+      .slice(0, TOP_N);
 
-    // 2차: 잔여 현금을 그리디로 재투입해 활용률을 최대화한다.
-    // 매번 "목표 대비 가장 덜 채워진(allocAmount - cost가 큰)" 종목 중
-    // 단가가 잔여 현금 이하인 것을 한 주씩 추가 매수한다. 가중치를 최대한
-    // 존중하면서, 매수 가능한 종목이 없을 때까지(잔여 < 최저 단가) 채운다.
+    // 가중치 = 점수(음수는 0 클램프).
+    const items = ranked.map((r) => ({
+      report: r,
+      w: Math.max(r.score, 0),
+      price: r.current_price,
+      shares: 0,
+      cost: 0,
+    }));
+    const totalW = items.reduce((s, it) => s + it.w, 0);
+    if (totalW <= 0) return [];
+
+    // 종목당 최대 투입금액 — 시드 대비 비율 캡(이 금액을 넘게는 배분하지 않는다).
+    const cap = seedNum * MAX_NAME_PCT;
+
+    // 1차: weight 비례 목표금액(캡 적용) → 정수 주식으로 내림 배분
+    for (const it of items) {
+      const target = Math.min((seedNum * it.w) / totalW, cap);
+      it.shares = Math.floor(target / it.price);
+      it.cost = it.shares * it.price;
+    }
+
+    // 2차: 잔여 현금을 그리디로 재투입 — weight(점수)가 가장 큰 종목부터 한 주씩 추가
+    // 매수해 확신 높은 상위 종목에 집중시킨다(비례 분산이 아니라 상위 우선). 단 한 주 더
+    // 사면 종목당 캡(cap)을 넘는 종목은 제외하므로, 1등이 캡에 닿으면 잔여는 다음 상위
+    // 종목으로 흐른다. 매수 가능 종목이 없을 때까지(잔여 < 최저가 또는 전원 캡 도달) 채운다.
     let leftover = seedNum - items.reduce((s, it) => s + it.cost, 0);
     for (;;) {
       let best: (typeof items)[number] | null = null;
-      let bestGap = -Infinity;
+      let bestW = -Infinity;
       for (const it of items) {
+        if (it.w <= 0) continue; // 0점(음수) 종목엔 잔여현금도 배분하지 않는다
         if (it.price <= 0 || it.price > leftover) continue;
-        const gap = it.allocAmount - it.cost; // 부족분이 클수록 우선
-        if (gap > bestGap) {
-          bestGap = gap;
+        if (it.cost + it.price > cap) continue;
+        if (it.w > bestW) {
+          bestW = it.w;
           best = it;
         }
       }
@@ -78,12 +98,12 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
     }
 
     return items
-      .map(({ report, weight, allocAmount, shares, cost }) => ({
-        report,
-        weight,
-        allocAmount,
-        shares,
-        cost,
+      .map((it) => ({
+        report: it.report,
+        weight: it.w / totalW,
+        allocAmount: Math.min((seedNum * it.w) / totalW, cap),
+        shares: it.shares,
+        cost: it.cost,
       }))
       .sort((a, b) => b.cost - a.cost);
   }, [reports, seedNum]);
@@ -116,7 +136,7 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
             시드 배분
           </h2>
           <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            점수 가중치로 {reports.length}개 종목에 자동 배분
+            점수 가중치로 상위 {Math.min(reports.length, TOP_N)}개 종목에 자동 배분
           </p>
         </div>
       </header>

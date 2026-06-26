@@ -80,6 +80,10 @@ BUY_PULLBACK_PCT = float(os.getenv('BUY_PULLBACK_PCT', '0.5'))
 # settle(08:05/09:05)가 손실을 정리하기 전에 갭하락으로 손실이 커지는 것을 막는 안전망.
 HARD_STOP_LOSS_PCT = float(os.getenv('HARD_STOP_LOSS_PCT', '2.0'))
 
+# ── 시드 배분기 튜닝 (core.seed_allocator) ──
+# 종목당 최대 투입 비율 — 시드 대비(고정금액 아님). 1.0 이상이면 사실상 무제한.
+SEED_MAX_NAME_PCT = float(os.getenv('SEED_MAX_NAME_PCT', '0.5'))
+
 # ── ⚠️ 매매 안전장치 ──
 # 'paper': 모의(주문 미전송, 의도만 로깅·기록) / 'live': 실주문 전송. 기본값은 paper.
 TRADING_MODE = os.getenv('TRADING_MODE', 'paper').lower()

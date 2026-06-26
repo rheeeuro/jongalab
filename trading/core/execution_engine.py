@@ -197,7 +197,7 @@ class ExecutionEngine:
             logger.warning("매도 거부 [%s]: %s", stk_cd, resp.get("return_msg"))
             return None
         order_repo.mark_sent(order_id, resp.get("ord_no"), "filled" if paper else "sent")
-        self.risk.record_order(trade_date)
+        # 매도(청산)는 일일 주문수 한도에 카운트하지 않는다 — 한도는 매수(신규 노출)만 제한한다.
         if paper:
             fill_repo.record_fill(order_id, stk_cd, qty, price)
             realized = position_repo.apply_sell_fill(stk_cd, qty, price)
