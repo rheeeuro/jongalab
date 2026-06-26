@@ -19,3 +19,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["core", "workers"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+# 자금 경로(money-path) 순수 로직 단위 테스트. DB/네트워크 없이 fake 주입으로 동작을 고정한다.
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"

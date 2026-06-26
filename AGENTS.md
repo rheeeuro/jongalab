@@ -96,6 +96,8 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
 2. Python(`.py`) 변경 → 바뀐 파일마다 `uv run python -m py_compile <file>`
 3. 라우터/응답 변경 → API 기동 후 `curl`로 엔드포인트 status·shape 확인
 4. UI 변경 → `:3000` 라우트 200 + **모바일 레이아웃** 우선 점검
+5. `trading/` 자금 경로(`seed_allocator`/`execution_engine`/`risk_engine`) 변경 → 단위 테스트 실행:
+   `uv run --directory trading --group dev pytest` (DB/네트워크 불필요). 동작이 바뀌면 `trading/tests/` 도 함께 갱신.
 
 실패가 있으면 수정 후 다시 통과시킨 뒤에만 완료로 보고한다. 추측 금지 — 실행 결과로 보고한다.
 
