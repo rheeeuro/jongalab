@@ -27,3 +27,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["core", "workers", "routers"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+# 순수 로직 단위 테스트 (DB/네트워크 없이). 현재: 가중치 백테스트(core/backtest.py).
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"

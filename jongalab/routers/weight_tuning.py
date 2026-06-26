@@ -15,24 +15,45 @@ from core.repository import (
     mark_rejected,
     SCORE_WEIGHT_KEYS,
 )
+from core.backtest import backtest_proposal
 
 router = APIRouter(prefix="/api/weight-tuning", tags=["weight-tuning"])
 
 
+def _attach_backtest(proposal: dict | None, cfg: dict | None = None) -> dict | None:
+    """제안에 백테스트 검증 결과(backtest)를 붙인다 — 저장된 dataset + 가중치로 즉석 계산.
+
+    임계값(PREFERRED/MIN_TRADING_VALUE 등 비튜닝 상수)은 현재 전략설정에서 채운다.
+    실패해도 제안 조회 자체는 막지 않는다(backtest=None).
+    """
+    if not proposal or not proposal.get("dataset"):
+        return proposal
+    try:
+        cfg = cfg if cfg is not None else get_strategy_config()
+        current = {**cfg, **(proposal.get("current_weights") or {})}
+        proposed = {**cfg, **(proposal.get("proposed_weights") or {})}
+        proposal["backtest"] = backtest_proposal(proposal["dataset"], current, proposed)
+    except Exception:
+        proposal["backtest"] = None
+    return proposal
+
+
 @router.get("/proposals")
 def get_proposals(limit: int = 20):
-    """제안 목록 (최신순)."""
+    """제안 목록 (최신순). 각 제안에 백테스트 검증 결과를 첨부."""
     try:
-        return list_proposals(limit)
+        proposals = list_proposals(limit)
+        cfg = get_strategy_config()
+        return [_attach_backtest(p, cfg) for p in proposals]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/proposals/latest")
 def get_latest():
-    """가장 최근 제안 1건."""
+    """가장 최근 제안 1건 (백테스트 검증 결과 포함)."""
     try:
-        return get_latest_proposal() or {}
+        return _attach_backtest(get_latest_proposal()) or {}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

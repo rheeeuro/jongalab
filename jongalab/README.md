@@ -38,6 +38,7 @@ jongalab/
 | `sector_resolver.py` | 티커→섹터 해석(ticker_dictionary 캐시, TTL 1년) |
 | `ticker.py` | 기업명↔티커 변환, 신규 티커 등록, 콘텐츠 본문 기업명 추출 |
 | `filters.py` | 분석 결과 저장 여부 판단(점수 범위·티커 포함·환각 검증) |
+| `backtest.py` | 가중치 제안 백테스트 — `score_candidate` 공식을 미러링(`recompute_score`)해 저장된 표본에 제안 가중치를 재적용, 승자/패자 판별력 비교. ⚠️엔진 공식 변경 시 미러도 갱신(테스트가 드리프트 감지) |
 | `notifications.py` | 텔레그램 알림(재시도 포함) |
 | `market_calendar.py` | KRX 개장일 판별(exchange_calendars XKRX) |
 | `logging_setup.py` | 로그 설정 |
@@ -79,7 +80,8 @@ jongalab/
         ├─► daily_stock_report (score, rank_no)  ─► 대시보드/갭체크
         └─► trade_signal (status=pending)        ─► trading 도메인이 집행
 다음날 아침 gap_check ─► daily_stock_report.gap_* 갱신
-주말 weight_tuner ─► 실현손익 피드백 ─► 가중치 제안(관리자 승인 후 strategy_config 반영)
+주말 weight_tuner ─► 실현손익 피드백 ─► 가중치 제안
+  └► 관리자 승인 화면에서 백테스트 검증(제안 가중치 재적용, core/backtest.py) 확인 → 승인 시 strategy_config 반영
 ```
 
 **경계**: jongalab 은 **무엇을 살지** 결정해 `trade_signal` 에 적재만 한다.
@@ -95,3 +97,5 @@ jongalab/
 4. DB 접근은 `core/repository/*`, LLM 은 `core/ai_service.analyze_content` 만 사용한다.
 5. 검증: Python 변경마다 `uv run --directory jongalab python -m py_compile <file>`,
    라우터/응답 변경 시 API 기동 후 `curl` 로 status·shape 확인.
+6. 순수 로직(예: `core/backtest.py`) 단위 테스트: `uv run --directory jongalab --group dev pytest`
+   (DB/네트워크 없이). `recompute_score` 는 실제 `score_candidate` 와 교차검증되므로 엔진 공식 변경 시 함께 갱신.

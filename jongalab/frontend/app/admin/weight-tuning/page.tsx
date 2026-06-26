@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Check, X, Loader2, ArrowRight, TrendingUp, TrendingDown } from "lucide-react";
-import type { WeightTuningProposal, WeightTuningSample } from "@/types";
+import type { WeightTuningProposal, WeightTuningSample, WeightBacktest } from "@/types";
 
 const WEIGHT_LABELS: Record<string, string> = {
   SCORE_SUPPLY_BONUS: "수급 가점",
@@ -186,6 +186,9 @@ function ProposalCard({
         </div>
       </div>
 
+      {/* Backtest validation */}
+      {proposal.backtest && <BacktestPanel bt={proposal.backtest} />}
+
       {/* Rationale */}
       {proposal.rationale && (
         <div className="px-4 sm:px-5 pb-4">
@@ -261,6 +264,81 @@ function WeightRow({ label, from, to }: { label: string; from?: number; to?: num
           {to ?? "-"}
         </span>
       </span>
+    </div>
+  );
+}
+
+const VERDICT: Record<string, { label: string; cls: string }> = {
+  IMPROVES: { label: "개선", cls: "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
+  WORSENS: { label: "악화", cls: "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+  NEUTRAL: { label: "보합", cls: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
+  INSUFFICIENT: { label: "표본 부족", cls: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+};
+
+function BacktestPanel({ bt }: { bt: WeightBacktest }) {
+  const v = VERDICT[bt.verdict] ?? VERDICT.NEUTRAL;
+  return (
+    <div className="px-4 sm:px-5 pb-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-xs font-bold text-slate-500">백테스트 검증 (제안 가중치 재적용)</h3>
+        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${v.cls}`}>{v.label}</span>
+      </div>
+      <div className="rounded-lg border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
+        <BtRow
+          label="승자−패자 점수차"
+          hint="클수록 승자를 더 높게 평가 = 좋음"
+          from={bt.current.spread}
+          to={bt.proposed.spread}
+          delta={bt.spread_delta}
+        />
+        <BtRow
+          label="손익 순위상관"
+          hint="-1~1, 클수록 점수가 실현손익을 잘 반영"
+          from={bt.current.pnl_rank_corr}
+          to={bt.proposed.pnl_rank_corr}
+          delta={bt.corr_delta}
+        />
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-slate-400">{bt.note}</p>
+    </div>
+  );
+}
+
+function BtRow({
+  label,
+  hint,
+  from,
+  to,
+  delta,
+}: {
+  label: string;
+  hint: string;
+  from: number | null;
+  to: number | null;
+  delta: number | null;
+}) {
+  const fmt = (x: number | null) => (x === null || x === undefined ? "—" : String(x));
+  const up = delta !== null && delta > 0;
+  const down = delta !== null && delta < 0;
+  return (
+    <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+      <div className="min-w-0">
+        <div className="text-sm text-slate-600 dark:text-slate-300">{label}</div>
+        <div className="truncate text-[11px] text-slate-400">{hint}</div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5 font-mono tabular-nums text-sm">
+        <span className="text-slate-400">{fmt(from)}</span>
+        <ArrowRight className="h-3 w-3 text-slate-300" />
+        <span className={up ? "font-bold text-green-600 dark:text-green-400" : down ? "font-bold text-red-600 dark:text-red-400" : "text-slate-500"}>
+          {fmt(to)}
+        </span>
+        {delta !== null && delta !== 0 && (
+          <span className={`text-[11px] ${up ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+            ({up ? "+" : ""}
+            {delta})
+          </span>
+        )}
+      </div>
     </div>
   );
 }

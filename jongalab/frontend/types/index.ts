@@ -207,6 +207,24 @@ export interface WeightTuningSample {
   change_pct: number;
 }
 
+export interface WeightBacktestMetrics {
+  winner_avg_score: number | null;
+  loser_avg_score: number | null;
+  spread: number | null;
+  pnl_rank_corr: number | null;
+  scores: { stk_cd: string; name: string; outcome: string; realized_pnl: number; score: number }[];
+}
+
+export interface WeightBacktest {
+  sample_count: number;
+  current: WeightBacktestMetrics;
+  proposed: WeightBacktestMetrics;
+  spread_delta: number | null;
+  corr_delta: number | null;
+  verdict: 'IMPROVES' | 'WORSENS' | 'NEUTRAL' | 'INSUFFICIENT';
+  note: string;
+}
+
 export interface WeightTuningProposal {
   id: number;
   week_start: string;
@@ -220,6 +238,7 @@ export interface WeightTuningProposal {
   proposed_weights: WeightMap;
   rationale: string | null;
   dataset: WeightTuningSample[] | null;
+  backtest?: WeightBacktest | null;
   created_at: string;
   applied_at: string | null;
 }
