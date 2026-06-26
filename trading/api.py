@@ -11,7 +11,9 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException, Depends, Request
 from pydantic import BaseModel
 
-from core.config import DB_CONFIG, TRADING_MODE, ADMIN_PASSWORD  # noqa: F401  (import 시 루트 .env 로드)
+from core.config import (  # noqa: F401  (import 시 루트 .env 로드)
+    DB_CONFIG, TRADING_MODE, ADMIN_PASSWORD, HARD_STOP_LOSS_PCT, TRAIL_PCT, BUY_PULLBACK_PCT,
+)
 from core.logging_setup import setup_logging
 from core.repository import kiwoom_token as token_repo
 from core.repository import risk_state as risk_repo
@@ -132,6 +134,88 @@ def positions():
             p["eval_amt"] = cur * p["qty"]
             p["unrealized_pnl"] = (cur - p["avg_price"]) * p["qty"] if cur else 0
     return rows
+
+
+def _heartbeat_worker(hb: dict | None) -> str | None:
+    """가장 최근 하트비트로부터 실제 가동 중인 pm2 워커명을 식별.
+    monitor_poll → trading-monitor, buy_poll → trading-buy-{venue}."""
+    if not hb:
+        return None
+    if hb["event"] == "monitor_poll":
+        return "trading-monitor"
+    if hb["event"] == "buy_poll":
+        venue = (hb.get("payload") or {}).get("venue")
+        return f"trading-buy-{venue}" if venue in ("krx", "nxt") else "trading-buy"
+    return None
+
+
+def _monitor_phase(now: datetime):
+    """현재 시각이 어느 폴링 단계인지 — (phase, in_window). 평일만 가동.
+
+    sell  = 매도 모니터(monitor 워커)   08:00~09:30
+    buy_krx = KRX 눌림 매수(signal_executor --venue krx)  15:00~15:20
+    buy_nxt = NXT 눌림 매수(signal_executor --venue nxt)  19:30~19:50
+    """
+    if now.weekday() >= 5:
+        return None, False
+    hm = (now.hour, now.minute)
+    if (8, 0) <= hm <= (9, 30):
+        return "sell", True
+    if (15, 0) <= hm <= (15, 20):
+        return "buy_krx", True
+    if (19, 30) <= hm <= (19, 50):
+        return "buy_nxt", True
+    return None, False
+
+
+@app.get("/monitor")
+def monitor():
+    """자동매매 폴링 모니터 상태 — '모니터' 탭 실시간 뷰.
+
+    매도 모니터(monitor, 08:00~09:30)와 매수 집행(signal_executor, KRX 15:00 / NXT 19:30)
+    워커의 가동 여부(하트비트 기준)와 함께, 보유 포지션을 스탑선(settle_plan)·하드손절가
+    (평단×(1-HARD_STOP_LOSS_PCT/100))로 평가하고, 폴링 활동 로그(매도 스탑·매수 집행)와
+    최근 주문 로그를 묶어 반환한다.
+    """
+    now = datetime.now()
+    phase, in_window = _monitor_phase(now)
+    # 하트비트(monitor_poll/buy_poll)가 60초(=4×폴링) 안에 있으면 워커가 실제로 돌고 있다고 본다.
+    hb = audit_log.last_heartbeat()
+    last_poll = hb["created_at"] if hb else None
+    active = bool(last_poll and (now - last_poll).total_seconds() <= 60)
+    worker = _heartbeat_worker(hb) if active else None  # 실제 폴링 중인 워커 (꺼졌으면 None)
+
+    positions = position_repo.get_open_positions()
+    plans = {p["stk_cd"]: p for p in settle_plan_repo.get_active_plans()}
+    if positions:
+        dc = KiwoomDataClient()
+        for p in positions:
+            cur, is_nxt = dc.get_display_price(p["stk_cd"])
+            p["cur_prc"] = cur
+            p["is_nxt"] = is_nxt
+            p["eval_amt"] = cur * p["qty"]
+            p["unrealized_pnl"] = (cur - p["avg_price"]) * p["qty"] if cur else 0
+            # 손절가: 평단 대비 -HARD_STOP_LOSS_PCT% (plan 유무 무관 안전망)
+            p["hard_stop"] = round(p["avg_price"] * (1 - HARD_STOP_LOSS_PCT / 100))
+            plan = plans.get(p["stk_cd"])
+            # 스탑선: 활성 청산계획의 stop_price (트레일링으로 상향됨). 장 시작 전이면 None.
+            p["stop_price"] = plan["stop_price"] if plan else None
+            p["plan_active"] = bool(plan)
+
+    return {
+        "active": active,
+        "in_window": in_window,
+        "phase": phase,
+        "worker": worker,
+        "last_poll_at": last_poll.isoformat() if last_poll else None,
+        "poll_sec": 15,
+        "hard_stop_pct": HARD_STOP_LOSS_PCT,
+        "trail_pct": TRAIL_PCT,
+        "pullback_pct": BUY_PULLBACK_PCT,
+        "positions": positions,
+        "orders": order_repo.list_recent(30),
+        "events": audit_log.list_activity_events(50),
+    }
 
 
 @app.get("/names")

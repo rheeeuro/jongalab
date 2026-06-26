@@ -26,11 +26,21 @@ from core.seed_allocator import allocate
 from core.kiwoom_data_client import to_int
 from core.repository import trade_signal as signal_repo
 from core.repository import blocklist as blocklist_repo
+from core.repository import audit_log
 
 setup_logging()
 logger = logging.getLogger("SignalExecutor")
 
 POLL_SEC = 15  # closing_bet 완료 대기 / 눌림 매수 폴링 공통 주기
+
+
+def _beat(payload: dict) -> None:
+    """매수 폴링 하트비트 — 대시보드 '모니터' 탭이 매수 워커 가동 여부를 판별하는 신호.
+    기록 실패가 매수 루프를 막지 않도록 예외를 삼킨다(순수 로깅)."""
+    try:
+        audit_log.append("buy_poll", None, payload)
+    except Exception as e:
+        logger.warning("하트비트 기록 실패: %s", e)
 
 # (venue → 윈도우 시작/데드라인/대기한도(시,분), 거래소). ecosystem.config.js 의 cron(=start) 과 일치시킬 것.
 # wait_until: closing_bet(같은 분 동시 기동) 완료를 이 시각까지 기다린다. 미감지 시 기존 시그널로 진행
@@ -55,9 +65,13 @@ def _buy_candidate(engine: ExecutionEngine, trade_date: str, c: dict,
         signal_repo.update_status(sig["id"], "executing")
         resp = engine.execute_buy(trade_date, sized, dmst_stex_tp=exchange)
         signal_repo.update_status(sig["id"], "done" if resp else "skipped")
+        audit_log.append("buy_exec", stk, {
+            "shares": c["shares"], "price": price, "reason": reason, "sent": bool(resp)})
     except Exception as e:
         logger.error("시그널 %s 집행 실패: %s", sig["id"], e)
         signal_repo.update_status(sig["id"], "rejected", note=str(e))
+        audit_log.append("buy_exec", stk, {
+            "shares": c["shares"], "price": price, "reason": reason, "sent": False, "error": str(e)})
     finally:
         c["bought"] = True
 
@@ -78,6 +92,10 @@ def main() -> int:
     logger.info("매수 집행 시작 [%s] 거래소=%s 윈도우 %02d:%02d~%02d:%02d 눌림 -%.2f%% (거래일 %s)",
                 args.venue.upper(), cfg["exchange"], *cfg["start"], *cfg["deadline"],
                 BUY_PULLBACK_PCT, trade_date)
+    audit_log.append("buy_start", None, {
+        "venue": args.venue, "exchange": cfg["exchange"],
+        "window": f"{cfg['start'][0]:02d}:{cfg['start'][1]:02d}~{cfg['deadline'][0]:02d}:{cfg['deadline'][1]:02d}",
+        "pullback_pct": BUY_PULLBACK_PCT})
 
     # 0) closing_bet(같은 분 동시 기동) 완료 대기 — 윈도우 시작 이후 갱신된 시그널이 보일 때까지.
     #    이 회차 closing_bet 가 종목 추천을 마친 뒤의 최신 시그널로 매수하기 위함.
@@ -90,6 +108,7 @@ def main() -> int:
             break
         logger.info("closing_bet(%02d:%02d 회차) 완료 대기 중... (%s 이후 갱신 대기)",
                     *cfg["start"], since)
+        _beat({"venue": args.venue, "phase": "wait"})
         time.sleep(POLL_SEC)
     else:
         logger.info("closing_bet 갱신 시그널 감지 — 매수 폴링 시작")
@@ -111,6 +130,7 @@ def main() -> int:
         if stk in block:
             logger.info("blocklist 제외 — signal %s [%s]", sig["id"], stk)
             signal_repo.update_status(sig["id"], "skipped", note="blocklist")
+            audit_log.append("buy_skip", stk, {"reason": "blocklist"})
             continue
         classified.append((sig, stk, max(float(sig.get("score") or 0), 0),
                            engine.data.is_nxt_enabled(stk)))
@@ -148,6 +168,8 @@ def main() -> int:
         if c["shares"] < 1:
             logger.info("배분 0주 스킵 [%s] (점수 %.1f, 현재가 %d)", c["stk_cd"], c["score"], c["price"])
             signal_repo.update_status(c["sig"]["id"], "skipped", note="배분 0주")
+            audit_log.append("buy_skip", c["stk_cd"], {
+                "reason": "배분 0주", "score": c["score"], "price": c["price"]})
             c["bought"] = True  # 루프 대상에서 제외
 
     # 4) 윈도우 폴링 — 종목별 고점 추종, 고점 대비 BUY_PULLBACK_PCT% 눌리면 즉시 매수
@@ -172,6 +194,8 @@ def main() -> int:
         if all(c["bought"] for c in cands):
             logger.info("전 종목 매수 완료 — 데드라인 전 종료")
             break
+        _beat({"venue": args.venue, "phase": "poll",
+               "pending": sum(1 for c in cands if not c["bought"])})
         time.sleep(POLL_SEC)
 
     # 5) 데드라인 — 끝까지 안 눌린 잔여 후보는 시장가로 매수해 추세 종목 확보

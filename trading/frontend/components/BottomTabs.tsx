@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, CalendarDays, Receipt, Settings } from "lucide-react";
+import { Home, Activity, CalendarDays, Receipt, Settings } from "lucide-react";
 
 const TABS = [
   { href: "/", label: "오늘", icon: Home },
+  { href: "/monitor", label: "모니터", icon: Activity },
   { href: "/calendar", label: "달력", icon: CalendarDays },
   { href: "/history", label: "거래내역", icon: Receipt },
   { href: "/settings", label: "설정", icon: Settings },

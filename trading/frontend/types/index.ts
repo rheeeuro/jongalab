@@ -142,6 +142,50 @@ export interface BuyPreview {
   venues: BuyPreviewVenue[];
 }
 
+/** 모니터 탭 — 폴링 워커 가동 상태 + 스탑선/손절가가 붙은 보유 포지션 + 활동/주문 로그. */
+export interface MonitorPosition extends Position {
+  hard_stop: number; // 손절가 = 평단 × (1 - HARD_STOP_LOSS_PCT/100)
+  stop_price: number | null; // 스탑선(트레일링) — 활성 청산계획이 없으면 null(장 시작 전)
+  plan_active: boolean; // 활성 청산계획(감시 대상) 여부
+}
+
+/** 폴링 활동 이벤트 — 매도(스탑 상향/발동·손절) + 매수(집행/스킵/시작). */
+export type MonitorEventType =
+  | "monitor_start"
+  | "monitor_trail"
+  | "monitor_stop"
+  | "monitor_hardstop"
+  | "buy_start"
+  | "buy_exec"
+  | "buy_skip";
+
+export interface MonitorEvent {
+  id: number;
+  event: MonitorEventType;
+  stk_cd: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any;
+  created_at: string;
+}
+
+/** 현재 폴링 단계 — 매도 감시 / KRX·NXT 매수 집행 / 미가동(null). */
+export type MonitorPhase = "sell" | "buy_krx" | "buy_nxt" | null;
+
+export interface MonitorState {
+  active: boolean; // 하트비트 기준 워커 가동 중 여부 (60초 이내 폴링)
+  in_window: boolean; // 가동 구간(매도 08:00~09:30 / 매수 15:00·19:30) 여부
+  phase: MonitorPhase; // 현재 폴링 단계
+  worker: string | null; // 실제 폴링 중인 pm2 워커명 (예: trading-buy-nxt), 미가동 시 null
+  last_poll_at: string | null; // 마지막 폴링 시각 (ISO)
+  poll_sec: number; // 폴링 주기(초)
+  hard_stop_pct: number; // 하드 손절 임계 %
+  trail_pct: number; // 트레일링 되돌림 %
+  pullback_pct: number; // 매수 눌림 임계 %
+  positions: MonitorPosition[];
+  orders: Order[];
+  events: MonitorEvent[];
+}
+
 export interface DailySummary {
   trade_date: string;
   realized_pnl: number;

@@ -30,11 +30,21 @@ from core.fill_sync import sync_fills
 from core.order_maintenance import cancel_stale_orders, reconcile_dead_sent
 from core.repository import position as position_repo
 from core.repository import settle_plan as plan_repo
+from core.repository import audit_log
 
 setup_logging()
 logger = logging.getLogger("Monitor")
 
 POLL_SEC = 15
+
+
+def _beat(payload: dict) -> None:
+    """폴링 하트비트 — 대시보드 '모니터' 탭이 워커 가동 여부를 판별하는 신호.
+    기록 실패가 감시 루프를 막지 않도록 예외를 삼킨다(순수 로깅)."""
+    try:
+        audit_log.append("monitor_poll", None, payload)
+    except Exception as e:
+        logger.warning("하트비트 기록 실패: %s", e)
 
 
 def in_window(now: datetime) -> bool:
@@ -105,6 +115,9 @@ def check_once(engine: ExecutionEngine) -> None:
             if cur <= hard_stop:
                 sold = engine.execute_sell(trade_date, stk_cd, pos["qty"], cur,
                                            dmst_stex_tp=sell_venue(datetime.now()), tag="hardstop")
+                audit_log.append("monitor_hardstop", stk_cd, {
+                    "cur": cur, "hard_stop": hard_stop, "avg_price": pos["avg_price"],
+                    "qty": pos["qty"], "pct": HARD_STOP_LOSS_PCT, "sent": bool(sold)})
                 if sold and _exit_confirmed(stk_cd):
                     if plan:
                         plan_repo.deactivate(plan["trade_date"], stk_cd,
@@ -122,6 +135,8 @@ def check_once(engine: ExecutionEngine) -> None:
             if plan and cur <= plan["stop_price"]:
                 sold = engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
                                            dmst_stex_tp=sell_venue(datetime.now()), tag="stop")
+                audit_log.append("monitor_stop", stk_cd, {
+                    "cur": cur, "stop": plan["stop_price"], "qty": pos["qty"], "sent": bool(sold)})
                 if sold and _exit_confirmed(stk_cd):
                     plan_repo.deactivate(plan["trade_date"], stk_cd,
                                          f"스탑/저가이탈 청산완료 @{cur}(<= {plan['stop_price']})")
@@ -141,6 +156,8 @@ def check_once(engine: ExecutionEngine) -> None:
                         plan["trade_date"], stk_cd, trail_stop, note=f"trail @{cur}"):
                     logger.info("트레일링 [%s] 스탑 상향 %d→%d (현재가 %d, -%.1f%%)",
                                 stk_cd, plan["stop_price"], trail_stop, cur, TRAIL_PCT)
+                    audit_log.append("monitor_trail", stk_cd, {
+                        "old": plan["stop_price"], "new": trail_stop, "cur": cur, "pct": TRAIL_PCT})
         except Exception as e:
             logger.error("모니터 점검 실패 [%s]: %s", stk_cd, e)
 
@@ -151,16 +168,20 @@ def main() -> int:
         return 0
     logger.info("하드손절(-%.1f%%)/스탑 모니터 시작 (15초 폴링, 08:00 기동, 08:00·09:00 워밍업 스킵, 09:30 자동 종료)",
                 HARD_STOP_LOSS_PCT)
+    audit_log.append("monitor_start", None, {
+        "poll_sec": POLL_SEC, "hard_stop_pct": HARD_STOP_LOSS_PCT, "trail_pct": TRAIL_PCT})
     engine = ExecutionEngine()
     while in_window(datetime.now()):
         now = datetime.now()
         if in_open_warmup(now):
             logger.info("개장 워밍업 %02d:%02d — 시가 체결 전 stale 가격 오발동 방지 위해 평가 스킵",
                         now.hour, now.minute)
+            _beat({"warmup": True})
             time.sleep(POLL_SEC)
             continue
         try:
             check_once(engine)
+            _beat({"positions": len(position_repo.get_open_positions())})
         except Exception as e:
             logger.error("모니터 루프 오류: %s", e)
         time.sleep(POLL_SEC)

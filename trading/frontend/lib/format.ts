@@ -61,3 +61,20 @@ export function todayYYYYMMDD(): string {
   const n = new Date();
   return `${n.getFullYear()}${String(n.getMonth() + 1).padStart(2, "0")}${String(n.getDate()).padStart(2, "0")}`;
 }
+
+// ISO(naive local) → "n초 전 / n분 전 / n시간 전". 모니터 마지막 폴링 표시용.
+export function ago(iso: string | null, nowMs: number): string {
+  if (!iso) return "기록 없음";
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "기록 없음";
+  const s = Math.max(0, Math.round((nowMs - t) / 1000));
+  if (s < 60) return `${s}초 전`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}분 전`;
+  return `${Math.floor(m / 60)}시간 전`;
+}
+
+// "2026-06-26T08:01:13" → "08:01:13"
+export function hhmmss(iso: string): string {
+  return iso.slice(11, 19);
+}
