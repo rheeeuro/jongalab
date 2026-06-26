@@ -178,6 +178,7 @@ def monitor():
     최근 주문 로그를 묶어 반환한다.
     """
     now = datetime.now()
+    today_dash = now.strftime("%Y-%m-%d")  # 모니터 탭은 주문·활동 로그 모두 오늘만
     phase, in_window = _monitor_phase(now)
     # 하트비트(monitor_poll/buy_poll)가 60초(=4×폴링) 안에 있으면 워커가 실제로 돌고 있다고 본다.
     hb = audit_log.last_heartbeat()
@@ -213,8 +214,9 @@ def monitor():
         "trail_pct": TRAIL_PCT,
         "pullback_pct": BUY_PULLBACK_PCT,
         "positions": positions,
-        "orders": order_repo.list_recent(30),
-        "events": audit_log.list_activity_events(50),
+        # 주문 로그·활동 로그 모두 오늘 날짜만 (최신순) — 모니터 탭은 당일 폴링 활동을 본다
+        "orders": list(reversed(order_repo.list_by_date(today_dash))),
+        "events": audit_log.list_activity_events(50, date_dash=today_dash),
     }
 
 

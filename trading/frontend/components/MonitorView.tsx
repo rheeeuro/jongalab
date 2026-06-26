@@ -199,9 +199,9 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
 
       {/* 주문 로그 */}
       <section className="rounded-2xl bg-white p-5 shadow-sm dark:bg-slate-900">
-        <h2 className="mb-1 text-base font-bold">주문 로그</h2>
+        <h2 className="mb-1 text-base font-bold">오늘 주문 로그</h2>
         {orders.length === 0 ? (
-          <p className="py-6 text-center text-sm text-slate-400">최근 주문이 없어요.</p>
+          <p className="py-6 text-center text-sm text-slate-400">오늘 주문이 없어요.</p>
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {orders.map((o) => {

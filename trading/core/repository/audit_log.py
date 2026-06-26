@@ -68,14 +68,21 @@ _ACTIVITY_EVENTS = (
 )
 
 
-def list_activity_events(limit: int = 50) -> list[dict]:
-    """폴링 활동 로그 — 매도(스탑 상향/발동) + 매수(집행/스킵/시작) (최신순). payload 는 dict 로 파싱."""
+def list_activity_events(limit: int = 50, date_dash: str | None = None) -> list[dict]:
+    """폴링 활동 로그 — 매도(스탑 상향/발동) + 매수(집행/스킵/시작) (최신순). payload 는 dict 로 파싱.
+    date_dash(YYYY-MM-DD) 를 주면 그 날짜 이벤트만 (모니터 탭: 오늘만)."""
     placeholders = ", ".join(["%s"] * len(_ACTIVITY_EVENTS))
+    where = f"event IN ({placeholders})"
+    params: list = [*_ACTIVITY_EVENTS]
+    if date_dash:
+        where += " AND created_at >= %s AND created_at < %s + INTERVAL 1 DAY"
+        params += [date_dash, date_dash]
+    params.append(int(limit))
     with get_db() as (conn, cursor):
         cursor.execute(
             f"SELECT id, event, stk_cd, payload, created_at FROM audit_log "
-            f"WHERE event IN ({placeholders}) ORDER BY id DESC LIMIT %s",
-            (*_ACTIVITY_EVENTS, int(limit)),
+            f"WHERE {where} ORDER BY id DESC LIMIT %s",
+            tuple(params),
         )
         rows = cursor.fetchall()
     for r in rows:
