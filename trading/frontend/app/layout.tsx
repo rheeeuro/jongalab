@@ -5,6 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "종가랩 자동매매",
   description: "자동매매 집행·포지션·리스크 대시보드",
+  icons: { icon: "/logo.png", apple: "/logo.png" },
 };
 
 export default function RootLayout({

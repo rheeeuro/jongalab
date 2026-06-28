@@ -85,12 +85,19 @@ def _exit_confirmed(stk_cd: str) -> bool:
 
 
 def check_once(engine: ExecutionEngine) -> None:
-    # live 체결을 먼저 반영해 포지션을 최신화 (paper 는 no-op)
-    sync_fills(engine.client)
-    # 전일 잔여 미체결 자동 취소(개장 중) — 묶임 방지
-    cancel_stale_orders(engine.client)
-    # 오늘 소멸한 'sent' 주문(0주 체결 IOC 등) 정리 + 멱등키 해제 → 같은 tag 재매도 허용
-    reconcile_dead_sent(engine.client)
+    # 유지보수(housekeeping)는 각 단계를 격리한다 — 한 단계가 실패해도 아래 하드손절/스탑
+    # 감시(자금 안전의 핵심)는 반드시 돈다. 과거 reconcile_dead_sent 의 멱등키 충돌 예외가
+    # check_once 전체를 매 폴링 중단시켜 모든 종목 감시가 멈췄던 회귀를 막는다.
+    #  - 체결 동기화: live 체결을 포지션에 반영(paper no-op)
+    #  - 잔여 미체결 취소: 전일 잔여 미체결 자동 취소(개장 중 묶임 방지)
+    #  - 죽은 주문 정리: 0주 체결로 소멸한 'sent' 주문 정리 + 멱등키 해제(같은 tag 재매도 허용)
+    for label, step in (("체결 동기화", sync_fills),
+                        ("잔여 미체결 취소", cancel_stale_orders),
+                        ("죽은 주문 정리", reconcile_dead_sent)):
+        try:
+            step(engine.client)
+        except Exception as e:
+            logger.error("%s 실패(감시는 계속 진행): %s", label, e)
 
     plans = {p["stk_cd"]: p for p in plan_repo.get_active_plans()}
     positions = {p["stk_cd"]: p for p in position_repo.get_open_positions()}

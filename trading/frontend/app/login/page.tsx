@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, FormEvent } from "react";
+import Image from "next/image";
 import { Lock, Loader2 } from "lucide-react";
 
 // 대시보드 로그인 — 비밀번호를 /api/login 으로 보내 검증하고,
@@ -40,9 +41,14 @@ export default function LoginPage() {
         className="w-full max-w-sm space-y-6 rounded-2xl bg-white p-7 shadow-sm dark:bg-slate-900"
       >
         <div className="flex flex-col items-center gap-2">
-          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-white dark:text-slate-900">
-            <Lock className="h-5 w-5" />
-          </span>
+          <Image
+            src="/logo.png"
+            alt="종가랩"
+            width={56}
+            height={56}
+            priority
+            className="h-14 w-14 rounded-2xl"
+          />
           <h1 className="text-lg font-bold">자동매매 대시보드</h1>
           <p className="text-sm text-slate-500">비밀번호를 입력하세요</p>
         </div>

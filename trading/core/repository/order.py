@@ -78,13 +78,15 @@ def mark_canceled(order_id: int) -> None:
 def void_dead_order(order_id: int) -> None:
     """체결 0으로 소멸한 주문(브로커에 없는 'sent') 마감 + 멱등키 해제.
 
-    멱등키 끝에 ':dead' 를 붙여 해제하면, 같은 거래일·tag 의 재매도가 다시 가능해진다
+    멱등키 끝에 ':dead:<id>' 를 붙여 해제하면, 같은 거래일·tag 의 재매도가 다시 가능해진다
     (find_by_idempotency_key 가 상태 무관으로 키를 찾으므로, 키 자체를 비워줘야 재시도된다).
-    'sent' 한 건에만 호출되고 호출 후 status='canceled' 라 같은 주문에 두 번 붙지 않는다."""
+    id 를 함께 붙여 고유성을 보장한다: 키 해제 후 같은 base 키로 재매도된 주문이 또 죽어
+    재차 정리될 때, 단순히 ':dead' 만 붙이면 먼저 정리된 주문과 키가 충돌(Duplicate entry)해
+    UPDATE 가 실패하고 그 주문이 'sent' 로 남아 매 폴링마다 같은 예외를 반복한다."""
     with get_db() as (conn, cursor):
         cursor.execute(
             "UPDATE `order` SET status = 'canceled', "
-            "idempotency_key = CONCAT(idempotency_key, ':dead') WHERE id = %s",
+            "idempotency_key = CONCAT(idempotency_key, ':dead:', id) WHERE id = %s",
             (order_id,),
         )
         conn.commit()
