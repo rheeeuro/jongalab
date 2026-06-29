@@ -51,10 +51,16 @@ export interface Order {
   /** 실제 체결 수량가중평균가. 미체결이면 null → price(주문 시점 참조가) 폴백. */
   fill_price: number | null;
   filled_qty: number;
-  mode: "paper" | "live";
-  status: "intended" | "sent" | "accepted" | "rejected" | "filled" | "canceled";
+  /** 스킵 행(주문 행 없음)은 mode 가 없다. */
+  mode?: "paper" | "live";
+  /** "skipped" 는 주문 행이 아닌 매수 스킵/차단(audit_log) — 거래내역 탭이 사유와 함께 표시. */
+  status: "intended" | "sent" | "accepted" | "rejected" | "filled" | "canceled" | "skipped";
   kiwoom_ord_no: string | null;
   created_at: string;
+  /** 체결 안 된 경우 사유 — 거부는 키움 메시지(예: "매수증거금이 부족합니다…"), 스킵은 스킵 사유, 체결분은 null. */
+  reason?: string | null;
+  /** "skip" = 주문 행이 아닌 매수 스킵/차단 항목(거래내역 병합용). 실제 주문이면 없음. */
+  kind?: "skip";
 }
 
 export interface AuditEvent {

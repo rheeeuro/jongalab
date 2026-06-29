@@ -39,7 +39,9 @@ class FakeOrderClient:
         return self._sell_resp
 
     def get_deposit(self):
-        return {"ord_alow_amt": self._deposit}
+        # 실제 kt00001 응답엔 ord_alow_amt(주문가능금액)와 100stk_ord_alow_amt(현금주문가능금액)가
+        # 모두 있다. 시드 산정·집행 보정 모두 후자를 쓰므로 둘 다 같은 값으로 흉내낸다.
+        return {"ord_alow_amt": self._deposit, "100stk_ord_alow_amt": self._deposit}
 
 
 class FakeRisk:

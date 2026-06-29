@@ -21,6 +21,8 @@ export function middleware(req: NextRequest) {
 }
 
 // /api, 정적 자원은 미들웨어 제외(라우트 핸들러는 자체적으로 토큰을 백엔드에 전달).
+// public 자산(logo.png 등)도 제외 — 미인증 시 /login 으로 리다이렉트되면
+// 파비콘이 깨지고, next/image 옵티마이저가 원본을 못 받아 로고도 깨진다.
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|logo.png).*)"],
 };

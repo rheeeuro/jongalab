@@ -2,10 +2,19 @@
 
 자동매매의 사후 추적·정산 근거. UPDATE/DELETE 하지 않는다.
 """
+import re
 import json
 from typing import Optional
 
 from core.db import get_db
+
+# 키움 거부 메시지에서 사람이 읽을 부분만 추출 — "[2000](855056:매수증거금이 부족합니다...)" → 안쪽 메시지.
+_KIWOOM_MSG_RE = re.compile(r"\(\d+:(.+)\)\s*$")
+
+
+def _clean_kiwoom_msg(msg: str) -> str:
+    m = _KIWOOM_MSG_RE.search(msg or "")
+    return (m.group(1) if m else (msg or "")).strip()
 
 
 def append(event: str, stk_cd: Optional[str], payload: dict) -> None:
@@ -208,6 +217,88 @@ def list_by_stock(stk_cd: str, start_dt: str, end_dt: str, limit: int = 200) -> 
             except (ValueError, TypeError):
                 pass
     return rows
+
+
+def reject_reasons_by_order_ids(order_ids: list[int]) -> dict[int, str]:
+    """거부된 주문의 키움 거부 사유 맵 {order_id: 메시지}.
+
+    execute_buy/execute_sell 가 거부 시 남기는 buy_rejected/sell_rejected payload
+    (order_id + resp.return_msg)에서 뽑아, 대시보드가 '왜 체결 안 됐나'를 보여주게 한다.
+    payload 는 JSON 컬럼 — order_id 로 DB 필터 후 메시지는 Python 에서 파싱(중첩 resp 안전)."""
+    ids = {int(i) for i in order_ids if i is not None}
+    if not ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(ids))
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"SELECT payload FROM audit_log "
+            f"WHERE event IN ('buy_rejected', 'sell_rejected') "
+            f"AND JSON_VALUE(payload, '$.order_id') IN ({placeholders})",
+            tuple(str(i) for i in ids),
+        )
+        rows = cursor.fetchall()
+    out: dict[int, str] = {}
+    for r in rows:
+        payload = r.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (ValueError, TypeError):
+                continue
+        payload = payload or {}
+        oid = payload.get("order_id")
+        msg = (payload.get("resp") or {}).get("return_msg") or ""
+        msg = _clean_kiwoom_msg(msg)
+        if oid is not None and msg:
+            out[int(oid)] = msg
+    return out
+
+
+# 주문 행이 안 생기는 '매수 안 함' 이벤트 — 전송 전 스킵/차단(거래내역 탭이 사유와 함께 보여준다).
+#   buy_skip: 블록리스트 제외·배분 0주(워커) / buy_blocked: 리스크 차단 / buy_skipped: 주문가능액 부족·수량 0(집행기)
+_SKIP_EVENTS = ("buy_skip", "buy_blocked", "buy_skipped")
+
+
+def buy_skips_by_month(month: str) -> list[dict]:
+    """해당 월(YYYYMM) 매수 스킵/차단 — order 행이 없는 미체결을 order 와 같은 모양으로 돌려준다.
+
+    거래내역 탭이 주문과 한 목록에 섞어 '왜 안 샀나'를 보여주게 한다(status='skipped', reason 동봉).
+    같은 날·같은 종목은 최신 1건만(여러 윈도우 중복 방지)."""
+    first_day = f"{month[:4]}-{month[4:6]}-01"
+    placeholders = ", ".join(["%s"] * len(_SKIP_EVENTS))
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"SELECT id, event, stk_cd, payload, created_at FROM audit_log "
+            f"WHERE event IN ({placeholders}) AND stk_cd IS NOT NULL "
+            f"AND created_at >= %s AND created_at < %s + INTERVAL 1 MONTH "
+            f"ORDER BY id DESC",
+            (*_SKIP_EVENTS, first_day, first_day),
+        )
+        rows = cursor.fetchall()
+    out: list[dict] = []
+    seen: set[tuple] = set()
+    for r in rows:
+        payload = r.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (ValueError, TypeError):
+                payload = {}
+        payload = payload or {}
+        dedup = (str(r["created_at"])[:10], r["stk_cd"])  # (날짜, 종목) — id DESC 라 먼저 본 게 최신
+        if dedup in seen:
+            continue
+        seen.add(dedup)
+        reason = payload.get("reason") or "스킵"
+        if reason == "blocklist":
+            reason = "블록리스트 제외"
+        out.append({
+            "id": r["id"], "stk_cd": r["stk_cd"], "side": "buy",
+            "qty": 0, "price": 0, "fill_price": None, "filled_qty": 0,
+            "kiwoom_ord_no": None, "status": "skipped", "reason": reason,
+            "created_at": r["created_at"], "kind": "skip",
+        })
+    return out
 
 
 def list_recent(limit: int = 50) -> list[dict]:

@@ -315,12 +315,34 @@ def buy_preview(date: str | None = None):
     return {"trade_date": trade_date, "cash": cash, "total_score": total_score, "venues": venues}
 
 
+def _attach_reason(rows: list[dict]) -> list[dict]:
+    """미체결(체결 안 된) 주문에 '왜 안 됐나' 사유를 붙인다(거래내역 탭 표시용).
+    거부는 키움 메시지(audit_log), 그 외는 상태 기반 일반 사유. 체결분은 None."""
+    rejected_ids = [r["id"] for r in rows if r.get("status") == "rejected"]
+    reasons = audit_log.reject_reasons_by_order_ids(rejected_ids)
+    labels = {"canceled": "미체결 취소", "sent": "미체결", "accepted": "미체결",
+              "intended": "전송 안 됨"}
+    for r in rows:
+        st = r.get("status")
+        if st == "rejected":
+            r["reason"] = reasons.get(r["id"]) or "주문 거부"
+        elif st == "filled":
+            r["reason"] = None
+        else:
+            r["reason"] = labels.get(st)
+    return rows
+
+
 @app.get("/orders")
 def orders(limit: int = 50, month: str | None = None):
-    """주문 목록. month=YYYYMM 이면 그 달 전체(최신순), 아니면 최근 limit 건."""
-    if month:
-        return order_repo.list_by_month(month)
-    return order_repo.list_recent(limit)
+    """주문 목록. month=YYYYMM 이면 그 달 전체(최신순), 아니면 최근 limit 건.
+    미체결엔 reason 을 실어 거래내역 탭이 표시한다. month 조회는 주문 행이 없는
+    매수 스킵/차단(배분 0주·블록리스트·리스크 차단·주문가능액 부족)도 함께 섞어 시간순 정렬한다."""
+    if not month:
+        return _attach_reason(order_repo.list_recent(limit))
+    rows = _attach_reason(order_repo.list_by_month(month)) + audit_log.buy_skips_by_month(month)
+    rows.sort(key=lambda r: r["created_at"], reverse=True)
+    return rows
 
 
 @app.get("/audit")

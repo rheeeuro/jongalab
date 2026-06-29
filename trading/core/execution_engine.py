@@ -69,6 +69,16 @@ class ExecutionEngine:
         qty = budget // price
         return qty, price
 
+    def _live_orderable_cash(self) -> int:
+        """주문 직전 live 주문가능 현금(현금주문가능금액). 시드 산정과 동일 필드
+        (100stk_ord_alow_amt)를 live 재조회한다 — 시드는 윈도우 시작 1회 스냅샷이라, 앞선 종목의
+        체결·증거금 선반영으로 줄어든 실제 주문가능액을 반영하지 못한다. 조회 실패 시 -1(=보정 생략)."""
+        try:
+            return to_int(self.client.get_deposit().get("100stk_ord_alow_amt"))
+        except Exception as e:
+            logger.warning("주문가능금액 조회 실패 — 사이징 보정 생략: %s", e)
+            return -1
+
     def execute_buy(self, trade_date: str, signal: dict, dmst_stex_tp: str = "KRX") -> dict | None:
         """매수 시그널 1건 집행. 차단/중복이면 None 반환.
         dmst_stex_tp: 거래소 라우팅 — 16:00 매수는 NXT 시간대라 'NXT'.
@@ -89,6 +99,24 @@ class ExecutionEngine:
             logger.info("수량 0 스킵 [%s] price=%s", stk_cd, price)
             return None
         notional = qty * price
+
+        # 2-b. live 주문가능금액으로 수량 보정 (live 전용)
+        #   시드는 윈도우 시작 1회 스냅샷 → 앞선 종목의 체결·증거금 선반영으로 실제 주문가능
+        #   현금이 줄면, 정적 배분 수량 그대로 쏜 (특히 마지막) 종목이 '증거금 부족'으로 통째
+        #   거부된다. 주문 직전 live 재조회해 지금 살 수 있는 최대 수량으로 줄여 종목을 놓치지
+        #   않는다. (조회 실패 시 보정 생략 → broker 거부 후 _afford_qty_on_margin_reject 안전망.)
+        if not getattr(self.client, "paper", False) and price > 0:
+            avail = self._live_orderable_cash()
+            if avail >= 0 and notional > avail:
+                clamped = avail // price
+                if clamped < 1:
+                    audit_log.append("buy_skipped", stk_cd,
+                                     {"key": key, "reason": "주문가능금액 부족", "avail": avail, "price": price})
+                    logger.info("주문가능금액 부족 스킵 [%s] avail=%d < price=%d", stk_cd, avail, price)
+                    return None
+                logger.info("주문가능금액 보정 [%s] %d→%d주 (avail=%d, price=%d)",
+                            stk_cd, qty, clamped, avail, price)
+                qty, notional = clamped, clamped * price
 
         # 3. 리스크 검사
         decision = self.risk.check(trade_date, stk_cd, notional)

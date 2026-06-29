@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 const STATUS_LABEL: Record<string, string> = {
   filled: "체결", sent: "전송", intended: "접수", rejected: "거부",
-  canceled: "취소", accepted: "수락",
+  canceled: "취소", accepted: "수락", skipped: "스킵",
 };
 
 function dateKey(iso: string): string {
@@ -127,34 +127,51 @@ export default async function HistoryPage({
                 {list.map((o) => {
                   const buy = o.side === "buy";
                   const filled = o.status === "filled";
+                  const skip = o.status === "skipped"; // 주문 행 없는 매수 스킵/차단 → 수량/가격 없음
                   return (
-                    <li
-                      key={o.id}
-                      className={`flex items-center justify-between px-5 py-3.5 ${
-                        filled ? "" : "opacity-45 grayscale"
-                      }`}
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <span
-                          className={`shrink-0 rounded-lg px-2 py-1 text-xs font-bold ${
-                            buy
-                              ? "bg-rose-100 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400"
-                              : "bg-blue-100 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400"
-                          }`}
-                        >
-                          {buy ? "매수" : "매도"}
-                        </span>
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold">{nm(o.stk_cd)}</p>
-                          <p className="text-xs text-slate-400 tabular-nums">
-                            {hhmm(o.created_at)} · {STATUS_LABEL[o.status] ?? o.status}
-                            {o.mode === "paper" ? " · 모의" : ""}
-                          </p>
+                    <li key={`${skip ? "skip" : "order"}-${o.id}`} className="px-5 py-3.5">
+                      {/* 주문 본문 — 미체결은 흐리게(기존 디자인). 사유는 아래에서 또렷하게 보여준다. */}
+                      <div
+                        className={`flex items-center justify-between ${
+                          filled ? "" : "opacity-45 grayscale"
+                        }`}
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span
+                            className={`shrink-0 rounded-lg px-2 py-1 text-xs font-bold ${
+                              buy
+                                ? "bg-rose-100 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400"
+                                : "bg-blue-100 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400"
+                            }`}
+                          >
+                            {buy ? "매수" : "매도"}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold">{nm(o.stk_cd)}</p>
+                            <p className="text-xs text-slate-400 tabular-nums">
+                              {hhmm(o.created_at)} ·{" "}
+                              {/* 미체결이면 상태 텍스트에 hover 시 사유 툴팁(점선 밑줄로 힌트) */}
+                              {!filled && o.reason ? (
+                                <span
+                                  title={o.reason}
+                                  className="cursor-help underline decoration-dotted underline-offset-2"
+                                >
+                                  {STATUS_LABEL[o.status] ?? o.status}
+                                </span>
+                              ) : (
+                                (STATUS_LABEL[o.status] ?? o.status)
+                              )}
+                              {o.mode === "paper" ? " · 모의" : ""}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-semibold tabular-nums">{o.filled_qty || o.qty}주</p>
-                        <p className="text-xs text-slate-400 tabular-nums">{wonExact(o.fill_price ?? o.price)}</p>
+                        {/* 스킵 행은 주문이 아니라 수량/가격이 없다 — 우측 블록 생략 */}
+                        {!skip && (
+                          <div className="text-right">
+                            <p className="font-semibold tabular-nums">{o.filled_qty || o.qty}주</p>
+                            <p className="text-xs text-slate-400 tabular-nums">{wonExact(o.fill_price ?? o.price)}</p>
+                          </div>
+                        )}
                       </div>
                     </li>
                   );

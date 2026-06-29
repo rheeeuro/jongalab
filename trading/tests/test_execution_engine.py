@@ -95,6 +95,44 @@ def test_buy_krx_uses_market_order_type(engine):
     assert client.buys[0]["trde_tp"] == "3"           # KRX 시장가
 
 
+# ── execute_buy: live 주문가능금액 보정 ─────────────────────────
+
+def _live_engine(monkeypatch, repo_rec, deposit):
+    """live 모드(paper=False) 엔진 — 주문가능액 보정 경로 검증용."""
+    from tests.conftest import FakeOrderClient, FakeRisk, FakeData
+    client = FakeOrderClient(paper=False, deposit=deposit,
+                             buy_resp={"return_code": 0, "return_msg": "ok", "ord_no": "B1"})
+    eng = ExecutionEngine(client=client, risk=FakeRisk(), data=FakeData())
+    return eng, client
+
+
+def test_buy_clamps_qty_to_live_orderable_cash(monkeypatch, repo_rec):
+    # 배분은 10주(@10,000=100,000) 의도하지만 주문가능액은 35,000 → 3주로 축소 발사.
+    eng, client = _live_engine(monkeypatch, repo_rec, deposit="35000")
+    out = eng.execute_buy("20260626", _signal(qty=10, price=10000), "NXT")
+    assert out is not None
+    assert client.buys[0]["qty"] == 3                 # 35000 // 10000
+    # create_intended(key, sid, stk, "buy", qty, price, "market", mode) → args[4]=qty
+    assert repo_rec.intended[-1][0][4] == 3           # 의도 기록도 축소 수량
+
+
+def test_buy_skips_when_orderable_cash_below_one_share(monkeypatch, repo_rec):
+    # 주문가능액이 1주 가격에도 못 미치면 broker 거부 대신 깔끔히 스킵.
+    eng, client = _live_engine(monkeypatch, repo_rec, deposit="9000")
+    out = eng.execute_buy("20260626", _signal(qty=1, price=10000), "NXT")
+    assert out is None
+    assert client.buys == []                          # 전송 자체를 안 함
+    assert "buy_skipped" in repo_rec.event_types
+
+
+def test_buy_keeps_qty_when_orderable_cash_sufficient(monkeypatch, repo_rec):
+    # 주문가능액이 충분하면 보정 없이 배분 수량 그대로 발사.
+    eng, client = _live_engine(monkeypatch, repo_rec, deposit="10000000")
+    out = eng.execute_buy("20260626", _signal(qty=10, price=10000), "NXT")
+    assert out is not None
+    assert client.buys[0]["qty"] == 10
+
+
 # ── size_order fallback (사전 배분 없을 때 단일 종목 사이징) ──────
 
 def test_size_order_fallback_uses_deposit_and_caps(engine):

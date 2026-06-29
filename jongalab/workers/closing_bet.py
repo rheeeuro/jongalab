@@ -116,9 +116,13 @@ class ClosingBetStrategy:
                     mc_raw = self.engine.parse_price(info.get("mac", "0"))
                     mc = mc_raw * 100_000_000
                     if mc >= self.strategy_cfg.MIN_MARKET_CAP:
+                        # 기본정보(ka10001)엔 거래대금이 없어 일봉(ka10081)에서 별도 조회
+                        time.sleep(0.3)
+                        tv = self._fetch_trading_value(code)
                         candidates.append(StockCandidate(
                             code=code, name=name, sector=self._find_sector(code),
-                            current_price=cp, market_cap=mc, change_pct=chg,
+                            current_price=cp, trading_value=tv,
+                            market_cap=mc, change_pct=chg,
                         ))
                         seen_codes.add(code)
                     time.sleep(0.3)
@@ -126,6 +130,18 @@ class ClosingBetStrategy:
                     logger.warning(f"종목 조회 실패 [{code}]: {e}")
 
         return candidates
+
+    def _fetch_trading_value(self, code: str) -> int:
+        """일봉(ka10081) 최신 캔들의 거래대금(trde_prica, 단위 백만원)을 원 단위로 환산.
+        거래대금순위 API와 동일한 단위·환산식(×1,000,000)을 사용한다."""
+        try:
+            data = self.api.get_daily_chart(code)
+            candles = data.get("stk_dt_pole_chart_qry", [])
+            if candles:
+                return abs(self.engine.parse_price(candles[0].get("trde_prica", "0"))) * 1_000_000
+        except Exception as e:
+            logger.warning(f"거래대금 조회 실패 [{code}]: {e}")
+        return 0
 
     # ── Phase 2: 수급 분석 ──
     def _phase2_supply_analysis(self, candidates: list[StockCandidate]) -> list[StockCandidate]:
