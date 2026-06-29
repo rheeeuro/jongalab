@@ -66,20 +66,65 @@ def realized_by_date(date_dash: str) -> dict:
     return agg
 
 
-def has_sell_between(stk_cd: str, start_dash: str, end_dash: str) -> bool:
-    """[start_dash 00:00, end_dash 00:00) 사이에 이 종목 매도 체결이 있었는지(YYYY-MM-DD).
+def has_sell_between(stk_cd: str, start_dt: str, end_dt: str) -> bool:
+    """[start_dt, end_dt) 사이에 이 종목 매도 체결이 있었는지(datetime 문자열, 포함~미포함).
 
     분할/이월 청산 판정용 — 같은 매수(1회)를 여러 날에 나눠 팔면, 뒤 매도일은 '이미 한 번 판
     뒤의 연속 청산'이다. 이때 모달이 원매수일까지 거슬러 올라가지 않도록(=매도 당일만 보도록)
-    호출부가 이 신호로 구간 시작을 조정한다."""
+    호출부가 이 신호로 구간 시작을 조정한다. 하한을 매수일 오후(15:00)로 주면, 매수 전 그날
+    오전에 끝난 '다른 사이클'의 청산은 세지 않는다."""
     with get_db() as (conn, cursor):
         cursor.execute(
             "SELECT 1 FROM audit_log WHERE stk_cd = %s "
             "AND event IN ('sell_filled_paper', 'sell_filled_live') "
             "AND created_at >= %s AND created_at < %s LIMIT 1",
-            (stk_cd, start_dash, end_dash),
+            (stk_cd, start_dt, end_dt),
         )
         return cursor.fetchone() is not None
+
+
+def latest_manual_buys_before(date_dash: str) -> dict:
+    """각 종목의 'date_dash(YYYY-MM-DD) 0시 이전' 가장 최근 수동 매수(manual_buy_link) 1건.
+
+    NXT 일일 한도 초과로 자동 매수가 막힌 분을 사람이 수동 체결해 연동한 기록 — order 테이블엔 없고
+    audit_log 로만 남아 라운드트립 매수처 짝짓기에서 누락된다. order 매수와 함께 후보로 쓰도록 order 와
+    같은 모양으로 돌려준다. created_at(매수 시각)은 이 수동 매수가 메우는 직전 자동매수 시도
+    (buy_exec/buy_blocked/buy_intended)의 시각을 쓴다 — 그게 실제 NXT 체결 시점이다(연동은 보통
+    새벽 일괄이라 링크 시각은 날짜가 밀려 있음). 매칭이 없으면 링크 시각.
+    반환: {stk_cd: {stk_cd, qty, price, fill_price, filled_qty, created_at}} (order 매수와 동일 형태)."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT a.stk_cd, a.payload, a.created_at FROM audit_log a "
+            "JOIN (SELECT stk_cd, MAX(id) AS mid FROM audit_log "
+            "      WHERE event = 'manual_buy_link' AND created_at < %s GROUP BY stk_cd) m "
+            "  ON a.id = m.mid",
+            (date_dash,),
+        )
+        links = cursor.fetchall()
+        out: dict[str, dict] = {}
+        for r in links:
+            payload = r["payload"]
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except (ValueError, TypeError):
+                    payload = {}
+            payload = payload or {}
+            price = abs(int(payload.get("avg_price") or 0))
+            qty = int(payload.get("qty") or 0)
+            cursor.execute(
+                "SELECT created_at FROM audit_log WHERE stk_cd = %s "
+                "AND event IN ('buy_exec', 'buy_blocked', 'buy_intended') "
+                "AND created_at <= %s ORDER BY id DESC LIMIT 1",
+                (r["stk_cd"], r["created_at"]),
+            )
+            hit = cursor.fetchone()
+            out[r["stk_cd"]] = {
+                "stk_cd": r["stk_cd"], "qty": qty, "price": price,
+                "fill_price": price, "filled_qty": qty,
+                "created_at": hit["created_at"] if hit else r["created_at"],
+            }
+        return out
 
 
 def last_heartbeat():

@@ -65,10 +65,11 @@ export default function StockLogModal({
   const markers = useMemo<ChartMarker[]>(() => {
     if (!events) return [];
     const out: ChartMarker[] = [];
-    const buyFills = events.filter((e) => BUY_FILL.has(e.event));
+    // 매수 타점: 체결(buy_filled_*) + 수동 매수 연동(manual_buy_link, avg_price). 둘 다 없으면 buy_exec.
+    const buyFills = events.filter((e) => BUY_FILL.has(e.event) || e.event === "manual_buy_link");
     const buys = buyFills.length ? buyFills : events.filter((e) => e.event === "buy_exec" && e.payload?.sent);
     for (const e of buys) {
-      const price = Number(e.payload?.price) || 0;
+      const price = Number(e.payload?.price ?? e.payload?.avg_price) || 0;
       if (price) out.push({ time: e.created_at, side: "buy", price });
     }
     for (const e of events.filter((e) => SELL_FILL.has(e.event))) {

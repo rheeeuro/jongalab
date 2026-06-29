@@ -21,6 +21,7 @@ const EVENT_META: Record<string, EventMeta> = {
   buy_skip: { label: "매수 스킵", tone: MUTED },
   buy_skipped: { label: "매수 스킵", tone: MUTED },
   buy_blocked: { label: "매수 차단", tone: MUTED },
+  manual_buy_link: { label: "수동 매수", tone: BUY },
   // 매도 모니터
   monitor_start: { label: "모니터 시작", tone: NEUTRAL },
   monitor_trail: { label: "스탑 상향", tone: "bg-emerald-100 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400" },
@@ -67,6 +68,8 @@ export function eventDetail(event: string, payload: any): string {
     case "buy_filled_paper":
     case "buy_filled_live":
       return `${num(p.qty)}주 @${num(p.price)} 체결`;
+    case "manual_buy_link":
+      return `${num(p.qty)}주 @${num(p.avg_price)} 수동 매수 연동${p.reason ? ` · ${p.reason}` : ""}`;
     case "buy_skip":
       return p.reason === "blocklist" ? "blocklist 제외" : `${p.reason ?? "스킵"}`;
     case "buy_skipped":

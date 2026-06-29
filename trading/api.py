@@ -353,7 +353,9 @@ def _effective_start(stk_cd: str, start: str, end: str) -> str:
         return start
     sdash = f"{start[:4]}-{start[4:6]}-{start[6:8]}"
     edash = f"{end[:4]}-{end[4:6]}-{end[6:8]}"
-    return end if audit_log.has_sell_between(stk_cd, sdash, edash) else start
+    # 하한은 매수일 오후 15:00 — 매수(오후) 뒤에 청산이 또 있었을 때만 '연속 청산'으로 본다.
+    # (매수 전 그날 오전의 다른 사이클 청산은 제외해야 매수일이 잘못 당겨지지 않는다.)
+    return end if audit_log.has_sell_between(stk_cd, f"{sdash} 15:00:00", edash) else start
 
 
 @app.get("/stock-events")
@@ -431,6 +433,12 @@ def _build_roundtrips(date_dash: str, sells: list[dict], realized_map: dict) -> 
     감사로그 기준의 권위값이고, 매수가·매도가는 체결가(미체결이면 참조가) 표시값이다.
     """
     prior_buys = order_repo.latest_buys_before(date_dash)
+    # 수동 매수(NXT 한도초과분 → manual_buy_link, order 테이블에 없음)도 매수처 후보로 합친다.
+    # 종목별로 더 최근 매수(주문 vs 수동)를 채택 — 안 그러면 그 매도가 엉뚱한 옛 매수에 묶인다.
+    for cd, m in audit_log.latest_manual_buys_before(date_dash).items():
+        o = prior_buys.get(cd)
+        if not o or m["created_at"] >= o["created_at"]:
+            prior_buys[cd] = m
     agg: dict[str, dict] = {}  # 종목별 매도 수량/금액(=Σ 체결수량*체결가)
     for o in sells:
         cd = o["stk_cd"]
