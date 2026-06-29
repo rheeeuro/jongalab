@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS channels (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 보존 정책: created_at 3개월 이전 행은 cleanup_content 워커(매일 04:00)가 자동 삭제.
 CREATE TABLE IF NOT EXISTS content_analysis (
     id INT AUTO_INCREMENT PRIMARY KEY,
     external_id VARCHAR(255) NOT NULL UNIQUE, -- 유튜브ID or 텔레그램Link

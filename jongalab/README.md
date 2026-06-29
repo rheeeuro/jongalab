@@ -59,6 +59,7 @@ jongalab/
 |---|---|---|
 | `youtube_collector` | 15분 | 채널 RSS → 자막 → Ollama 분석 → `content_analysis` |
 | `telegram_listener` | 상시 | Telethon 채널 감시 → 메시지 분석 → `content_analysis` |
+| `cleanup_content` | 매일 04:00 | `content_analysis` 3개월 이전 행 삭제(테이블 비대화 방지) |
 | `closing_bet` | 평일 09~20시(30분) | Phase 1/2 스크리닝 → `daily_stock_report` + `trade_signal` 적재 |
 | `gap_check` (`--retry`) | 평일 08:05 / 09:05 | 전날 top-10 현재가 → 갭 등락률 → ADMIN 알림 |
 | `weight_tuner` | 토 08:00 | 지난주 실현손익 → GPT 가중치 제안(`weight_tuning_proposal`) |

@@ -25,10 +25,13 @@ except Exception: print("0")
 # 변경 파일 중복 제거
 mapfile -t FILES < <(sort -u "$PENDING")
 
-NEED_WEB=0; NEED_API=0; NEED_TG=0; NEED_KIWOOM=0; NEED_TAPI=0; NEED_TWEB=0
+NEED_WEB=0; NEED_API=0; NEED_TG=0; NEED_KIWOOM=0; NEED_TAPI=0; NEED_TWEB=0; NEED_ECOSYSTEM=0
 declare -A CRON_HIT=()
 
 for f in "${FILES[@]}"; do
+  case "$f" in
+    */ecosystem.config.js)                        NEED_ECOSYSTEM=1 ;;
+  esac
   # ── jongalab (메인 앱) ──
   case "$f" in
     */jongalab/frontend/*)                        NEED_WEB=1 ;;
@@ -81,6 +84,33 @@ sys.exit(1)
 
 NOTES=()
 BUILD_FAILED=""
+
+# 0) ecosystem.config.js 변경: 새로 정의된(아직 pm2 에 없는) 앱을 자동 등록한다.
+#    pm2 jlist 에 이름이 없는 앱 = 신규 → pm2 start --only 로 등록 후 pm2 save.
+#    (이미 등록된 앱은 상태와 무관하게 건드리지 않는다 — 필요 시 아래 분류 로직이 재시작.)
+#    cron 워커는 등록 시 1회 즉시 실행되고 이후 스케줄대로 spawn 된다.
+if [ "$NEED_ECOSYSTEM" = "1" ]; then
+  ECO_NAMES=$(node -e 'try{const a=require(process.argv[1]).apps||[];console.log(a.map(x=>x.name).join("\n"))}catch(e){}' "$ROOT/ecosystem.config.js" 2>/dev/null)
+  PM2_NAMES=$(pm2 jlist 2>/dev/null | python3 -c '
+import json,sys
+try: apps=json.load(sys.stdin)
+except Exception: apps=[]
+print("\n".join(a.get("name","") for a in apps))
+')
+  REGISTERED=0
+  while IFS= read -r name; do
+    [ -z "$name" ] && continue
+    if ! grep -qxF "$name" <<<"$PM2_NAMES"; then
+      if pm2 start "$ROOT/ecosystem.config.js" --only "$name" >/dev/null 2>&1; then
+        NOTES+=("🆕 $name pm2 신규 등록(즉시 1회 실행)")
+        REGISTERED=1
+      else
+        NOTES+=("⚠️ $name pm2 등록 실패 — 수동 확인 필요")
+      fi
+    fi
+  done <<<"$ECO_NAMES"
+  [ "$REGISTERED" = "1" ] && pm2 save >/dev/null 2>&1 && NOTES+=("💾 pm2 save 완료")
+fi
 
 # 1) 프론트: 빌드 후 재시작
 if [ "$NEED_WEB" = "1" ]; then

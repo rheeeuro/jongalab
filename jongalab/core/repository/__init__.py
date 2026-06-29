@@ -14,6 +14,7 @@ from core.repository.content import (
     get_today_content_by_stock,
     get_content_by_stock_and_date,
     get_mention_stats,
+    delete_old_content_analysis,
 )
 
 from core.repository.source import (

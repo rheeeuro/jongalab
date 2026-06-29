@@ -131,6 +131,23 @@ def save_content_analysis(
     logging.info(f"DB 저장 완료: {title} (점수: {score}, 티커: {related_tickers})")
 
 
+def delete_old_content_analysis(months: int = 3) -> int:
+    """N개월 이전에 수집된 콘텐츠 분석 데이터를 삭제한다.
+
+    조회는 모두 최근 데이터(7일/24시간/오늘)만 보므로, 오래된 행은 보관 가치가 없다.
+    매일 cron(cleanup_content 워커)으로 실행해 테이블 비대화를 막는다.
+    삭제된 행 수를 반환한다.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "DELETE FROM content_analysis WHERE created_at < NOW() - INTERVAL %s MONTH",
+            (months,),
+        )
+        deleted = cursor.rowcount
+        conn.commit()
+    return deleted
+
+
 def get_today_content_by_stock(stock_code: str) -> list[dict]:
     """오늘 날짜의 특정 종목 관련 콘텐츠 분석 조회 (ticker로 매칭)"""
     code_part = stock_code.split(".")[0]

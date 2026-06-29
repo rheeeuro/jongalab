@@ -118,6 +118,10 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
   - `kiwoom/api.py`/`kiwoom/core/**` → `kiwoom-api` 재시작.
   - cron 워커(`youtube_collector`/`daily_digest`/`gap_check`/`closing_bet`/`kiwoom_token_refresh`)는
     **재시작하지 않는다** — cron 마다 새 프로세스로 spawn 되어 다음 스케줄 실행 때 자동 반영된다.
+  - `ecosystem.config.js` 편집 시 **새로 정의된 앱(아직 pm2 에 없는 이름)을 자동 등록**한다
+    (`pm2 start ecosystem.config.js --only <name>` 후 `pm2 save`). cron 워커는 등록 시 1회 즉시
+    실행되고 이후 스케줄대로 spawn 된다. 이미 등록된 앱은 건드리지 않는다(필요 시 위 분류대로 재시작).
+    → 새 워커/서비스는 `ecosystem.config.js` 에만 추가하면 별도 pm2 명령 없이 등록·기동된다.
   - 해당 PM2 앱이 `online` 이 아니거나 pm2 가 없으면 조용히 건너뛴다.
 - **Codex** (및 기타): 위 자동화가 없으므로 **검증 단계를 직접 실행**해야 한다. 가드레일(민감 파일,
   비밀키)도 사람이 지키듯 스스로 지킨다. 설정은 글로벌 `~/.codex/config.toml`,
