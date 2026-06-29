@@ -1,15 +1,17 @@
-"""시초가 2단계 청산 워커 (NXT 08:05 / KRX 09:28 데드라인).
+"""시초가 청산 워커 (NXT 08:05 / KRX 개장 09:05 / KRX 데드라인 09:28).
 
 전략:
-  [NXT 08:05]  NXT 시초가 vs 매수 평단으로 갭 판정 → 절반 매도, 잔량 감시계획(settle_plan) 기록
+  [NXT 08:05]  NXT **상장 종목**: NXT 시초가 vs 평단으로 갭 판정 → 절반 매도, 잔량 감시계획(settle_plan) 기록
+  [KRX 09:05]  NXT **미상장 종목**: KRX 개장가 vs 평단으로 갭 판정 → 절반 매도, 잔량 감시계획 기록
+     (NXT 단계와 동일 로직 미러 — NXT 미상장 종목은 NXT 호가가 없어 KRX 정규장 개장 후 처리한다)
      - 갭상승: 스탑선 = 절반매도 체결가(버퍼 없음) → 이후 모니터가 트레일링으로 끌어올림
      - 갭하락: 저가이탈선 = 시초가 - 버퍼          → 이탈 시 모니터가 즉시 전량 매도
-  [08:05~09:28]  모니터(monitor.py)가 30초 폴링으로 잔량을 들고 가며 스탑선을 고점 추종으로
+  [~09:28]  모니터(monitor.py)가 15초 폴링으로 잔량을 들고 가며 스탑선을 고점 추종으로
      끌어올린다(트레일링 스탑). KRX 정규장 상승분을 잔량으로 최대한 따라간다.
   [KRX 09:28]  데드라인 — 트레일링에 안 걸리고 남은 잔량을 갭 방향 무관 전량 매도(보유 안 함).
      09:30 모니터 종료 직전, 미체결 잔량을 정리하는 최종 백스톱.
 
-가정(미세 조정 가능): '시초가'는 각 단계 실행 시점의 현재가로 근사. '저가 이탈선'은 NXT 시초가.
+가정(미세 조정 가능): '시초가'는 각 단계 실행 시점의 현재가로 근사. '저가 이탈선'은 시초가 기준.
 """
 import sys
 import argparse
@@ -32,13 +34,14 @@ setup_logging()
 logger = logging.getLogger("Settle")
 
 
-def _half_sell_fill_price(trade_date: str, stk_cd: str, fallback: int) -> int:
-    """NXT 절반매도(tag='nxt')의 실체결 수량가중평균가. 미체결/조회불가면 fallback(시초가).
+def _half_sell_fill_price(trade_date: str, stk_cd: str, tag: str, fallback: int) -> int:
+    """절반매도(해당 단계 tag)의 실체결 수량가중평균가. 미체결/조회불가면 fallback(시초가).
 
     live 는 체결이 ka10076 으로 사후 반영되므로 호출 전 sync_fills 필요.
     paper 는 주문 참조가(=시초가)로 즉시 체결돼 fallback 과 동일하게 수렴한다.
+    tag: 단계 구분자('nxt'=NXT 08:05, 'krxopen'=KRX 09:05) — 멱등키 suffix 와 일치해야 한다.
     """
-    key = ExecutionEngine.idempotency_key(trade_date, 0, f"sell:nxt:{stk_cd}")
+    key = ExecutionEngine.idempotency_key(trade_date, 0, f"sell:{tag}:{stk_cd}")
     order = order_repo.find_by_idempotency_key(key)
     if not order:
         return fallback
@@ -50,48 +53,69 @@ def _half_sell_fill_price(trade_date: str, stk_cd: str, fallback: int) -> int:
     return round(amount / tot_qty)
 
 
-def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
-    """NXT 08:05 — 갭 판정 + 절반 매도 + 감시계획 기록."""
+def _run_open_stage(engine: ExecutionEngine, trade_date: str, *,
+                    stage_tag: str, stex: str, want_nxt: bool) -> None:
+    """시초가 갭 판정 + 절반 매도 + 잔량 감시계획 기록 (NXT 08:05 / KRX 개장 09:05 공용).
+
+    NXT 단계와 KRX 개장 단계는 동일 전략이고, 대상 종목 집합·거래소·멱등 tag 만 다르다.
+      want_nxt=True  → NXT 상장 종목만 (stex='NXT' 최유리IOC, tag='nxt')      — 08:05
+      want_nxt=False → NXT 미상장 종목만 (stex='KRX' 시장가, tag='krxopen')   — 09:05
+    NXT 미상장 종목은 NXT 호가가 없어 NXT 단계에서 건너뛰고, KRX 정규장 개장 후 여기서 처리한다.
+    """
+    label = stage_tag.upper()
     positions = position_repo.get_open_positions()
     if not positions:
-        logger.info("[NXT] 보유 포지션 없음 — 종료")
+        logger.info("[%s] 보유 포지션 없음 — 종료", label)
         return
     for p in positions:
         stk_cd, qty, avg = p["stk_cd"], p["qty"], p["avg_price"]
-        # 비-NXT 종목은 NXT 단계 대상이 아님(NXT 미상장) → 09:05 KRX 단계에서 청산
-        if not engine.data.is_nxt_enabled(stk_cd):
-            logger.info("[NXT] %s 비-NXT — 08:05 단계 건너뜀(09:05 KRX 청산)", stk_cd)
+        # 이 단계 대상이 아닌 종목은 건너뜀 (NXT 단계↔KRX 개장 단계가 종목을 나눠 책임진다)
+        if engine.data.is_nxt_enabled(stk_cd) != want_nxt:
             continue
         try:
-            nxt_open = engine.data.get_market_price(stk_cd)
-            if nxt_open <= 0:
-                logger.warning("[NXT] 현재가 조회 실패 — 보류 [%s]", stk_cd)
+            open_px = engine.data.get_market_price(stk_cd)
+            if open_px <= 0:
+                logger.warning("[%s] 현재가 조회 실패 — 보류 [%s]", label, stk_cd)
                 continue
-            gap_dir = "up" if nxt_open > avg else "down"
+            gap_dir = "up" if open_px > avg else "down"
             half = qty // 2  # 내림(소숫점 내림) — 1주는 절반=0(매도 안 함, 전량 보유로 회복 대기)
             if half >= 1:
-                engine.execute_sell(trade_date, stk_cd, half, nxt_open,
-                                    dmst_stex_tp="NXT", tag="nxt")  # NXT → 최유리IOC
+                engine.execute_sell(trade_date, stk_cd, half, open_px,
+                                    dmst_stex_tp=stex, tag=stage_tag)
             remaining = qty - half
             if remaining > 0:
                 if gap_dir == "up":
                     # 갭상승: 스탑선 = 절반매도 체결가(버퍼 없음). 잔량이 절반 판 가격 아래로
                     # 내려가면 모니터가 즉시 전량 매도해 확보한 이익선을 지킨다.
                     sync_fills(engine.client)  # 절반매도 체결 반영(live) 후 실체결가 확인
-                    stop_price = _half_sell_fill_price(trade_date, stk_cd, fallback=nxt_open)
+                    stop_price = _half_sell_fill_price(trade_date, stk_cd, stage_tag, fallback=open_px)
                 else:
                     # 갭하락: 저가이탈선 = 시초가에서 STOP_BUFFER_PCT% 아래(버퍼). 시초가를 그대로
                     # 잡으면 한 틱만 눌려도 잔량이 즉시 털리므로 시초가 회복 대기를 위한 버퍼를 둔다.
-                    stop_price = round(nxt_open * (1 - STOP_BUFFER_PCT / 100))
-                plan_repo.upsert_plan(trade_date, stk_cd, gap_dir, avg, nxt_open,
-                                      stop_price=stop_price, note=f"nxt half={half}")
-                logger.info("[NXT] %s 갭%s 절반매도 %d주 @%d (잔량 %d, 스탑 %d)",
-                            stk_cd, gap_dir, half, nxt_open, remaining, stop_price)
+                    stop_price = round(open_px * (1 - STOP_BUFFER_PCT / 100))
+                plan_repo.upsert_plan(trade_date, stk_cd, gap_dir, avg, open_px,
+                                      stop_price=stop_price, note=f"{stage_tag} half={half}")
+                logger.info("[%s] %s 갭%s 절반매도 %d주 @%d (잔량 %d, 스탑 %d)",
+                            label, stk_cd, gap_dir, half, open_px, remaining, stop_price)
             else:
-                logger.info("[NXT] %s 갭%s 전량매도 %d주 @%d (잔량 0 — 감시계획 없음)",
-                            stk_cd, gap_dir, half, nxt_open)
+                logger.info("[%s] %s 갭%s 전량매도 %d주 @%d (잔량 0 — 감시계획 없음)",
+                            label, stk_cd, gap_dir, half, open_px)
         except Exception as e:
-            logger.error("[NXT] 청산 실패 [%s]: %s", stk_cd, e)
+            logger.error("[%s] 청산 실패 [%s]: %s", label, stk_cd, e)
+
+
+def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
+    """NXT 08:05 — NXT 상장 종목 갭 판정 + 절반 매도 + 감시계획 기록 (최유리IOC)."""
+    _run_open_stage(engine, trade_date, stage_tag="nxt", stex="NXT", want_nxt=True)
+
+
+def run_krx_open(engine: ExecutionEngine, trade_date: str) -> None:
+    """KRX 09:05 — NXT 미상장 종목 갭 판정 + 절반 매도 + 감시계획 기록 (KRX 시장가).
+
+    NXT 호가가 없어 08:05 단계에서 건너뛴 종목을, KRX 정규장 개장가로 NXT 단계와 동일하게 처리한다.
+    이후 모니터가 09:05~09:28 트레일링으로 잔량을 들고 가고, 09:28 KRX 데드라인이 잔량을 정리한다.
+    """
+    _run_open_stage(engine, trade_date, stage_tag="krxopen", stex="KRX", want_nxt=False)
 
 
 def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
@@ -208,12 +232,12 @@ def _notify_sells(engine: ExecutionEngine, trade_date: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--venue", choices=["nxt", "krx"], required=True)
+    parser.add_argument("--venue", choices=["nxt", "krx_open", "krx"], required=True)
     args = parser.parse_args()
 
     now = datetime.now()
     # 실행 윈도우 가드: 평일 + 지정 시간대에만 동작(오실행·pm2 start 즉시실행 방지).
-    expected_hour = 8 if args.venue == "nxt" else 9
+    expected_hour = 8 if args.venue == "nxt" else 9  # krx_open(09:05)·krx(09:28) 모두 09시
     if now.weekday() >= 5 or now.hour != expected_hour:
         logger.info("[%s] 실행 윈도우(%s 평일 %02d시)가 아님 — 스킵",
                     args.venue.upper(), args.venue.upper(), expected_hour)
@@ -225,6 +249,8 @@ def main() -> int:
     sync_fills(engine.client)  # 직전 체결을 포지션에 반영 후 청산 판단 (paper 는 no-op)
     if args.venue == "nxt":
         run_nxt(engine, trade_date)
+    elif args.venue == "krx_open":
+        run_krx_open(engine, trade_date)
     else:
         run_krx(engine, trade_date)
     logger.info("청산 종료 [%s]", args.venue.upper())
