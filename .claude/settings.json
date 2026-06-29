@@ -18,7 +18,8 @@
       "Bash(curl -s -o /dev/null -w :*)",
       "Bash(grep :*)",
       "Bash(rg :*)",
-      "Bash(grep -E \"\\\\.py$\")"
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(npx tsc *)"
     ],
     "deny": [
       "Read(./.env)",

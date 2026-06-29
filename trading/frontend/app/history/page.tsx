@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { wonExact, fmtDate } from "@/lib/format";
 import type { Order, NameMap } from "@/types";
+import ReasonTip from "@/components/ReasonTip";
 
 export const dynamic = "force-dynamic";
 
@@ -130,7 +131,7 @@ export default async function HistoryPage({
                   const skip = o.status === "skipped"; // 주문 행 없는 매수 스킵/차단 → 수량/가격 없음
                   return (
                     <li key={`${skip ? "skip" : "order"}-${o.id}`} className="px-5 py-3.5">
-                      {/* 주문 본문 — 미체결은 흐리게(기존 디자인). 사유는 아래에서 또렷하게 보여준다. */}
+                      {/* 주문 본문 — 미체결은 흐리게(기존 디자인). 사유는 상태 텍스트의 hover/탭 툴팁(ReasonTip). */}
                       <div
                         className={`flex items-center justify-between ${
                           filled ? "" : "opacity-45 grayscale"
@@ -150,14 +151,9 @@ export default async function HistoryPage({
                             <p className="truncate font-semibold">{nm(o.stk_cd)}</p>
                             <p className="text-xs text-slate-400 tabular-nums">
                               {hhmm(o.created_at)} ·{" "}
-                              {/* 미체결이면 상태 텍스트에 hover 시 사유 툴팁(점선 밑줄로 힌트) */}
+                              {/* 미체결이면 상태 텍스트에 hover(데스크탑)/탭(모바일) 시 사유 툴팁 */}
                               {!filled && o.reason ? (
-                                <span
-                                  title={o.reason}
-                                  className="cursor-help underline decoration-dotted underline-offset-2"
-                                >
-                                  {STATUS_LABEL[o.status] ?? o.status}
-                                </span>
+                                <ReasonTip label={STATUS_LABEL[o.status] ?? o.status} reason={o.reason} />
                               ) : (
                                 (STATUS_LABEL[o.status] ?? o.status)
                               )}
