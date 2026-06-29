@@ -119,6 +119,35 @@ def list_activity_events(limit: int = 50, date_dash: str | None = None) -> list[
     return rows
 
 
+# 한 종목 트레일에서 제외할 노이즈 — 하트비트·완료마커·주문응답 원문(키움 resp 그대로라 길다).
+_TRAIL_EXCLUDE = ("monitor_poll", "buy_poll", "worker_done", "buy_response", "sell_response")
+
+
+def list_by_stock(stk_cd: str, start_dash: str, end_dash: str, limit: int = 200) -> list[dict]:
+    """한 종목의 매매 트레일 — [start_dash, end_dash] 구간(YYYY-MM-DD) 감사 이벤트(시간 오름차순).
+
+    대시보드에서 청산 종목을 누르면 '그 종목에 워커가 무슨 일을 했는지'(매수 집행 → 갭/스탑
+    모니터 → 매도 체결)를 시간순으로 보여주기 위한 조회. 종가베팅은 전일 매수→당일 매도라
+    start=매수일·end=매도일 로 두 날을 함께 본다. payload 는 dict 로 파싱한다."""
+    placeholders = ", ".join(["%s"] * len(_TRAIL_EXCLUDE))
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"SELECT id, event, stk_cd, payload, created_at FROM audit_log "
+            f"WHERE stk_cd = %s AND event NOT IN ({placeholders}) "
+            f"AND created_at >= %s AND created_at < %s + INTERVAL 1 DAY "
+            f"ORDER BY id ASC LIMIT %s",
+            (stk_cd, *_TRAIL_EXCLUDE, start_dash, end_dash, int(limit)),
+        )
+        rows = cursor.fetchall()
+    for r in rows:
+        if isinstance(r.get("payload"), str):
+            try:
+                r["payload"] = json.loads(r["payload"])
+            except (ValueError, TypeError):
+                pass
+    return rows
+
+
 def list_recent(limit: int = 50) -> list[dict]:
     """최근 감사 이벤트 (대시보드용, 최신순). payload 는 dict 로 파싱."""
     with get_db() as (conn, cursor):

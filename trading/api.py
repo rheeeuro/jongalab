@@ -329,6 +329,17 @@ def audit(limit: int = 50):
     return audit_log.list_recent(limit)
 
 
+@app.get("/stock-events")
+def stock_events(stk_cd: str, start: str, end: str | None = None):
+    """한 종목의 매매 트레일(감사 이벤트, 시간순) — 청산 종목 클릭 시 워커 로그 모달용.
+    start/end = YYYYMMDD (end 생략 시 start 당일). 종가베팅은 전일 매수→당일 매도라
+    start=매수일·end=매도일 로 호출한다."""
+    end = end or start
+    sdash = f"{start[:4]}-{start[4:6]}-{start[6:8]}"
+    edash = f"{end[:4]}-{end[4:6]}-{end[6:8]}"
+    return audit_log.list_by_stock(stk_cd, sdash, edash)
+
+
 @app.get("/pnl/monthly")
 def pnl_monthly(month: str | None = None):
     """월별 일자 실현손익 — 달력용. month=YYYYMM (기본 이번 달)."""

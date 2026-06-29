@@ -186,7 +186,7 @@ export default function CalendarPage() {
               {(detail.roundtrips?.length ?? 0) > 0 && (
                 <div>
                   <p className="mb-1 text-xs font-semibold text-slate-400">청산 (매수가 → 매도가)</p>
-                  <RoundTrips trips={detail.roundtrips} names={names} plans={detail.plans} />
+                  <RoundTrips trips={detail.roundtrips} names={names} plans={detail.plans} date={detail.date} />
                 </div>
               )}
               {detail.buys.length > 0 && (

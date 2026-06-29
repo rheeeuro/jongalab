@@ -76,7 +76,7 @@ export default async function TodayPage() {
         ) : (
           <>
             <p className="-mt-1 mb-1 text-xs text-slate-400">어제 매수가 → 오늘 매도가</p>
-            <RoundTrips trips={trips} names={names} />
+            <RoundTrips trips={trips} names={names} date={day?.date ?? todayYYYYMMDD()} />
           </>
         )}
       </Card>

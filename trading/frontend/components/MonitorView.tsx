@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import type { MonitorState, MonitorEvent, NameMap, BuyPreview } from "@/types";
+import type { MonitorState, NameMap, BuyPreview } from "@/types";
 import { won, wonExact, pnlClass, ago, hhmmss } from "@/lib/format";
+import { eventMeta, eventDetail } from "@/lib/events";
 
 // 폴링으로 새로 들어온 항목의 id 집합을 반환 — 첫 로드분은 제외(자동 채워진 것만 애니메이션).
 // 항목 배열(items)의 참조가 바뀔 때만(=폴링 갱신 시) 비교한다. 1초 틱 리렌더에는 반응하지 않음.
@@ -29,16 +30,6 @@ function useNewIds<T extends { id: number }>(items: T[]): Set<number> {
 const ORDER_STATUS: Record<string, string> = {
   filled: "체결", sent: "전송", intended: "접수", rejected: "거부",
   canceled: "취소", accepted: "수락",
-};
-
-const EVENT_META: Record<MonitorEvent["event"], { label: string; tone: string }> = {
-  monitor_start: { label: "모니터 시작", tone: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" },
-  monitor_trail: { label: "스탑 상향", tone: "bg-emerald-100 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400" },
-  monitor_stop: { label: "스탑 발동", tone: "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400" },
-  monitor_hardstop: { label: "하드손절", tone: "bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400" },
-  buy_start: { label: "매수 시작", tone: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" },
-  buy_exec: { label: "매수 집행", tone: "bg-rose-100 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400" },
-  buy_skip: { label: "매수 스킵", tone: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
 };
 
 // 현재가가 스탑/손절선 위로 얼마나 떨어져 있는지(%). 양수=안전 여유, 음수=이미 이탈.
@@ -255,7 +246,7 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
         ) : (
           <ul className="space-y-3">
             {events.map((e) => {
-              const meta = EVENT_META[e.event];
+              const meta = eventMeta(e.event);
               return (
                 <li
                   key={e.id}
@@ -271,7 +262,7 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
                       </span>
                       {e.stk_cd && <span className="truncate text-sm font-semibold">{nm(e.stk_cd)}</span>}
                     </div>
-                    <p className="mt-0.5 text-xs text-slate-400 tabular-nums">{eventDetail(e)}</p>
+                    <p className="mt-0.5 text-xs text-slate-400 tabular-nums">{eventDetail(e.event, e.payload)}</p>
                   </div>
                 </li>
               );
@@ -449,32 +440,4 @@ function BuyPreviewSection({
       )}
     </section>
   );
-}
-
-function eventDetail(e: MonitorEvent): string {
-  const p = e.payload ?? {};
-  switch (e.event) {
-    case "monitor_start":
-      return `폴링 ${p.poll_sec ?? "?"}s · 손절 −${p.hard_stop_pct ?? "?"}% · 트레일링 −${p.trail_pct ?? "?"}%`;
-    case "monitor_trail":
-      return `스탑 ${num(p.old)} → ${num(p.new)} (현재가 ${num(p.cur)})`;
-    case "monitor_stop":
-      return `현재가 ${num(p.cur)} ≤ 스탑 ${num(p.stop)} · ${p.sent ? "매도 전송" : "전송 안 됨"}`;
-    case "monitor_hardstop":
-      return `현재가 ${num(p.cur)} ≤ 손절 ${num(p.hard_stop)} · ${p.sent ? "매도 전송" : "전송 안 됨"}`;
-    case "buy_start":
-      return `${(p.exchange ?? p.venue ?? "").toString().toUpperCase()} ${p.window ?? ""} · 눌림 −${p.pullback_pct ?? "?"}%`;
-    case "buy_exec":
-      return `${num(p.shares)}주 @${num(p.price)} · ${p.sent ? "매수 전송" : p.error ? "실패" : "전송 안 됨"}${
-        p.reason && String(p.reason).includes("데드라인") ? " (데드라인)" : ""
-      }`;
-    case "buy_skip":
-      return p.reason === "blocklist" ? "blocklist 제외" : `${p.reason ?? "스킵"}`;
-    default:
-      return "";
-  }
-}
-
-function num(v: unknown): string {
-  return typeof v === "number" ? v.toLocaleString() : "-";
 }
