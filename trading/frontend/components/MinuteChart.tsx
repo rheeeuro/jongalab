@@ -104,9 +104,10 @@ export default function MinuteChart({ candles, markers }: { candles: Candle[]; m
       }
       return best as UTCTimestamp;
     };
-    const seriesMarkers: SeriesMarker<UTCTimestamp>[] = markers
+    const snapped = markers.map((mk) => ({ ...mk, t: snap(mk.time) }));
+    const seriesMarkers: SeriesMarker<UTCTimestamp>[] = snapped
       .map((mk) => ({
-        time: snap(mk.time),
+        time: mk.t,
         position: mk.side === "buy" ? ("belowBar" as const) : ("aboveBar" as const),
         color: mk.side === "buy" ? "#ef4444" : "#3b82f6",
         shape: mk.side === "buy" ? ("arrowUp" as const) : ("arrowDown" as const),
@@ -115,12 +116,24 @@ export default function MinuteChart({ candles, markers }: { candles: Candle[]; m
       .sort((a, b) => (a.time as number) - (b.time as number));
     if (seriesMarkers.length) createSeriesMarkers(candleSeries, seriesMarkers);
 
-    chart.timeScale().fitContent();
+    // 초기 줌: 매수/매도 타점 구간을 ±패딩으로 살짝 확대(타점 없으면 전체). 사용자는 자유롭게 줌아웃 가능.
+    const idxs = snapped.map((m) => times.indexOf(m.t as number)).filter((i) => i >= 0);
+    if (idxs.length) {
+      const from = Math.min(...idxs);
+      const to = Math.max(...idxs);
+      const pad = Math.max(20, Math.round((to - from) * 0.5));
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, from - pad),
+        to: Math.min(times.length - 1, to + pad),
+      });
+    } else {
+      chart.timeScale().fitContent();
+    }
 
+    // 리사이즈 시 폭만 갱신 — 보이는 구간(초기 줌)은 lightweight-charts 가 그대로 유지한다.
     const ro = new ResizeObserver((entries) => {
       if (!entries.length || !chartRef.current) return;
       chartRef.current.applyOptions({ width: entries[0].contentRect.width });
-      chartRef.current.timeScale().fitContent();
     });
     ro.observe(el);
 

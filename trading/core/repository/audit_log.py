@@ -66,6 +66,22 @@ def realized_by_date(date_dash: str) -> dict:
     return agg
 
 
+def has_sell_between(stk_cd: str, start_dash: str, end_dash: str) -> bool:
+    """[start_dash 00:00, end_dash 00:00) 사이에 이 종목 매도 체결이 있었는지(YYYY-MM-DD).
+
+    분할/이월 청산 판정용 — 같은 매수(1회)를 여러 날에 나눠 팔면, 뒤 매도일은 '이미 한 번 판
+    뒤의 연속 청산'이다. 이때 모달이 원매수일까지 거슬러 올라가지 않도록(=매도 당일만 보도록)
+    호출부가 이 신호로 구간 시작을 조정한다."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT 1 FROM audit_log WHERE stk_cd = %s "
+            "AND event IN ('sell_filled_paper', 'sell_filled_live') "
+            "AND created_at >= %s AND created_at < %s LIMIT 1",
+            (stk_cd, start_dash, end_dash),
+        )
+        return cursor.fetchone() is not None
+
+
 def last_heartbeat():
     """가장 최근 하트비트 1건 (monitor_poll/buy_poll) — 없으면 None.
 

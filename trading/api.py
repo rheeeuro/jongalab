@@ -344,12 +344,25 @@ def _to_dt(ts: str) -> str:
     return f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[8:10]}:{ts[10:12]}:{ts[12:14]}"
 
 
+def _effective_start(stk_cd: str, start: str, end: str) -> str:
+    """모달 구간의 시작일(YYYYMMDD) 보정. 보통은 매수일(start)이지만, 매수일~매도일 사이에 이미
+    이 종목 매도가 있었으면(1회 매수를 여러 날 나눠 판 분할/이월 청산) 이번 매도는 다음 사이클이라
+    매도 당일(end)만 본다 — 원매수일까지 거슬러 올라가 이전 청산이 섞이지 않게 한다.
+    (주말/공휴일을 끼고 다음날 청산하는 정상 사이클은 중간 매도가 없어 그대로 매수일부터 본다.)"""
+    if start == end:
+        return start
+    sdash = f"{start[:4]}-{start[4:6]}-{start[6:8]}"
+    edash = f"{end[:4]}-{end[4:6]}-{end[6:8]}"
+    return end if audit_log.has_sell_between(stk_cd, sdash, edash) else start
+
+
 @app.get("/stock-events")
 def stock_events(stk_cd: str, start: str, end: str | None = None):
     """한 종목의 매매 트레일(감사 이벤트, 시간순) — 청산 종목 클릭 시 워커 로그 모달용.
     start/end = YYYYMMDD (end 생략 시 start 당일). 종가베팅은 전일 매수→당일 매도라
-    start=매수일·end=매도일 로 호출한다. 한 매매 사이클(매수날 12시~매도날 12시)만 본다."""
+    start=매수일·end=매도일 로 호출한다. 한 매매 사이클(매수날 15시~매도날 10시)만 본다."""
     end = end or start
+    start = _effective_start(stk_cd, start, end)
     lo, hi = _trade_window(start, end)
     return audit_log.list_by_stock(stk_cd, _to_dt(lo), _to_dt(hi))
 
@@ -361,6 +374,7 @@ def stock_chart(stk_cd: str, start: str, end: str | None = None):
     KRX 봉이 우선, 그 밖(NXT 프리/애프터마켓: 오후 매수·시초가 청산)은 NXT 봉. NXT 미지원 종목은
     KRX 만. start/end = YYYYMMDD. 조회 실패/데이터 없음이면 빈 배열(차트는 '데이터 없음'으로 처리)."""
     end = end or start
+    start = _effective_start(stk_cd, start, end)
     lo, hi = _trade_window(start, end)
     dc = KiwoomDataClient()
     # NXT 먼저 채우고 KRX 로 정규장 겹치는 분(minute)을 덮어쓴다(주 보드=KRX 우선, 연장시간대=NXT).
