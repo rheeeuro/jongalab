@@ -112,12 +112,13 @@ class ClosingBetStrategy:
                     info = self.api.get_stock_basic_info(code)
                     name = info.get("stk_nm", code)
                     cp = abs(self.engine.parse_price(info.get("cur_prc", "0")))
+                    chg = self.engine.parse_float(info.get("flu_rt", "0"))
                     mc_raw = self.engine.parse_price(info.get("mac", "0"))
                     mc = mc_raw * 100_000_000
                     if mc >= self.strategy_cfg.MIN_MARKET_CAP:
                         candidates.append(StockCandidate(
                             code=code, name=name, sector=self._find_sector(code),
-                            current_price=cp, market_cap=mc,
+                            current_price=cp, market_cap=mc, change_pct=chg,
                         ))
                         seen_codes.add(code)
                     time.sleep(0.3)
