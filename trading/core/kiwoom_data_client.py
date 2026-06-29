@@ -67,6 +67,19 @@ class KiwoomDataClient:
             "/chart/daily", {"stk_cd": stk_cd, "dt": dt, "upd_stk_prc": upd_stk_prc}
         )
 
+    def get_minute_chart_pages(self, stk_cd: str, tic_scope: str = "1",
+                               base_dt: str = "", max_pages: int = 2) -> list:
+        """ka10080 — 분봉 차트 연속조회. base_dt(YYYYMMDD) 기준 최신→과거 순 bar 리스트.
+        1페이지 ≈ 900봉(≈2.3거래일)이라 max_pages=2 면 매수날~매도날 구간을 넉넉히 덮는다.
+        bar 필드: cntr_tm(YYYYMMDDHHMMSS)·open_pric·high_pric·low_pric·cur_prc(종가)·trde_qty."""
+        resp = requests.post(
+            f"{self.base_url}/chart/minute-pages",
+            json={"stk_cd": stk_cd, "tic_scope": tic_scope, "base_dt": base_dt, "max_pages": max_pages},
+            timeout=30,  # 연속조회(페이지당 0.3s sleep)라 기본 10s 보다 길게
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def is_nxt_enabled(self, stk_cd: str) -> bool:
         """NXT(넥스트레이드) 거래 가능 종목인지. 조회 실패 시 False(보수적)."""
         try:

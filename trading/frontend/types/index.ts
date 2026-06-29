@@ -94,6 +94,23 @@ export interface RoundTrip {
   realized: number; // 종목별 실현손익 (감사로그 권위값)
 }
 
+/** 1분봉 캔들 — 워커 로그 모달 차트(매수날 12시~매도날 12시). time 은 "YYYY-MM-DDTHH:MM". */
+export interface Candle {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+/** 차트 매수/매도 타점 — 체결 이벤트(시각·가격)에서 만든다. time 은 가장 가까운 캔들로 스냅된다. */
+export interface ChartMarker {
+  time: string; // ISO 시각(이벤트 created_at)
+  side: "buy" | "sell";
+  price: number;
+}
+
 export interface DayDetail {
   date: string;
   realized_pnl: number;

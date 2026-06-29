@@ -123,20 +123,21 @@ def list_activity_events(limit: int = 50, date_dash: str | None = None) -> list[
 _TRAIL_EXCLUDE = ("monitor_poll", "buy_poll", "worker_done", "buy_response", "sell_response")
 
 
-def list_by_stock(stk_cd: str, start_dash: str, end_dash: str, limit: int = 200) -> list[dict]:
-    """한 종목의 매매 트레일 — [start_dash, end_dash] 구간(YYYY-MM-DD) 감사 이벤트(시간 오름차순).
+def list_by_stock(stk_cd: str, start_dt: str, end_dt: str, limit: int = 200) -> list[dict]:
+    """한 종목의 매매 트레일 — [start_dt, end_dt] 시각 구간('YYYY-MM-DD HH:MM:SS', 포함) 감사
+    이벤트(시간 오름차순).
 
     대시보드에서 청산 종목을 누르면 '그 종목에 워커가 무슨 일을 했는지'(매수 집행 → 갭/스탑
-    모니터 → 매도 체결)를 시간순으로 보여주기 위한 조회. 종가베팅은 전일 매수→당일 매도라
-    start=매수일·end=매도일 로 두 날을 함께 본다. payload 는 dict 로 파싱한다."""
+    모니터 → 매도 체결)를 시간순으로 보여주기 위한 조회. 구간은 한 매매 사이클(매수날 12시~매도날
+    12시)로 좁혀, 같은 종목을 여러 날 매매해도 인접 사이클 이벤트가 섞이지 않는다. payload 는 dict 로 파싱."""
     placeholders = ", ".join(["%s"] * len(_TRAIL_EXCLUDE))
     with get_db() as (conn, cursor):
         cursor.execute(
             f"SELECT id, event, stk_cd, payload, created_at FROM audit_log "
             f"WHERE stk_cd = %s AND event NOT IN ({placeholders}) "
-            f"AND created_at >= %s AND created_at < %s + INTERVAL 1 DAY "
+            f"AND created_at >= %s AND created_at <= %s "
             f"ORDER BY id ASC LIMIT %s",
-            (stk_cd, *_TRAIL_EXCLUDE, start_dash, end_dash, int(limit)),
+            (stk_cd, *_TRAIL_EXCLUDE, start_dt, end_dt, int(limit)),
         )
         rows = cursor.fetchall()
     for r in rows:

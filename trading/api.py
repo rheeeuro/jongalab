@@ -329,15 +329,67 @@ def audit(limit: int = 50):
     return audit_log.list_recent(limit)
 
 
+def _trade_window(start: str, end: str) -> tuple[str, str]:
+    """한 매매 사이클 시각 구간 (YYYYMMDDHHMMSS, 포함). 매수날≠매도날이면 매수날 15:00~매도날 10:00.
+    종가베팅은 오후(15:00 KRX/19:30 NXT) 매수·오전(08:05 NXT/09:05 KRX) 청산이라 이 구간이 한
+    사이클(매수→청산)을 딱 감싼다. 같은 종목을 여러 날 매매해도 인접 사이클이 섞이지 않는다.
+    (이 구간 밖엔 종목별 감사 이벤트가 없어 로그도 동일하다.) 같은 날이면 그 날 전체."""
+    if start == end:
+        return f"{start}000000", f"{end}235959"
+    return f"{start}150000", f"{end}100000"
+
+
+def _to_dt(ts: str) -> str:
+    """YYYYMMDDHHMMSS → 'YYYY-MM-DD HH:MM:SS' (SQL 비교용)."""
+    return f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[8:10]}:{ts[10:12]}:{ts[12:14]}"
+
+
 @app.get("/stock-events")
 def stock_events(stk_cd: str, start: str, end: str | None = None):
     """한 종목의 매매 트레일(감사 이벤트, 시간순) — 청산 종목 클릭 시 워커 로그 모달용.
     start/end = YYYYMMDD (end 생략 시 start 당일). 종가베팅은 전일 매수→당일 매도라
-    start=매수일·end=매도일 로 호출한다."""
+    start=매수일·end=매도일 로 호출한다. 한 매매 사이클(매수날 12시~매도날 12시)만 본다."""
     end = end or start
-    sdash = f"{start[:4]}-{start[4:6]}-{start[6:8]}"
-    edash = f"{end[:4]}-{end[4:6]}-{end[6:8]}"
-    return audit_log.list_by_stock(stk_cd, sdash, edash)
+    lo, hi = _trade_window(start, end)
+    return audit_log.list_by_stock(stk_cd, _to_dt(lo), _to_dt(hi))
+
+
+@app.get("/stock-chart")
+def stock_chart(stk_cd: str, start: str, end: str | None = None):
+    """1분봉 캔들 — 매수날 15:00 ~ 매도날 10:00 구간(워커 로그 모달 차트용).
+    NXT(넥스트레이드)와 KRX(정규장) 분봉을 한 시계열로 합친다 — KRX 정규장(09:00~15:30) 시간대는
+    KRX 봉이 우선, 그 밖(NXT 프리/애프터마켓: 오후 매수·시초가 청산)은 NXT 봉. NXT 미지원 종목은
+    KRX 만. start/end = YYYYMMDD. 조회 실패/데이터 없음이면 빈 배열(차트는 '데이터 없음'으로 처리)."""
+    end = end or start
+    lo, hi = _trade_window(start, end)
+    dc = KiwoomDataClient()
+    # NXT 먼저 채우고 KRX 로 정규장 겹치는 분(minute)을 덮어쓴다(주 보드=KRX 우선, 연장시간대=NXT).
+    codes = [stk_cd]
+    try:
+        if dc.is_nxt_enabled(stk_cd):
+            codes = [f"{stk_cd}_NX", stk_cd]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("NXT 여부 조회 실패 [%s]: %s", stk_cd, e)
+    bars: dict[str, dict] = {}  # YYYYMMDDHHMM → 캔들 (분 단위 중복 제거 + 정렬 키)
+    for code in codes:
+        try:
+            raw = dc.get_minute_chart_pages(code, tic_scope="1", base_dt=end, max_pages=2)
+        except Exception as e:  # noqa: BLE001 — 차트는 부가 정보라 실패해도 모달은 떠야 한다
+            logger.warning("분봉 조회 실패 [%s]: %s", code, e)
+            continue
+        for it in raw or []:
+            tm = it.get("cntr_tm", "")
+            if len(tm) < 12 or not (lo <= tm <= hi):
+                continue
+            bars[tm[:12]] = {
+                "time": f"{tm[:4]}-{tm[4:6]}-{tm[6:8]}T{tm[8:10]}:{tm[10:12]}",
+                "open": abs(to_int(it.get("open_pric"))),
+                "high": abs(to_int(it.get("high_pric"))),
+                "low": abs(to_int(it.get("low_pric"))),
+                "close": abs(to_int(it.get("cur_prc"))),
+                "volume": abs(to_int(it.get("trde_qty"))),
+            }
+    return [bars[k] for k in sorted(bars)]
 
 
 @app.get("/pnl/monthly")
