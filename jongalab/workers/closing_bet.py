@@ -383,7 +383,11 @@ class ClosingBetStrategy:
 
 if __name__ == "__main__":
     from core.market_calendar import exit_if_outside_window
-    # cron: 0,30 9-20 * * 1-5. 휴장일·운영시간대(09~20시, NXT 종료까지) 밖이면 종료.
-    exit_if_outside_window(9, 20)
+    # cron: 0,30 8-20 * * 1-5. 휴장일·운영시간대(08:30~20시, NXT 종료까지) 밖이면 종료.
+    # 운영 시작은 08:30 — cron 의 08:00 틱은 분 단위로 한 번 더 막는다(window 헬퍼는 시 단위).
+    exit_if_outside_window(8, 20)
+    if datetime.now().hour == 8 and datetime.now().minute < 30:
+        logger.info("운영 시작(08:30) 전 — 워커를 실행하지 않고 종료합니다.")
+        raise SystemExit(0)
     strategy = ClosingBetStrategy()
     strategy.run()
