@@ -116,6 +116,7 @@ def main() -> int:
     signals = signal_repo.get_pending_signals(trade_date)
     if not signals:
         logger.info("집행 대기 시그널 없음 — 종료")
+        _beat({"venue": args.venue, "phase": "done", "reason": "집행 대기 시그널 없음"})
         return 0
 
     block = blocklist_repo.get_codes()
@@ -136,12 +137,14 @@ def main() -> int:
                            engine.data.is_nxt_enabled(stk)))
     if not classified:
         logger.info("대상 시그널 없음 — 종료")
+        _beat({"venue": args.venue, "phase": "done", "reason": "대상 시그널 없음"})
         return 0
 
     total_score = sum(s for _, _, s, _ in classified)
     venue_items = [(sig, stk, score) for (sig, stk, score, isn) in classified if isn == want_nxt]
     if not venue_items:
         logger.info("이 거래소 대상 시그널 없음 — 종료")
+        _beat({"venue": args.venue, "phase": "done", "reason": "이 거래소 대상 시그널 없음"})
         return 0
     venue_score = sum(s for _, _, s in venue_items)
 

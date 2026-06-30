@@ -1,8 +1,8 @@
-"""시초가 청산 워커 (NXT 08:05 / KRX 개장 09:05 / KRX 데드라인 09:28).
+"""시초가 청산 워커 (NXT 08:03 / KRX 개장 09:03 / KRX 데드라인 09:28).
 
 전략:
-  [NXT 08:05]  NXT **상장 종목**: NXT 시초가 vs 평단으로 갭 판정 → 절반 매도, 잔량 감시계획(settle_plan) 기록
-  [KRX 09:05]  NXT **미상장 종목**: KRX 개장가 vs 평단으로 갭 판정 → 절반 매도, 잔량 감시계획 기록
+  [NXT 08:03]  NXT **상장 종목**: NXT 시초가 vs 평단으로 갭 판정 → 절반 매도, 잔량 감시계획(settle_plan) 기록
+  [KRX 09:03]  NXT **미상장 종목**: KRX 개장가 vs 평단으로 갭 판정 → 절반 매도, 잔량 감시계획 기록
      (NXT 단계와 동일 로직 미러 — NXT 미상장 종목은 NXT 호가가 없어 KRX 정규장 개장 후 처리한다)
      - 갭상승: 스탑선 = 절반매도 체결가(버퍼 없음) → 이후 모니터가 트레일링으로 끌어올림
      - 갭하락: 저가이탈선 = 시초가 - 버퍼          → 이탈 시 모니터가 즉시 전량 매도
@@ -39,7 +39,7 @@ def _half_sell_fill_price(trade_date: str, stk_cd: str, tag: str, fallback: int)
 
     live 는 체결이 ka10076 으로 사후 반영되므로 호출 전 sync_fills 필요.
     paper 는 주문 참조가(=시초가)로 즉시 체결돼 fallback 과 동일하게 수렴한다.
-    tag: 단계 구분자('nxt'=NXT 08:05, 'krxopen'=KRX 09:05) — 멱등키 suffix 와 일치해야 한다.
+    tag: 단계 구분자('nxt'=NXT 08:03, 'krxopen'=KRX 09:03) — 멱등키 suffix 와 일치해야 한다.
     """
     key = ExecutionEngine.idempotency_key(trade_date, 0, f"sell:{tag}:{stk_cd}")
     order = order_repo.find_by_idempotency_key(key)
@@ -55,11 +55,11 @@ def _half_sell_fill_price(trade_date: str, stk_cd: str, tag: str, fallback: int)
 
 def _run_open_stage(engine: ExecutionEngine, trade_date: str, *,
                     stage_tag: str, stex: str, want_nxt: bool) -> None:
-    """시초가 갭 판정 + 절반 매도 + 잔량 감시계획 기록 (NXT 08:05 / KRX 개장 09:05 공용).
+    """시초가 갭 판정 + 절반 매도 + 잔량 감시계획 기록 (NXT 08:03 / KRX 개장 09:03 공용).
 
     NXT 단계와 KRX 개장 단계는 동일 전략이고, 대상 종목 집합·거래소·멱등 tag 만 다르다.
-      want_nxt=True  → NXT 상장 종목만 (stex='NXT' 최유리IOC, tag='nxt')      — 08:05
-      want_nxt=False → NXT 미상장 종목만 (stex='KRX' 시장가, tag='krxopen')   — 09:05
+      want_nxt=True  → NXT 상장 종목만 (stex='NXT' 최유리IOC, tag='nxt')      — 08:03
+      want_nxt=False → NXT 미상장 종목만 (stex='KRX' 시장가, tag='krxopen')   — 09:03
     NXT 미상장 종목은 NXT 호가가 없어 NXT 단계에서 건너뛰고, KRX 정규장 개장 후 여기서 처리한다.
     """
     label = stage_tag.upper()
@@ -105,15 +105,15 @@ def _run_open_stage(engine: ExecutionEngine, trade_date: str, *,
 
 
 def run_nxt(engine: ExecutionEngine, trade_date: str) -> None:
-    """NXT 08:05 — NXT 상장 종목 갭 판정 + 절반 매도 + 감시계획 기록 (최유리IOC)."""
+    """NXT 08:03 — NXT 상장 종목 갭 판정 + 절반 매도 + 감시계획 기록 (최유리IOC)."""
     _run_open_stage(engine, trade_date, stage_tag="nxt", stex="NXT", want_nxt=True)
 
 
 def run_krx_open(engine: ExecutionEngine, trade_date: str) -> None:
-    """KRX 09:05 — NXT 미상장 종목 갭 판정 + 절반 매도 + 감시계획 기록 (KRX 시장가).
+    """KRX 09:03 — NXT 미상장 종목 갭 판정 + 절반 매도 + 감시계획 기록 (KRX 시장가).
 
-    NXT 호가가 없어 08:05 단계에서 건너뛴 종목을, KRX 정규장 개장가로 NXT 단계와 동일하게 처리한다.
-    이후 모니터가 09:05~09:28 트레일링으로 잔량을 들고 가고, 09:28 KRX 데드라인이 잔량을 정리한다.
+    NXT 호가가 없어 08:03 단계에서 건너뛴 종목을, KRX 정규장 개장가로 NXT 단계와 동일하게 처리한다.
+    이후 모니터가 09:03~09:28 트레일링으로 잔량을 들고 가고, 09:28 KRX 데드라인이 잔량을 정리한다.
     """
     _run_open_stage(engine, trade_date, stage_tag="krxopen", stex="KRX", want_nxt=False)
 
@@ -121,9 +121,9 @@ def run_krx_open(engine: ExecutionEngine, trade_date: str) -> None:
 def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
     """KRX 09:28 데드라인 — 트레일링에 안 걸린 잔량 전량 매도(갭 방향 무관, 잔량 보유 안 함).
 
-    08:05~09:28 사이 모니터 트레일링 스탑으로 이미 청산된 종목은 active 계획이 해제(또는 qty=0)돼
+    08:03~09:28 사이 모니터 트레일링 스탑으로 이미 청산된 종목은 active 계획이 해제(또는 qty=0)돼
     여기서 건너뛴다. 데드라인까지 남은 잔량만 정리한다.
-    청산 완료 후, 당일 NXT(08:05)+트레일링+KRX(09:28) 매도를 합산한 최종 현황을 관리자에게 전송한다.
+    청산 완료 후, 당일 NXT(08:03)+트레일링+KRX(09:28) 매도를 합산한 최종 현황을 관리자에게 전송한다.
     """
     plans = plan_repo.get_active_plans()
     active_codes = {plan["stk_cd"] for plan in plans}  # 아래 첫 루프가 책임지는 종목
@@ -157,7 +157,7 @@ def run_krx(engine: ExecutionEngine, trade_date: str) -> None:
             logger.error("[KRX] 청산 실패 [%s]: %s", stk_cd, e)
 
     # 활성 plan 없는 잔여 포지션 → KRX 정규장 시장가 전량청산 (진짜 데드라인 백스톱).
-    #   대상: 비-NXT 종목 + 08:05 NXT 매도 실패/누락분 + "전송됐으나 미체결로 plan 만 비활성화"된 잔량.
+    #   대상: 비-NXT 종목 + 08:03 NXT 매도 실패/누락분 + "전송됐으나 미체결로 plan 만 비활성화"된 잔량.
     #   (비활성 plan 행도 get_plan 으론 잡히므로, 존재여부가 아닌 active 여부로 판정해야 '보유 안 함'이 보장된다.)
     for p in position_repo.get_open_positions():
         stk_cd = p["stk_cd"]
@@ -184,7 +184,7 @@ def _notify_sells(engine: ExecutionEngine, trade_date: str) -> None:
     대시보드와 **같은 권위값**으로 보고한다: 실체결가(fill_price)·체결수량으로 집계하고,
     실현손익은 audit_log(체결 기반) 권위값을 쓴다. 참조가/주문수량 추정이 부호까지 뒤집을 만큼
     실제와 괴리됐던 문제를 막기 위함. 전송 직전 체결을 한 번 더 동기화한다(live; paper no-op).
-    NXT(08:05 절반)+트레일링+KRX(09:28 잔량) 단계를 종목별로 합산해 '최종' 현황을 보고한다.
+    NXT(08:03 절반)+트레일링+KRX(09:28 잔량) 단계를 종목별로 합산해 '최종' 현황을 보고한다.
     """
     try:
         sync_fills(engine.client)  # 최신 체결 반영 후 집계 (참조가/미체결 괴리 최소화)
@@ -237,7 +237,7 @@ def main() -> int:
 
     now = datetime.now()
     # 실행 윈도우 가드: 평일 + 지정 시간대에만 동작(오실행·pm2 start 즉시실행 방지).
-    expected_hour = 8 if args.venue == "nxt" else 9  # krx_open(09:05)·krx(09:28) 모두 09시
+    expected_hour = 8 if args.venue == "nxt" else 9  # krx_open(09:03)·krx(09:28) 모두 09시
     if now.weekday() >= 5 or now.hour != expected_hour:
         logger.info("[%s] 실행 윈도우(%s 평일 %02d시)가 아님 — 스킵",
                     args.venue.upper(), args.venue.upper(), expected_hour)
