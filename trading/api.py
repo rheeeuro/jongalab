@@ -464,7 +464,9 @@ def _build_roundtrips(date_dash: str, sells: list[dict], realized_map: dict) -> 
     agg: dict[str, dict] = {}  # 종목별 매도 수량/금액(=Σ 체결수량*체결가)
     for o in sells:
         cd = o["stk_cd"]
-        qty = o["filled_qty"] or o["qty"]
+        qty = o["filled_qty"] or 0   # 실제 체결분만 — 취소·미체결 주문은 청산 수량/금액에 넣지 않는다
+        if qty <= 0:                 # (취소된 IOC 재시도가 주문수량으로 폴백돼 청산 수량이 부풀던 버그 수정)
+            continue
         px = o["fill_price"] or o["price"]
         a = agg.setdefault(cd, {"qty": 0, "amount": 0})
         a["qty"] += qty
