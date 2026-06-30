@@ -100,30 +100,29 @@ export default function StockLogModal({
           </button>
         </div>
 
-        {/* 본문 (스크롤) */}
-        <div className="overflow-y-auto px-5 py-4">
-          {/* 1분봉 차트 (매수날 12시 ~ 매도날 12시 + 매수/매도 타점) */}
-          <section>
-            {!chartReady ? (
-              <div className="flex h-[260px] items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
-              </div>
-            ) : (
-              <MinuteChart candles={candles} markers={markers} />
-            )}
-            {chartReady && candles.length > 0 && (
-              <div className="mt-1.5 flex items-center justify-end gap-3 text-[11px] text-slate-400">
-                <span className="flex items-center gap-1">
-                  <span className="text-rose-500">▲</span> 매수
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="text-blue-500">▼</span> 매도
-                </span>
-              </div>
-            )}
-          </section>
+        {/* 1분봉 차트 (고정 — 매수날 12시 ~ 매도날 12시 + 매수/매도 타점) */}
+        <section className="shrink-0 px-5 pt-4">
+          {!chartReady ? (
+            <div className="flex h-[260px] items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
+            </div>
+          ) : (
+            <MinuteChart candles={candles} markers={markers} />
+          )}
+          {chartReady && candles.length > 0 && (
+            <div className="mt-1.5 flex items-center justify-end gap-3 text-[11px] text-slate-400">
+              <span className="flex items-center gap-1">
+                <span className="text-rose-500">▲</span> 매수
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-blue-500">▼</span> 매도
+              </span>
+            </div>
+          )}
+        </section>
 
-          {/* 워커 활동 로그 */}
+        {/* 워커 활동 로그 (스크롤) */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
           <h3 className="mb-2 mt-4 border-t border-slate-100 pt-4 text-xs font-semibold text-slate-400 dark:border-slate-800">
             워커 활동 로그
           </h3>
