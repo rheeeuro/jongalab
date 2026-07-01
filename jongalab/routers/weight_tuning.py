@@ -59,13 +59,29 @@ def get_latest():
 
 
 @router.post("/proposals/{proposal_id}/approve")
-def approve(proposal_id: int):
-    """제안 승인 — 제안 가중치를 현재 전략 설정에 덮어쓰고 적용 처리."""
+def approve(proposal_id: int, force: bool = False):
+    """제안 승인 — 제안 가중치를 현재 전략 설정에 덮어쓰고 적용 처리.
+
+    안전장치: 승인 시점에 backtest 를 재계산해 판별력을 '악화(WORSENS)'시키는 제안은
+    기본 차단한다(force=true 로만 강제 승인 가능). 저장된 dataset 기준이라, 승인 직전
+    데이터로도 개선이 확인된 제안만 반영된다.
+    """
     proposal = get_proposal(proposal_id)
     if not proposal:
         raise HTTPException(status_code=404, detail="제안을 찾을 수 없습니다.")
     if proposal["status"] != "pending":
         raise HTTPException(status_code=409, detail=f"이미 처리된 제안입니다(status={proposal['status']}).")
+    if not force:
+        bt = (_attach_backtest(dict(proposal)) or {}).get("backtest")
+        if bt and bt.get("verdict") == "WORSENS":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"이 제안은 판별력을 악화시킵니다(verdict=WORSENS, "
+                    f"스프레드Δ={bt.get('spread_delta')}, 상관Δ={bt.get('corr_delta')}). "
+                    f"그래도 적용하려면 force=true 로 다시 승인하세요."
+                ),
+            )
     try:
         config = get_strategy_config()
         proposed = proposal.get("proposed_weights") or {}

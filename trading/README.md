@@ -32,7 +32,7 @@ trading/
 │   ├── db.py                   # get_db(trading) / get_kiwoom_db / get_jongalab_db
 │   ├── risk_engine.py          # ⚠️ 게이트키핑: 킬스위치·일일한도·서킷브레이커
 │   ├── execution_engine.py     # ⚠️ 주문 사이징·집행·멱등키
-│   ├── seed_allocator.py       # 시드 배분(거래소별): 상위10·점수비례·점수우선 그리디·종목당 시드50% 캡
+│   ├── seed_allocator.py       # 시드 배분(거래소별): 상위10 선정(점수순)·등가중 배분·최소투입 우선 그리디·종목당 시드50% 캡
 │   ├── kiwoom_order_client.py  # 키움 REST 직접 호출(kt10000~3 주문, kt00018 잔고, ka10074~6)
 │   ├── kiwoom_data_client.py   # kiwoom 데이터 서버(:8001) 읽기(현재가·NXT·차트)
 │   ├── fill_sync.py            # 실거래 체결 동기화(ka10076 → fill/position)

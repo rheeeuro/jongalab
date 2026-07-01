@@ -21,12 +21,14 @@ const STATUS_BADGE: Record<string, string> = {
   approved: "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400",
   rejected: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
   expired: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
+  archived: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
 };
 const STATUS_LABEL: Record<string, string> = {
   pending: "검토 대기",
   approved: "승인됨",
   rejected: "반려됨",
   expired: "만료됨",
+  archived: "비적용",
 };
 
 function fmtPnl(v: number): string {
@@ -147,9 +149,17 @@ function ProposalCard({
   const cur = proposal.current_weights || {};
   const prop = proposal.proposed_weights || {};
   const pending = proposal.status === "pending";
+  const archived = proposal.status === "archived";
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+      {/* 비적용 안내 — 튜너는 실행됐으나 판별력 개선이 없어 승인 대상이 아님 */}
+      {archived && (
+        <div className="px-4 sm:px-5 py-2.5 bg-slate-50 dark:bg-slate-800/40 text-[12px] leading-relaxed text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800">
+          이번 주 튜너는 정상 실행됐지만, 백테스트상 판별력 개선이 없어 <b>적용하지 않습니다</b>. 아래 검증 결과 참고용입니다.
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3 border-b border-slate-100 dark:border-slate-800">
         <div className="flex items-center gap-2">

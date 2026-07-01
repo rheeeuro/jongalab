@@ -239,7 +239,7 @@ export interface WeightTuningProposal {
   id: number;
   week_start: string;
   week_end: string;
-  status: 'pending' | 'approved' | 'rejected' | 'expired';
+  status: 'pending' | 'approved' | 'rejected' | 'expired' | 'archived';
   sample_count: number;
   winners_count: number;
   losers_count: number;

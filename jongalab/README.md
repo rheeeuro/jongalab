@@ -65,7 +65,7 @@ jongalab/
 | `cleanup_content` | 매일 04:00 | `content_analysis` 3개월 + `news_mention` 14일 이전 행 삭제(테이블 비대화 방지) |
 | `closing_bet` | 평일 08:30~20시(30분) | Phase 1/2 스크리닝 → `daily_stock_report` + `trade_signal` 적재 |
 | `gap_check` (`--retry`) | 평일 08:05 / 09:05 | 전날 top-10 현재가 → 갭 등락률 → ADMIN 알림 |
-| `weight_tuner` | 토 08:00 | 지난주 실현손익 → GPT 가중치 제안(`weight_tuning_proposal`) |
+| `weight_tuner` | 토 08:00 | 지난주 실현손익 → GPT 가중치 제안 → backtest 검증: IMPROVES=pending(승인 대상) / 그 외=archived(비적용·표시용) + [건강지표] 로깅 |
 | `kis_night_futures_ws` | 평일 18:00~익일 새벽 | KIS WebSocket 야간선물 체결 → `kis_night_future` |
 | (토큰) `kis_token_refresh` | 매일 07:00 | 키움+KIS 토큰 갱신(`refresh_tokens.sh`) |
 
@@ -88,7 +88,11 @@ jongalab/
 다음날 아침 gap_check ─► daily_stock_report.gap_* 갱신
 주말 weight_tuner ─► 실현손익 + 지표(콘텐츠·뉴스 포함) 피드백 ─► 가중치 제안
   └► 0 근처 가중치는 절대스텝 부트스트랩 클램프로 성장 가능(±15% 곱셈식이 0을 0에 고정하는 문제 해소)
-  └► 관리자 승인 화면에서 백테스트 검증(제안 가중치 재적용, core/backtest.py) 확인 → 승인 시 strategy_config 반영
+  └► backtest(core/backtest.py)로 판별력 검증 → IMPROVES=status 'pending'(승인 대상) /
+     그 외(WORSENS·NEUTRAL·INSUFFICIENT)=status 'archived'(비적용 — 과적합이라 승인 대상은
+     아니지만 '튜너 동작 여부' 확인용으로 대시보드에 표시)
+  └► 매 실행 [건강지표] 로깅: 현재 가중치의 스프레드(승-패)·점수↔손익 상관(양수 전환 시 튜닝 재개 신호)
+  └► 관리자 승인 시 승인 시점 backtest 재검증 — WORSENS 는 기본 차단(force=true 로만 강제) → 승인 시 strategy_config 반영
 ```
 
 **경계**: jongalab 은 **무엇을 살지** 결정해 `trade_signal` 에 적재만 한다.

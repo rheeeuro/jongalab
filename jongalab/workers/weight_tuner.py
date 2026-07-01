@@ -5,9 +5,13 @@
 구성한다. 이 데이터와 현재 종합점수 구성 가중치를 GPT 에 넘겨 '오른 종목과 떨어진 종목을
 가른 지표'를 근거로 한 가중치 세부 조정안을 받는다.
 
-제안은 자동 적용하지 않는다. 서버측에서 주간 변화폭을 ±15% 로 클램프한 뒤
-weight_tuning_proposal 에 status='pending' 으로 저장하고, 관리자가 대시보드에서 승인해야
-strategy_config 에 반영된다(routers/weight_tuning.py).
+제안은 자동 적용하지 않는다. 서버측에서 주간 변화폭을 ±15% 로 클램프한 뒤 backtest 로
+판별력을 검증한다: **IMPROVES 면 status='pending'**(검토·승인 대상), 그 외(WORSENS/
+NEUTRAL/INSUFFICIENT)는 **status='archived'**(비적용)로 저장한다 — 노이즈 과적합이라
+승인 대상은 아니지만 '튜너가 돌긴 했다'를 대시보드에서 확인할 수 있게 이력·표시로 남긴다.
+pending 제안만 관리자가 승인하면 strategy_config 에 반영된다(routers/weight_tuning.py).
+매 실행마다 현재 가중치의 판별력(스프레드·점수↔손익 상관)을 [건강지표] 로 로깅한다 —
+이 값이 양수로 돌아서면 점수 예측력이 회복된 것이라 튜닝 재개의 신호가 된다.
 """
 import json
 import logging
@@ -15,6 +19,7 @@ from datetime import datetime, timedelta
 
 from core.logging_setup import setup_logging
 from core.ai_service import complete_json
+from core.backtest import backtest_proposal, evaluate_weights
 from core.prompts import WEIGHT_TUNING_PROMPT
 from core.repository import (
     get_strategy_config,
@@ -147,6 +152,24 @@ def run():
         except (TypeError, ValueError):
             proposed_weights[k] = cur  # 이상값이면 현재값 유지
 
+    # 건강지표: 현재 가중치의 판별력(스프레드=승자평균−패자평균, 점수↔손익 순위상관)을
+    # 매 실행 로그로 남긴다. 스프레드/상관이 양수로 돌아서는 순간이 '점수 예측력 회복 =
+    # 튜닝 재개' 신호다(현재는 음수라 튜닝 실익 없음).
+    health = evaluate_weights(dataset, current_weights)
+    logger.info(
+        f"[건강지표] 현재 가중치 판별력 — 스프레드(승-패)={health['spread']} "
+        f"점수↔손익 상관={health['pnl_rank_corr']} "
+        f"(승자평균 {health['winner_avg_score']} / 패자평균 {health['loser_avg_score']}, "
+        f"표본 {len(dataset)})"
+    )
+
+    # backtest 게이팅: 제안이 실제로 판별력을 개선(IMPROVES)할 때만 'pending'(검토·승인 대상).
+    # 그 외(WORSENS/NEUTRAL/INSUFFICIENT)는 노이즈 과적합 위험이 커 승인 대상에서 빼되,
+    # '튜너가 돌긴 했다'를 대시보드에서 확인할 수 있게 'archived'(비적용)로 저장·표시한다.
+    bt = backtest_proposal(dataset, current_weights, proposed_weights)
+    improves = bt["verdict"] == "IMPROVES"
+    status = "pending" if improves else "archived"
+
     winners = sum(1 for d in dataset if d["outcome"] == "WIN")
     losers = sum(1 for d in dataset if d["outcome"] == "LOSS")
     total_pnl = sum(d["realized_pnl"] for d in dataset)
@@ -163,11 +186,19 @@ def run():
         proposed_weights=proposed_weights,
         rationale=rationale,
         dataset=dataset,
+        status=status,
     )
-    logger.info(
-        f"제안 저장 완료 (id={pid}, 승={winners} 패={losers} 실현손익={total_pnl:,}원). "
-        f"대시보드에서 검토·승인 필요."
-    )
+    if improves:
+        logger.info(
+            f"제안 저장 완료 (id={pid}, status=pending, 승={winners} 패={losers} "
+            f"실현손익={total_pnl:,}원). 대시보드에서 검토·승인 필요."
+        )
+    else:
+        logger.info(
+            f"제안 저장 완료 (id={pid}, status=archived — 비적용). 판별력 개선 없음"
+            f"(verdict={bt['verdict']}, 스프레드Δ={bt['spread_delta']}, 상관Δ={bt['corr_delta']}). "
+            f"승인 대상 아님(과적합 방지) — 대시보드에 '동작 여부'로만 표시."
+        )
 
 
 if __name__ == "__main__":

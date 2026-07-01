@@ -38,8 +38,11 @@ def save_proposal(
     proposed_weights: dict,
     rationale: str,
     dataset: list | dict,
+    status: str = "pending",
 ) -> int:
-    """제안 저장 (주 단위 UPSERT). 같은 주에 재실행하면 최신 제안으로 덮어쓰고 pending 으로 되돌린다.
+    """제안 저장 (주 단위 UPSERT). 같은 주에 재실행하면 최신 제안으로 덮어쓴다.
+    status: 'pending'(검토 대기 — backtest IMPROVES) / 'archived'(비적용 — 튜너는 돌았으나
+    판별력 개선이 없어 승인 대상은 아니지만 '동작 여부' 확인용으로 이력·표시에 남김).
     반환: 제안 id."""
     cw = json.dumps(current_weights, ensure_ascii=False)
     pw = json.dumps(proposed_weights, ensure_ascii=False)
@@ -49,15 +52,15 @@ def save_proposal(
             """INSERT INTO weight_tuning_proposal
                (week_start, week_end, status, sample_count, winners_count, losers_count,
                 total_realized_pnl, current_weights, proposed_weights, rationale, dataset)
-               VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                ON DUPLICATE KEY UPDATE
-                 week_end = VALUES(week_end), status = 'pending',
+                 week_end = VALUES(week_end), status = VALUES(status),
                  sample_count = VALUES(sample_count), winners_count = VALUES(winners_count),
                  losers_count = VALUES(losers_count), total_realized_pnl = VALUES(total_realized_pnl),
                  current_weights = VALUES(current_weights), proposed_weights = VALUES(proposed_weights),
                  rationale = VALUES(rationale), dataset = VALUES(dataset),
                  created_at = CURRENT_TIMESTAMP, applied_at = NULL""",
-            (week_start, week_end, sample_count, winners_count, losers_count,
+            (week_start, week_end, status, sample_count, winners_count, losers_count,
              total_realized_pnl, cw, pw, rationale, ds),
         )
         # 이전 주의 미검토(pending) 제안은 만료 처리 — 이번 주 제안만 검토 대상으로 남긴다.
