@@ -1,14 +1,27 @@
+// 콘텐츠에서 언급된 종목별 판단 (구조화 요약)
+export interface StockCall {
+  name: string;
+  ticker?: string | null;
+  stance?: '호재' | '악재' | '중립' | string;
+  conviction?: '상' | '중' | '하' | string;
+  horizon?: '단기' | '중기' | '장기' | string;
+  reason?: string;
+}
+
 export interface ContentAnalysis {
   id: number;
-  external_id: string;   
-  source_name: string;  
-  title: string;          
+  external_id: string;
+  source_name: string;
+  title: string;
   analysis_content: string;
   sentiment_score?: number;
   platform: 'youtube' | 'telegram' | 'news';
   source_url?: string;
   created_at: string;
   related_tickers?: { ticker: string; name: string }[];
+  tldr?: string;               // 한 줄 대표 요약
+  tags?: string[];             // 테마 해시태그
+  stock_calls?: StockCall[];   // 종목별 방향·확신·시간축
 }
 
 // 아카이브 캘린더용 일자별 1등 종목 (/api/stock-report/top-picks)

@@ -95,6 +95,9 @@ class StockYoutubeAgent:
                 source_url=video_url,
                 related_tickers=tickers,
                 platform='youtube',
+                tldr=result.tldr,
+                tags=result.tags,
+                stocks=result.stocks,
             )
 
             if result.sentiment_score is not None and 30 <= result.sentiment_score <= 80:

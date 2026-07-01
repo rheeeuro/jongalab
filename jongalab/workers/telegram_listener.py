@@ -150,6 +150,9 @@ while True:
                 source_url=msg_link,
                 related_tickers=tickers,
                 platform='telegram',
+                tldr=result.tldr,
+                tags=result.tags,
+                stocks=result.stocks,
             )
 
             if result.sentiment_score is not None and 30 <= result.sentiment_score <= 80:

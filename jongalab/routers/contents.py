@@ -8,6 +8,15 @@ from core.repository import get_contents_paginated, get_contents_by_ticker, get_
 router = APIRouter(prefix="/api", tags=["contents"])
 
 
+class StockCall(BaseModel):
+    name: str
+    ticker: Optional[str] = None
+    stance: Optional[str] = None       # 호재 | 악재 | 중립
+    conviction: Optional[str] = None   # 상 | 중 | 하
+    horizon: Optional[str] = None      # 단기 | 중기 | 장기
+    reason: Optional[str] = None
+
+
 class ContentAnalysis(BaseModel):
     id: int
     external_id: str
@@ -18,6 +27,9 @@ class ContentAnalysis(BaseModel):
     platform: str
     source_url: Optional[str] = None
     created_at: str
+    tldr: Optional[str] = None
+    tags: Optional[List[str]] = None
+    stock_calls: Optional[List[StockCall]] = None
 
 
 @router.get("/contents")

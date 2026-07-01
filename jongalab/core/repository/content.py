@@ -8,6 +8,23 @@ from core.db import get_db
 from core.ai_utils import remove_markdown_code_blocks
 
 
+def _parse_json_columns(row: dict) -> None:
+    """content_analysis 행의 JSON 문자열 컬럼(tags/stock_calls)을 파이썬 객체로 파싱(in-place).
+    누락/파싱 실패 시 tags=[], stock_calls=[] 로 채운다. tldr 은 문자열 그대로 둔다.
+    """
+    for col in ("tags", "stock_calls"):
+        raw = row.get(col)
+        if isinstance(raw, str) and raw:
+            try:
+                row[col] = json.loads(raw)
+            except Exception:
+                row[col] = []
+        elif raw is None:
+            row[col] = []
+    if "tldr" in row and row["tldr"] is None:
+        row["tldr"] = ""
+
+
 def get_contents_paginated(page: int = 1, limit: int = 12) -> dict:
     """페이지네이션된 콘텐츠 목록 조회"""
     with get_db() as (conn, cursor):
@@ -24,7 +41,8 @@ def get_contents_paginated(page: int = 1, limit: int = 12) -> dict:
             f"""
             SELECT id, external_id, source_name, title,
                    analysis_content, sentiment_score,
-                   platform, source_url, created_at, related_tickers
+                   platform, source_url, created_at, related_tickers,
+                   tldr, tags, stock_calls
             FROM content_analysis {where_clause}
             ORDER BY created_at DESC
             LIMIT %s OFFSET %s
@@ -45,6 +63,7 @@ def get_contents_paginated(page: int = 1, limit: int = 12) -> dict:
                     row["related_tickers"] = []
             else:
                 row["related_tickers"] = []
+            _parse_json_columns(row)
 
         total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
 
@@ -77,6 +96,7 @@ def get_contents_by_ticker(ticker: str) -> list[dict]:
         for row in results:
             if isinstance(row["created_at"], datetime):
                 row["created_at"] = row["created_at"].isoformat()
+            _parse_json_columns(row)
         return results
 
 
@@ -99,12 +119,22 @@ def save_content_analysis(
     source_url: str,
     related_tickers: list,
     platform: str,
+    tldr: str = "",
+    tags: list | None = None,
+    stocks: list | None = None,
 ):
     """콘텐츠 분석 결과 저장 (telegram / youtube 공통).
     related_tickers의 종목별 섹터를 동기 조회해 ticker_sectors에 함께 저장.
     조회 실패는 sector=None으로 채워 콘텐츠 저장 자체는 막지 않음.
+
+    구조화 요약 필드도 함께 저장:
+    - tldr: 한 줄 대표 요약
+    - tags: 테마 해시태그 리스트 → tags(JSON)
+    - stocks: [{name,stance,conviction,horizon,reason}] → name을 ticker로 보강해 stock_calls(JSON)
     """
     content = remove_markdown_code_blocks(content)
+    tags = tags or []
+    stocks = stocks or []
 
     ticker_sectors_json: str | None = None
     try:
@@ -115,17 +145,40 @@ def save_content_analysis(
     except Exception as e:
         logging.warning(f"섹터 enrich 실패 (계속 진행): {e}")
 
+    # stocks 의 name 을 related_tickers 로 매칭해 ticker 를 붙인다 (프론트 종목 링크용).
+    name_to_ticker = {
+        (t.get("name") or "").strip(): t.get("ticker")
+        for t in (related_tickers or [])
+    }
+    stock_calls: list[dict] = []
+    for s in stocks:
+        nm = (s.get("name") or "").strip()
+        if not nm:
+            continue
+        stock_calls.append({
+            "name": nm,
+            "ticker": name_to_ticker.get(nm),
+            "stance": s.get("stance") or "중립",
+            "conviction": s.get("conviction") or "",
+            "horizon": s.get("horizon") or "",
+            "reason": (s.get("reason") or "").strip(),
+        })
+    tags_json = json.dumps(tags, ensure_ascii=False) if tags else None
+    stock_calls_json = json.dumps(stock_calls, ensure_ascii=False) if stock_calls else None
+
     with get_db() as (conn, cursor):
         query = """
             INSERT INTO content_analysis
             (external_id, source_name, title, analysis_content, sentiment_score,
-             source_url, related_tickers, platform, ticker_sectors)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             source_url, related_tickers, platform, ticker_sectors,
+             tldr, tags, stock_calls)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         cursor.execute(query, (
             external_id, source_name, title, content, score,
             source_url, json.dumps(related_tickers), platform,
             ticker_sectors_json,
+            tldr or None, tags_json, stock_calls_json,
         ))
         conn.commit()
     logging.info(f"DB 저장 완료: {title} (점수: {score}, 티커: {related_tickers})")

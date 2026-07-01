@@ -28,10 +28,10 @@ jongalab/
 |---|---|
 | `config.py` | `.env` 로딩, DB(jongalab/trading)·AI(Ollama/OpenAI)·키움/KIS 설정 |
 | `db.py` | 컨텍스트 매니저(`get_db`, `get_trading_db`) — 안전한 연결 관리 |
-| `ai_service.py` | **LLM 추상화(`analyze_content`)** — Ollama(콘텐츠 분석)/OpenAI(다이제스트) 분기. 직접 SDK 호출 금지, 항상 여기로 |
+| `ai_service.py` | **LLM 추상화(`analyze_content`)** — Ollama(콘텐츠 분석)/OpenAI(다이제스트) 분기. 직접 SDK 호출 금지, 항상 여기로. LLM 은 구조화 JSON(tldr/tags/summary/stocks/strategy)만 내보내고 `build_analysis_markdown()` 이 `analysis_content`(마크다운)를 재조립 |
 | `ai_utils.py` | LLM 응답 파싱(JSON 추출, 코드펜스/`<think>` 제거) |
 | `trading_engine.py` | **종가베팅 분석 엔진** ⚠️민감/가드. Phase 1 사전 스크리닝(수급·정배열·거래대금) → Phase 2 정밀(수급 그레이드·신고가·대장주·테마·콘텐츠) → 종합점수·top-N |
-| `prompts.py` | 콘텐츠 분석 프롬프트 ⚠️민감/가드 (sentiment_score, related_companies 등) |
+| `prompts.py` | 콘텐츠 분석 프롬프트 ⚠️민감/가드. 구조화 출력(sentiment_score·tldr·tags·summary·stocks[방향/확신/시간축]·strategy·related_companies) |
 | `kiwoom_client.py` | 키움 데이터 서버(`:8001`) HTTP 클라이언트 — 기본/상세/수급/차트/주도주 |
 | `kis_client.py` | 한국투자증권(KIS) Open API — 코스피200 야간선물 시세, WebSocket 키 |
 | `market_data.py` | 통합 시세 조회(국내→키움, 선물→KIS, 지수/원자재/환율→yfinance) |
@@ -74,7 +74,7 @@ jongalab/
 ## 핵심 도메인 흐름
 
 ```
-콘텐츠 수집(youtube/telegram) ──► content_analysis (sentiment, 관련 종목)
+콘텐츠 수집(youtube/telegram) ──► content_analysis (sentiment, 한줄요약 tldr, 테마 tags, 종목별 방향 stock_calls)
 뉴스 속보 채널(고빈도) ──사전매칭(LLM X)──► news_mention (종목·헤드라인)
                                         │
 종가 분석(closing_bet, 평일 13:00~15:00)│

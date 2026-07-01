@@ -36,6 +36,31 @@ function withoutNode<T extends { node?: unknown }>(props: T): Omit<T, "node"> {
   return rest;
 }
 
+// 종목 방향(호재/악재/중립) 색상 — 국장 관례(상승=빨강, 하락=파랑)에 맞춤
+function stanceClasses(stance?: string) {
+  if (stance === "호재") return "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300";
+  if (stance === "악재") return "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300";
+  return "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
+}
+
+// 테마 해시태그 칩 목록
+function TagChips({ tags, max }: { tags?: string[]; max?: number }) {
+  if (!tags || tags.length === 0) return null;
+  const shown = max ? tags.slice(0, max) : tags;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {shown.map((t) => (
+        <span
+          key={t}
+          className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300"
+        >
+          {t}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function CardBody({ item }: { item: ContentAnalysis }) {
   // 점수에 따른 색상 및 아이콘 결정
   const getSentimentColor = (score?: number) => {
@@ -92,11 +117,16 @@ function CardBody({ item }: { item: ContentAnalysis }) {
         <CardTitle className="text-lg leading-tight mb-2 line-clamp-2 text-left">
           {item.title}
         </CardTitle>
-        
-        <CardDescription className="line-clamp-4 text-sm text-slate-600 dark:text-slate-400 text-left mb-2">
-          {/* 마크다운 기호 대충 제거해서 보여주기 */}
-          {item.analysis_content.replace(/[#*-]/g, '')}
+
+        {/* tldr(한 줄 요약) 우선, 없으면 마크다운 기호 제거한 본문 */}
+        <CardDescription className="line-clamp-3 text-sm text-slate-600 dark:text-slate-400 text-left mb-2">
+          {item.tldr && item.tldr.trim().length > 0
+            ? item.tldr
+            : item.analysis_content.replace(/[#*>-]/g, '')}
         </CardDescription>
+
+        {/* 테마 해시태그 (모바일에서 최대 3개) */}
+        <TagChips tags={item.tags} max={3} />
       </CardContent>
 
       {/* 3. 푸터: 관련 티커 + 링크 */}
@@ -189,6 +219,53 @@ export function ContentCard({ item }: Props) {
             </div>
           </DialogDescription>
         </DialogHeader>
+
+        {/* 구조화 하이라이트: 한 줄 요약 + 테마 태그 + 종목별 방향 */}
+        {(item.tldr || (item.tags && item.tags.length > 0) || (item.stock_calls && item.stock_calls.length > 0)) && (
+          <div className="space-y-3">
+            {item.tldr && item.tldr.trim().length > 0 && (
+              <div className="rounded-lg bg-indigo-50 p-3 text-sm font-semibold leading-relaxed text-indigo-900 dark:bg-indigo-900/20 dark:text-indigo-200">
+                {item.tldr}
+              </div>
+            )}
+
+            {item.tags && item.tags.length > 0 && <TagChips tags={item.tags} />}
+
+            {item.stock_calls && item.stock_calls.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {item.stock_calls.map((s, i) => {
+                  const chip = (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-sm font-bold dark:bg-slate-800">
+                      {s.name}
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${stanceClasses(s.stance)}`}>
+                        {s.stance ?? "중립"}
+                      </span>
+                    </span>
+                  );
+                  return (
+                    <div key={`${s.name}-${i}`} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                      {s.ticker ? (
+                        <Link href={`/stocks/${s.ticker}`} className="shrink-0 transition-opacity hover:opacity-80">
+                          {chip}
+                        </Link>
+                      ) : (
+                        <span className="shrink-0">{chip}</span>
+                      )}
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+                        {(s.conviction || s.horizon) && (
+                          <span className="text-[10px] text-slate-400">
+                            {[s.conviction ? `확신 ${s.conviction}` : "", s.horizon].filter(Boolean).join(" · ")}
+                          </span>
+                        )}
+                        {s.reason && <span className="break-words">{s.reason}</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="p-6 bg-slate-50 dark:bg-slate-900 rounded-lg border overflow-x-hidden">
             <div className="flex items-center gap-2 mb-4 text-indigo-600 font-semibold border-b pb-2">

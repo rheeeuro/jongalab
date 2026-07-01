@@ -16,6 +16,54 @@ class AnalysisResult:
     content: str = ""
     sentiment_score: int = 50
     related_companies: list = field(default_factory=list)
+    # 구조화 요약 필드 (B+C 고도화)
+    tldr: str = ""                                   # 한 줄 대표 요약
+    tags: list = field(default_factory=list)         # 테마 해시태그 ["#반도체", ...]
+    summary: list = field(default_factory=list)      # 핵심 요약 불릿 3개
+    stocks: list = field(default_factory=list)       # [{name,stance,conviction,horizon,reason}]
+    strategy: str = ""                               # 대응 전략 한 줄
+
+
+_STANCE_EMOJI = {"호재": "📈", "악재": "📉", "중립": "➖"}
+
+
+def build_analysis_markdown(tldr: str, summary: list, stocks: list, strategy: str) -> str:
+    """구조화 필드를 프론트/알림 호환용 Markdown 리포트로 재조립.
+
+    LLM 은 구조화 JSON 만 내보내고, analysis_content(마크다운)는 여기서 만든다.
+    기존 ContentCard(ReactMarkdown)·텔레그램 알림이 그대로 렌더되도록 섹션 구조를 유지한다.
+    """
+    parts: list[str] = []
+    if tldr:
+        parts.append(f"## 📌 한 줄 요약\n{tldr}")
+
+    bullets = "\n".join(f"- {s}" for s in (summary or []) if s)
+    if bullets:
+        parts.append(f"## 1. 핵심 요약\n{bullets}")
+
+    stock_lines: list[str] = []
+    for s in stocks or []:
+        name = (s.get("name") or "").strip()
+        if not name:
+            continue
+        stance = s.get("stance") or "중립"
+        conviction = s.get("conviction") or ""
+        horizon = s.get("horizon") or ""
+        reason = (s.get("reason") or "").strip()
+        emoji = _STANCE_EMOJI.get(stance, "")
+        meta = "·".join(x for x in [stance, f"확신{conviction}" if conviction else "", horizon] if x)
+        head = f"{emoji} **{name}**".strip()
+        line = f"- {head} ({meta})" if meta else f"- {head}"
+        if reason:
+            line += f": {reason}"
+        stock_lines.append(line)
+    if stock_lines:
+        parts.append("## 2. 주요 언급 종목\n" + "\n".join(stock_lines))
+
+    if strategy:
+        parts.append(f"## 3. 대응 전략\n> {strategy}")
+
+    return "\n\n".join(parts)
 
 
 _client = Client(host=OLLAMA_HOST)
@@ -49,15 +97,33 @@ def analyze_content(prompt: str, model: str | None = None, **chat_options) -> An
             logging.info("⏭️ [스킵] AI가 주식 무관 콘텐츠로 판단 (sentiment_score: -1)")
             return None
 
+        tldr = data.get("tldr", "") or ""
+        tags = data.get("tags", []) or []
+        summary = data.get("summary", []) or []
+        stocks = data.get("stocks", []) or []
+        strategy = data.get("strategy", "") or ""
+        related = data.get("related_companies", []) or []
+        # 하위호환: related_companies 가 비면 stocks 의 name 으로 채운다
+        if not related and stocks:
+            related = [s.get("name") for s in stocks if s.get("name")]
+
+        # analysis_content(마크다운)는 구조화 필드로 재조립. 구 프롬프트 호환으로 content 가 오면 그대로 사용.
+        content = data.get("content") or build_analysis_markdown(tldr, summary, stocks, strategy)
+
         result = AnalysisResult(
             title=data.get("title", ""),
-            content=data["content"],
+            content=content,
             sentiment_score=data["sentiment_score"],
-            related_companies=data.get("related_companies", []),
+            related_companies=related,
+            tldr=tldr,
+            tags=tags,
+            summary=summary,
+            stocks=stocks,
+            strategy=strategy,
         )
         logging.info(
             f"🔍 AI 분석 결과: score={result.sentiment_score}, "
-            f"companies={result.related_companies}"
+            f"companies={result.related_companies}, stocks={len(result.stocks)}"
         )
         return result
 
