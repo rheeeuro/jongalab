@@ -43,6 +43,8 @@ _DEFAULTS = {
     "THEME_PERIOD_DAYS": "10",
     "THEME_STOCK_BONUS": 15,
     "CONTENT_SCORE_MAX": 10,
+    # 뉴스 재료: news_count 가 이 값에서 만점(NEWS_HEAT_CAP) 가점. NEWS_HEAT_CAP 은 비튜닝 상수.
+    "NEWS_HEAT_CAP": 10,
     # 종합점수 구성 가중치 (주간 매매성과 기반 GPT 튜닝 대상) — score_candidate() 가 사용
     "SCORE_SUPPLY_BONUS": 40.0,
     "SCORE_MA_ALIGNED_BONUS": 10,
@@ -52,6 +54,8 @@ _DEFAULTS = {
     "SCORE_LEADER_BONUS": 10,
     "SCORE_EXTRA_SUPPLY_DAY_BONUS": 3,
     "SCORE_PROGRAM_BUY_BONUS": 10,
+    # 뉴스 재료 가점 — 기본 0(표시·튜닝 전용, 종합점수 무영향). 주간 튜너가 성과 따라 상향 가능.
+    "SCORE_NEWS_BONUS": 0.0,
     "EXCLUDE_KEYWORDS": [
         "ETF", "ETN", "KODEX", "TIGER", "KBSTAR",
         "ARIRANG", "SOL", "HANARO", "RISE",
@@ -72,6 +76,7 @@ SCORE_WEIGHT_KEYS = [
     "SCORE_PROGRAM_BUY_BONUS",
     "THEME_STOCK_BONUS",
     "CONTENT_SCORE_MAX",
+    "SCORE_NEWS_BONUS",
 ]
 
 

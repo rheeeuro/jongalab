@@ -43,7 +43,6 @@ for f in "${FILES[@]}"; do
     */jongalab/core/*.py)                         NEED_API=1; NEED_TG=1 ;;   # core 는 api·telegram 공유
     */jongalab/workers/telegram_listener.py)      NEED_TG=1 ;;
     */jongalab/workers/youtube_collector.py)      CRON_HIT[jongalab-collector]=1 ;;
-    */jongalab/workers/daily_digest.py)           CRON_HIT[jongalab-daily-report]=1 ;;
     */jongalab/workers/gap_check.py)              CRON_HIT[jongalab-gap-check]=1; CRON_HIT[jongalab-gap-check-retry]=1 ;;  # 같은 스크립트(--retry)
     */jongalab/workers/weight_tuner.py)           CRON_HIT[jongalab-weight-tuner]=1 ;;
     */jongalab/workers/closing_bet.py)            CRON_HIT[jongalab-closing-bet]=1 ;;

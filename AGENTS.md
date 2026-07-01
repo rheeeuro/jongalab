@@ -21,7 +21,7 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
 - `core/` — 비즈니스 로직. `ai_service.py`(LLM 추상화), `trading_engine.py`(종가베팅 전략),
   `db.py`, `config.py`, `kiwoom_client.py`(키움 데이터 서버 HTTP 클라이언트), `repository/`(DB 접근 계층, 패턴 준수 필수)
 - `routers/` — FastAPI 라우트 핸들러 (`api.py`의 `app`에 등록)
-- `workers/` — PM2 cron 백그라운드 잡 (daily_digest, youtube_collector, telegram_listener,
+- `workers/` — PM2 cron 백그라운드 잡 (youtube_collector, telegram_listener,
   gap_check, closing_bet)
 - `frontend/` — Next.js 16 App Router + Tailwind 4 + recharts. `app/`(페이지), `components/`,
   `lib/api.ts`(fetch 래퍼, API_BASE=:8000), `types/index.ts`
@@ -116,7 +116,7 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
   - `jongalab/api.py`/`jongalab/routers/**`/`jongalab/core/**` → `jongalab-be` 재시작,
     `jongalab/core/**`·`telegram_listener.py` → `jongalab-telegram` 재시작.
   - `kiwoom/api.py`/`kiwoom/core/**` → `kiwoom-api` 재시작.
-  - cron 워커(`youtube_collector`/`daily_digest`/`gap_check`/`closing_bet`/`kiwoom_token_refresh`)는
+  - cron 워커(`youtube_collector`/`gap_check`/`closing_bet`/`kiwoom_token_refresh`)는
     **재시작하지 않는다** — cron 마다 새 프로세스로 spawn 되어 다음 스케줄 실행 때 자동 반영된다.
   - `ecosystem.config.js` 편집 시 **새로 정의된 앱(아직 pm2 에 없는 이름)을 자동 등록**한다
     (`pm2 start ecosystem.config.js --only <name>` 후 `pm2 save`). cron 워커는 등록 시 1회 즉시

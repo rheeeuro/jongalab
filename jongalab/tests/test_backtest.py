@@ -19,6 +19,7 @@ _W_KEYS = [
     "SCORE_PREFERRED_VALUE_BONUS", "SCORE_MIN_VALUE_BONUS",
     "SCORE_LEADER_BONUS", "SCORE_PROGRAM_BUY_BONUS", "THEME_STOCK_BONUS",
     "SCORE_EXTRA_SUPPLY_DAY_BONUS", "CONTENT_SCORE_MAX",
+    "SCORE_NEWS_BONUS", "NEWS_HEAT_CAP",
 ]
 
 
@@ -36,6 +37,7 @@ def _row(c: StockCandidate) -> dict:
         "is_leader": c.is_leader, "prog_net_buy": c.prog_net_buy,
         "is_theme_stock": c.is_theme_stock, "supply_days": c.supply_days,
         "content_score": ClosingBetStrategy._calc_content_score(c),
+        "news_count": c.news_count,
     }
 
 
@@ -45,7 +47,7 @@ _CANDIDATES = [
     StockCandidate(code="B", name="b", sector="s", supply_score=100, ma_aligned=True,
                    near_high=True, trading_value=250_000_000_000, is_leader=True,
                    prog_net_buy=500, is_theme_stock=True, supply_days=12,
-                   content_count=3, content_avg_score=80),
+                   content_count=3, content_avg_score=80, news_count=7),
     StockCandidate(code="C", name="c", sector="s", supply_score=55,
                    trading_value=150_000_000_000, supply_days=7,
                    content_count=1, content_avg_score=55),
@@ -72,6 +74,7 @@ def test_recompute_matches_engine_tuned_weights(c):
     cfg.SCORE_LEADER_BONUS = 20
     cfg.CONTENT_SCORE_MAX = 4          # 콘텐츠 상한 < 10 → 재캡 경로 검증
     cfg.SCORE_PROGRAM_BUY_BONUS = 0
+    cfg.SCORE_NEWS_BONUS = 8           # 뉴스 가중치 상향 → 뉴스 가점 경로 검증
     real = AnalysisEngine(api=None, config=cfg).score_candidate(c)
     mine = recompute_score(_row(c), _weights(cfg))
     assert mine == real

@@ -16,14 +16,14 @@
 
 ```
 kiwoom/
-├── api.py                       # FastAPI — 데이터 조회 엔드포인트 11종 + /, /health
+├── api.py                       # FastAPI — 데이터 조회 엔드포인트 12종 + /, /health
 ├── core/
 │   ├── config.py                # .env 로딩, kiwoom DB 설정 (DB키만 최소 복제)
 │   ├── db.py                    # 컨텍스트 매니저 get_db()
 │   ├── logging_setup.py         # 로그 설정 (httpx 로그 억제)
 │   ├── kiwoom_api/              # 키움 REST 클라이언트 (TR별 Mixin 조립)
 │   │   ├── _base.py             # KiwoomConfig, _BaseClient: 인증·_post·연속조회
-│   │   ├── stock_info.py        # ka10001/ka10100/ka10002/ka10059/ka90004
+│   │   ├── stock_info.py        # ka10001/ka10100/ka10002/ka10059/ka90004/ka10099
 │   │   ├── market.py            # ka10063/ka90008/ka90013 (시세·프로그램)
 │   │   ├── rank.py              # ka10032/ka90009/ka10037/ka10035 (순위)
 │   │   ├── theme.py             # ka90001/ka90002 (테마)
@@ -61,6 +61,7 @@ kiwoom/
 | `/stock/basic-info` | ka10001 | 주식 기본정보(시총·52주 고저 등) |
 | `/stock/detail-info` | ka10100 | 종목정보(업종·시장분류) |
 | `/stock/broker` | ka10002 | 거래원 상위 5 매도/매수 |
+| `/stock/list` | ka10099 | 시장별 상장종목 리스트(코스피/코스닥 code·name) |
 | `/stock/intraday-investor` | ka10063 | 종목별 투자자(개인/기관/외국인) |
 | `/chart/daily` | ka10081 | 일봉 차트 |
 | `/chart/minute-pages` | ka10080 | 분봉 차트(연속조회 다건 수집) |

@@ -8,7 +8,7 @@ description: PM2 cron 백그라운드 워커를 스캐폴드하고 ecosystem.con
 `workers/<name>.py` 에 새 백그라운드 잡을 만든다.
 
 절차:
-1. 기존 워커(`workers/daily_digest.py`, `workers/gap_check.py`)를 읽어 패턴 파악:
+1. 기존 워커(`workers/youtube_collector.py`, `workers/gap_check.py`)를 읽어 패턴 파악:
    - `dotenv` 로드 → `core/*` 임포트 → main 로직 → 로깅.
    - DB 접근은 `core/repository/*`, LLM 은 `core/ai_service` 만 사용.
 2. `workers/<name>.py` 생성 (단발 실행 가능한 `if __name__ == "__main__"` 포함).

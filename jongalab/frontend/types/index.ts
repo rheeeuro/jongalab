@@ -117,6 +117,9 @@ export interface StockReport {
   is_leader: boolean;
   is_theme_stock: boolean;
   content_score: number;
+  news_count: number;               // 당일 뉴스 언급 건수 (재료 신호)
+  news_summary?: string | null;     // 배치 LLM 재료 요약 (후보 소수만)
+  news_headlines?: string[];        // 최근 헤드라인 목록
   score: number;
   reason: string;  // 종합 점수 구성요소로 자동 생성된 매수 이유
   rank_no: number;
@@ -137,6 +140,13 @@ export interface ContentAnalysisItem {
   platform: string;
   source_url?: string;
   created_at?: string;
+}
+
+export interface NewsHeatItem {
+  ticker: string;
+  company_name: string | null;
+  mention_count: number;
+  last_at: string | null;
 }
 
 export interface StockReportDetail {

@@ -17,6 +17,14 @@ from core.repository.content import (
     delete_old_content_analysis,
 )
 
+from core.repository.news import (
+    save_news_mentions,
+    get_today_news_count_by_stock,
+    get_today_news_by_stock,
+    get_news_heat,
+    delete_old_news_mentions,
+)
+
 from core.repository.source import (
     get_active_sources,
     get_youtube_sources,
@@ -78,6 +86,7 @@ from core.repository.ticker import (
     lookup_ticker,
     lookup_name_by_ticker,
     save_ticker,
+    bulk_upsert_active_tickers,
     get_ticker_dictionary,
     update_ticker,
     delete_ticker,

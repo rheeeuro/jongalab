@@ -115,6 +115,7 @@ WEIGHT_TUNING_PROMPT = """당신은 한국 주식 종가베팅 전략의 퀀트 
 - SCORE_PROGRAM_BUY_BONUS: 프로그램 순매수(양매수, prog_net_buy>0) 가점 — 과거 데이터는 프로그램 기능 도입 전이라 N으로 기록될 수 있으니, 표본이 불충분하면 현재값을 유지하세요
 - THEME_STOCK_BONUS: 오늘의 테마주 가점
 - CONTENT_SCORE_MAX: 콘텐츠(유튜브/텔레그램) 분석 가점 상한
+- SCORE_NEWS_BONUS: 뉴스 속보 재료 가점 상한 (종목별 '뉴스언급' 건수가 많을수록 부여). 신규 지표로 기본값 0에서 시작
 
 [지난 주 매매 결과 — 종목별]
 {dataset_table}
@@ -125,8 +126,9 @@ WEIGHT_TUNING_PROMPT = """당신은 한국 주식 종가베팅 전략의 퀀트 
 3. SCORE_SUPPLY_BONUS 는 수급 중심 전략의 핵심이므로 10~80 범위를 벗어나지 않습니다.
 4. 모든 값은 소수 첫째자리까지만 사용합니다.
 5. 표본이 적거나 지표 간 차이가 불분명하면 현재값을 유지합니다.
+6. SCORE_NEWS_BONUS 는 신규 지표라 현재값이 0에 가깝습니다. '뉴스언급'이 WIN 종목에서 뚜렷이 높고 LOSS 종목에서 낮았다면 0에서 소폭(최대 3.0)만 올려 도입하고, 근거가 약하면 0을 유지하세요. (±15% 규칙은 0 근처에서 무의미하므로 이 지표에만 절대 스텝을 허용합니다.)
 
-반드시 아래 JSON 형식으로만 답하세요. weights 에는 위 10개 키를 모두 포함하고, rationale 에는
+반드시 아래 JSON 형식으로만 답하세요. weights 에는 위 11개 키를 모두 포함하고, rationale 에는
 어떤 지표가 승패를 갈랐고 왜 그렇게 조정했는지 2~4문장으로 한국어로 설명하세요.
 {{
     "weights": {{
@@ -139,7 +141,8 @@ WEIGHT_TUNING_PROMPT = """당신은 한국 주식 종가베팅 전략의 퀀트 
         "SCORE_EXTRA_SUPPLY_DAY_BONUS": 3,
         "SCORE_PROGRAM_BUY_BONUS": 10,
         "THEME_STOCK_BONUS": 15,
-        "CONTENT_SCORE_MAX": 10
+        "CONTENT_SCORE_MAX": 10,
+        "SCORE_NEWS_BONUS": 0
     }},
     "rationale": "..."
 }}

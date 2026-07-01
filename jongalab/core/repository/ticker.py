@@ -49,6 +49,33 @@ def save_ticker(company_name: str, ticker_symbol: str, status: str = "PENDING") 
         conn.commit()
 
 
+def bulk_upsert_active_tickers(rows: list[dict]) -> int:
+    """상장종목 리스트를 ticker_dictionary 에 ACTIVE 로 일괄 업서트 (뉴스 시딩 워커용).
+
+    rows 항목: {company_name, ticker_symbol}
+    - 신규는 ACTIVE 로 삽입.
+    - 기존 행은 티커를 최신으로 갱신하되, 관리자가 INACTIVE 로 꺼둔 종목은 건드리지 않는다.
+      (PENDING → ACTIVE 로 승격, sector 캐시는 유지)
+    반환: 영향받은 행 수(삽입/갱신 합).
+    """
+    if not rows:
+        return 0
+    with get_db() as (conn, cursor):
+        cursor.executemany(
+            """
+            INSERT INTO ticker_dictionary (company_name, ticker_symbol, status)
+            VALUES (%(company_name)s, %(ticker_symbol)s, 'ACTIVE')
+            ON DUPLICATE KEY UPDATE
+                ticker_symbol = VALUES(ticker_symbol),
+                status = IF(status = 'INACTIVE', 'INACTIVE', 'ACTIVE')
+            """,
+            rows,
+        )
+        affected = cursor.rowcount
+        conn.commit()
+    return affected
+
+
 def get_ticker_dictionary(status: str | None = None) -> list[dict]:
     """ticker_dictionary 전체 조회. status 필터 가능"""
     with get_db() as (conn, cursor):

@@ -20,10 +20,16 @@ from core.trading_engine import (
 from core.repository.stock_report import save_stock_reports
 from core.repository.sector_report import save_sector_reports
 from core.repository.content import get_today_content_by_stock
+from core.repository.news import get_today_news_count_by_stock, get_today_news_by_stock
 from core.repository.trade_signal import push_trade_signals
+from core.news_summary import summarize_news
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ClosingBet")
+
+# 뉴스 배치 요약: 언급이 이만큼 이상인 후보만, 한 실행당 최대 이 개수만 LLM 요약(비용 절감)
+NEWS_SUMMARY_MIN_COUNT = 3
+MAX_NEWS_SUMMARIES = 5
 
 
 class ClosingBetStrategy:
@@ -201,6 +207,16 @@ class ClosingBetStrategy:
             except Exception as e:
                 logger.warning(f"콘텐츠 분석 조회 실패 [{c.name}]: {e}")
 
+        # 뉴스 재료 반영 (오늘 관련 뉴스 언급 건수) — 사전매칭 집계, LLM 없음.
+        # 종합점수 뉴스 가중치(SCORE_NEWS_BONUS)는 기본 0이라 지금은 점수 무영향(표시·튜닝 전용).
+        for c in filtered:
+            try:
+                c.news_count = get_today_news_count_by_stock(c.code.split("_")[0])
+                if c.news_count:
+                    logger.info(f"[{c.name}] 뉴스 언급 {c.news_count}건")
+            except Exception as e:
+                logger.warning(f"뉴스 언급 조회 실패 [{c.name}]: {e}")
+
         for c in filtered:
             self.engine.score_candidate(c)
 
@@ -229,9 +245,17 @@ class ClosingBetStrategy:
     def _save_phase2_reports(self, candidates: list[StockCandidate]):
         """Phase 2 분석 결과를 daily_stock_report 테이블에 저장"""
         reports = []
+        summarized = 0
         for i, c in enumerate(candidates, 1):
+            code = c.code.split("_")[0]
+            news_count = getattr(c, "news_count", 0)
+            news_headlines, news_summary = self._build_news_fields(
+                c, code, news_count, summarized
+            )
+            if news_summary:
+                summarized += 1
             reports.append({
-                "stock_code": c.code.split("_")[0],
+                "stock_code": code,
                 "stock_name": c.name,
                 "sector": c.sector,
                 "current_price": c.current_price,
@@ -251,6 +275,9 @@ class ClosingBetStrategy:
                 "is_leader": c.is_leader,
                 "is_theme_stock": c.is_theme_stock,
                 "content_score": self._calc_content_score(c),
+                "news_count": news_count,
+                "news_summary": news_summary,
+                "news_headlines": news_headlines,
                 "score": c.score,
                 "rank_no": i,
             })
@@ -350,6 +377,29 @@ class ClosingBetStrategy:
                 logger.info(f"  {name}: {len(codes)}종목")
         else:
             logger.warning("테마 API 응답 없음 — 관심섹터 보강 없이 진행")
+
+    @staticmethod
+    def _build_news_fields(c: StockCandidate, code: str, news_count: int, summarized: int):
+        """뉴스 헤드라인 목록 + (조건 충족 시) 배치 LLM 재료 요약을 만든다.
+        반환: (headlines: list[str] | None, summary: str | None)."""
+        if news_count <= 0:
+            return None, None
+        headlines = None
+        summary = None
+        try:
+            items = get_today_news_by_stock(code)
+            headlines = [it["headline"] for it in items if it.get("headline")] or None
+        except Exception as e:
+            logger.warning(f"뉴스 헤드라인 조회 실패 [{c.name}]: {e}")
+        if (news_count >= NEWS_SUMMARY_MIN_COUNT and headlines
+                and summarized < MAX_NEWS_SUMMARIES):
+            try:
+                summary = summarize_news(c.name, code, headlines)
+                if summary:
+                    logger.info(f"[{c.name}] 뉴스 재료 요약 생성")
+            except Exception as e:
+                logger.warning(f"뉴스 요약 실패 [{c.name}]: {e}")
+        return headlines, summary
 
     @staticmethod
     def _calc_content_score(c: StockCandidate) -> float:

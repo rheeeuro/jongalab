@@ -58,6 +58,9 @@ def recompute_score(row: dict, w: dict) -> float:
     raw += min(extra_days, 5) * g("SCORE_EXTRA_SUPPLY_DAY_BONUS")
     # 콘텐츠 — 저장된 원천값(≤10)에 제안 상한만 다시 적용
     raw += min(float(row.get("content_score") or 0), g("CONTENT_SCORE_MAX"))
+    # 뉴스 재료 — news_count 가 NEWS_HEAT_CAP 에서 SCORE_NEWS_BONUS 만점 (기본 0 → 무영향)
+    cap = g("NEWS_HEAT_CAP") or 1
+    raw += min(int(row.get("news_count") or 0), cap) / cap * g("SCORE_NEWS_BONUS")
 
     max_possible = (
         g("SCORE_SUPPLY_BONUS")
@@ -69,6 +72,7 @@ def recompute_score(row: dict, w: dict) -> float:
         + g("THEME_STOCK_BONUS")
         + 5 * g("SCORE_EXTRA_SUPPLY_DAY_BONUS")
         + g("CONTENT_SCORE_MAX")
+        + g("SCORE_NEWS_BONUS")
     )
     return round(raw / max_possible * 100, 1) if max_possible else 0.0
 

@@ -48,6 +48,16 @@ class StockInfoMixin:
             "unit_tp": "1000",  # 1000:천주, 1:단주
         })
 
+    def get_stock_list(self, mrkt_tp: str = "0") -> dict:
+        """
+        ka10099 — 종목정보 리스트 (시장별 상장종목 전체)
+        mrkt_tp: "0"=코스피, "10"=코스닥
+        응답: list (LIST) — code, name, marketName, upName(업종), auditInfo 등
+        """
+        return self._post(self.cfg.URL_STKINFO, "ka10099", {
+            "mrkt_tp": mrkt_tp,
+        })
+
     def get_program_trade_by_stock(self, mrkt_tp: str = "P00101") -> dict:
         """
         ka90004 — 종목별프로그램매매현황요청

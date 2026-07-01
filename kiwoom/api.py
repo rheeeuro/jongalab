@@ -52,6 +52,10 @@ class MarketTp(BaseModel):
     mrkt_tp: str = "001"
 
 
+class StockList(BaseModel):
+    mrkt_tp: str = "0"  # 0=코스피, 10=코스닥
+
+
 class ProgramTrade(BaseModel):
     mrkt_tp: str = "P00101"
 
@@ -102,6 +106,11 @@ def stock_detail_info(b: StkCd):
 @app.post("/stock/broker")
 def stock_broker(b: StkCd):
     return api().get_stock_broker(b.stk_cd)
+
+
+@app.post("/stock/list")
+def stock_list(b: StockList):
+    return api().get_stock_list(mrkt_tp=b.mrkt_tp)
 
 
 @app.post("/stock/intraday-investor")

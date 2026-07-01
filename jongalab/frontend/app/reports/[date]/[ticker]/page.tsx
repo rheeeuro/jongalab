@@ -589,6 +589,43 @@ export default async function StockReportPage({
         </Card>
         )}
 
+        {/* 5-1. 뉴스 재료 (속보 채널 사전매칭 집계 + 배치 요약) */}
+        {(r.news_count ?? 0) > 0 && (
+        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Newspaper className="w-5 h-5 text-emerald-500" />
+              뉴스 재료
+              <span className="ml-auto text-sm font-normal text-slate-500">
+                오늘 <span className="font-bold text-emerald-600 dark:text-emerald-400">{r.news_count}</span>건 언급
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {r.news_summary && (
+                <p className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-line">
+                  {r.news_summary}
+                </p>
+              )}
+              {r.news_headlines && r.news_headlines.length > 0 && (
+                <ul className="space-y-2">
+                  {r.news_headlines.map((h, i) => (
+                    <li
+                      key={i}
+                      className="flex gap-2 text-sm text-slate-600 dark:text-slate-400"
+                    >
+                      <span className="text-emerald-500 shrink-0">•</span>
+                      <span className="min-w-0">{h}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+        )}
+
         {/* 6. 점수 상세 (점수 브레이크다운) */}
         <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
           <CardHeader className="pb-3">

@@ -31,6 +31,11 @@ logger = logging.getLogger("WeightTuner")
 MIN_SAMPLES = 5
 # 주간 가중치 변화폭 상한 (현재값 대비 ±15%) — 한 주 표본으로 급격히 흔들리지 않게
 MAX_REL_DELTA = 0.15
+# 0 근처 가중치 부트스트랩: 곱셈식(±15%) 클램프는 0에 영구 고정되므로, |현재값|<=NEAR_ZERO 이면
+# 절대 스텝(주당 ±MIN_ABS_STEP)으로 움직이게 한다. 신규 가중치(SCORE_NEWS_BONUS=0)가 성과에
+# 따라 0에서 자라날 수 있게 하는 장치. 기존 가중치(모두 >NEAR_ZERO)의 안전폭은 그대로 유지된다.
+NEAR_ZERO = 1.0
+MIN_ABS_STEP = 3.0
 # 가중치별 절대 안전 범위 (백스톱)
 ABS_BOUNDS = {
     "SCORE_SUPPLY_BONUS": (10.0, 80.0),
@@ -73,6 +78,7 @@ def _build_dataset(results: list[dict]) -> list[dict]:
             "prog_net_buy": int(rpt.get("prog_net_buy") or 0),
             "prog_buy": int(rpt.get("prog_net_buy") or 0) > 0,
             "content_score": round(float(rpt.get("content_score") or 0), 1),
+            "news_count": int(rpt.get("news_count") or 0),
             "change_pct": round(float(rpt.get("change_pct") or 0), 2),
         })
     return rows
@@ -87,7 +93,8 @@ def _build_prompt(current_weights: dict, dataset: list[dict]) -> str:
             f"정배열={'Y' if d['ma_aligned'] else 'N'} 신고가={'Y' if d['near_high'] else 'N'} "
             f"거래대금={d['trading_value']:,} 대장주={'Y' if d['is_leader'] else 'N'} "
             f"테마={'Y' if d['is_theme_stock'] else 'N'} 연속수급일={d['supply_days']} "
-            f"프로그램양매수={'Y' if d['prog_buy'] else 'N'} 콘텐츠={d['content_score']}"
+            f"프로그램양매수={'Y' if d['prog_buy'] else 'N'} 콘텐츠={d['content_score']} "
+            f"뉴스언급={d['news_count']}"
         )
     return WEIGHT_TUNING_PROMPT.format(
         current_weights=json.dumps(current_weights, ensure_ascii=False, indent=2),
@@ -96,11 +103,11 @@ def _build_prompt(current_weights: dict, dataset: list[dict]) -> str:
 
 
 def _clamp(key: str, current: float, proposed: float) -> float:
-    """현재값 대비 ±MAX_REL_DELTA + 절대 범위로 제안값을 클램프."""
-    lo_rel = current * (1 - MAX_REL_DELTA)
-    hi_rel = current * (1 + MAX_REL_DELTA)
-    lo_rel, hi_rel = min(lo_rel, hi_rel), max(lo_rel, hi_rel)
-    val = max(lo_rel, min(hi_rel, proposed))
+    """현재값 대비 ±MAX_REL_DELTA + 절대 범위로 제안값을 클램프.
+    단, |현재값| <= NEAR_ZERO 이면 곱셈식이 0에 고정되므로 절대 스텝(±MIN_ABS_STEP)을 쓴다."""
+    delta = MIN_ABS_STEP if abs(current) <= NEAR_ZERO else abs(current) * MAX_REL_DELTA
+    lo, hi = current - delta, current + delta
+    val = max(lo, min(hi, proposed))
     abs_lo, abs_hi = ABS_BOUNDS.get(key, DEFAULT_BONUS_BOUNDS)
     val = max(abs_lo, min(abs_hi, val))
     # 모든 가중치는 소수 첫째자리까지

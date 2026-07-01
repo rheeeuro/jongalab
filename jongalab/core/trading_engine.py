@@ -77,6 +77,9 @@ class StrategyConfig:
     # ---- 콘텐츠 분석 가산점 ----
     CONTENT_SCORE_MAX = 10            # 콘텐츠 분석 최대 가산점
 
+    # ---- 뉴스 재료 ----
+    NEWS_HEAT_CAP = 10                # news_count 가 이 값에서 SCORE_NEWS_BONUS 만점 (비튜닝 상수)
+
     # ---- 종합점수 구성 가중치 (주간 매매성과 기반 GPT 튜닝 대상) ----
     # score_candidate() 가 각 지표에 부여하는 가점(최대값). 최종 종합점수는 이 가점들의 최대 합으로
     # 정규화해 항상 0~100 으로 환산된다. 소수 첫째자리까지 조정 가능.
@@ -88,6 +91,7 @@ class StrategyConfig:
     SCORE_LEADER_BONUS = 10           # 대장주 가점
     SCORE_EXTRA_SUPPLY_DAY_BONUS = 3  # 5일 초과 장기 연속 수급 1일당 가점
     SCORE_PROGRAM_BUY_BONUS = 10      # 프로그램 양매수(prog_net_buy>0) 가점 (구 필수 조건 → 가산점화)
+    SCORE_NEWS_BONUS = 0.0            # 뉴스 재료 가점 — 기본 0(표시·튜닝 전용). 주간 튜너가 성과 따라 상향 가능
 
     def load_from_db(self):
         """DB에서 전략 설정값을 로드하여 인스턴스에 덮어씀"""
@@ -144,6 +148,7 @@ class StockCandidate:
     hourly_candles: list = field(default_factory=list)  # 1시간봉 캔들 데이터
     content_count: int = 0        # 오늘 관련 콘텐츠 분석 건수
     content_avg_score: float = 0  # 콘텐츠 평균 sentiment_score
+    news_count: int = 0           # 오늘 관련 뉴스 언급 건수 (재료 신호)
 
 
 @dataclass
@@ -651,6 +656,12 @@ class AnalysisEngine:
             )
             raw += min(mention_bonus + sentiment_bonus, self.cfg.CONTENT_SCORE_MAX)
 
+        # 뉴스 재료 언급 — news_count 가 NEWS_HEAT_CAP 에서 SCORE_NEWS_BONUS 만점.
+        # 기본 가중치 0이라 현재는 종합점수에 무영향(표시·주간 튜닝 전용).
+        if c.news_count > 0:
+            cap = self.cfg.NEWS_HEAT_CAP or 1
+            raw += min(c.news_count, cap) / cap * self.cfg.SCORE_NEWS_BONUS
+
         # 100점 만점 환산 — 각 가점의 최대 합으로 정규화(가중치 튜닝과 무관하게 항상 0~100).
         # 단조 변환이라 후보 간 순위는 보존된다.
         max_possible = (
@@ -663,6 +674,7 @@ class AnalysisEngine:
             + self.cfg.THEME_STOCK_BONUS
             + 5 * self.cfg.SCORE_EXTRA_SUPPLY_DAY_BONUS
             + self.cfg.CONTENT_SCORE_MAX
+            + self.cfg.SCORE_NEWS_BONUS
         )
         c.score = round(raw / max_possible * 100, 1) if max_possible else 0.0
         return c.score

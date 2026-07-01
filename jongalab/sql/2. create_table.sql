@@ -22,6 +22,23 @@ CREATE TABLE IF NOT EXISTS content_analysis (
     INDEX idx_external_id (external_id)
 );
 
+-- 뉴스 속보 언급 (고빈도 뉴스 채널 전용, LLM 분석 없이 종목 사전매칭만).
+-- content_analysis 와 분리 — 뉴스는 '재료 감지 신호'이지 '분석 콘텐츠'가 아니다.
+-- 한 헤드라인이 여러 종목을 언급하면 종목당 1행. 보존 정책: cleanup_content 워커가 N일 이전 삭제.
+CREATE TABLE IF NOT EXISTS news_mention (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    ticker VARCHAR(20) NOT NULL,              -- 매칭된 종목코드 (6자리)
+    company_name VARCHAR(100),                -- 매칭된 기업명
+    headline VARCHAR(500),                    -- 뉴스 헤드라인(+링크 프리뷰)
+    source_url VARCHAR(500),                  -- 원문/메시지 URL
+    channel_name VARCHAR(100),                -- 뉴스 채널명
+    published_at TIMESTAMP NULL DEFAULT NULL, -- 메시지 발행 시각(참고용)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 수집 시각(오늘 카운트 기준)
+    UNIQUE KEY uq_url_ticker (source_url, ticker),   -- 동일 기사·종목 중복 방지
+    INDEX idx_ticker_created (ticker, created_at),
+    INDEX idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS telegram_channels (
     id INT AUTO_INCREMENT PRIMARY KEY,
     channel_identifier VARCHAR(100) NOT NULL COMMENT '채널 username(문자) 또는 ID(숫자)',
@@ -82,6 +99,11 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     is_leader TINYINT(1) DEFAULT 0,
     is_theme_stock TINYINT(1) DEFAULT 0,
     content_score FLOAT DEFAULT 0.0,
+    -- 뉴스 재료 (news_mention 집계). news_count 는 종합점수 뉴스항(SCORE_NEWS_BONUS)의 입력이자
+    -- 주간 가중치 튜너의 학습 피처. 기본 가중치 0이라 현재는 점수에 무영향(표시·튜닝 전용).
+    news_count INT DEFAULT 0,               -- 당일 뉴스 언급 건수
+    news_summary TEXT DEFAULT NULL,         -- 후보 소수만 배치 LLM 재료 요약
+    news_headlines JSON DEFAULT NULL,       -- 최근 헤드라인 목록(표시용)
     score FLOAT DEFAULT 0.0,
     rank_no INT DEFAULT 0,
 

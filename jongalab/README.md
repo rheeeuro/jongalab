@@ -37,6 +37,8 @@ jongalab/
 | `market_data.py` | 통합 시세 조회(국내→키움, 선물→KIS, 지수/원자재/환율→yfinance) |
 | `sector_resolver.py` | 티커→섹터 해석(ticker_dictionary 캐시, TTL 1년) |
 | `ticker.py` | 기업명↔티커 변환, 신규 티커 등록, 콘텐츠 본문 기업명 추출 |
+| `news_matcher.py` | 뉴스 헤드라인 → 종목 사전매칭(LLM 없음). ticker_dictionary(ACTIVE) 인메모리 매처, 경계 룩어라운드로 오탐 억제 |
+| `news_summary.py` | 후보 소수 뉴스 재료 배치 요약(Ollama, `analyze_content` 경유). 프롬프트는 가드 파일과 분리 |
 | `filters.py` | 분석 결과 저장 여부 판단(점수 범위·티커 포함·환각 검증) |
 | `backtest.py` | 가중치 제안 백테스트 — `score_candidate` 공식을 미러링(`recompute_score`)해 저장된 표본에 제안 가중치를 재적용, 승자/패자 판별력 비교. ⚠️엔진 공식 변경 시 미러도 갱신(테스트가 드리프트 감지) |
 | `notifications.py` | 텔레그램 알림(재시도 포함) |
@@ -44,13 +46,13 @@ jongalab/
 | `logging_setup.py` | 로그 설정 |
 
 #### `core/repository/` — DB 접근 계층 (raw SQL 은 반드시 여기서만)
-`content`(콘텐츠 분석) · `source`(채널) · `ticker`(기업명↔티커) · `stock_report`(종목일간리포트) ·
+`content`(콘텐츠 분석) · `news`(뉴스 속보 언급 `news_mention`) · `source`(채널) · `ticker`(기업명↔티커, 상장종목 벌크 시딩) · `stock_report`(종목일간리포트) ·
 `sector_report`(주도 섹터) · `trade_signal`(→ trading DB 매수신호 핸드오프, 멱등 upsert) ·
 `trade_result`(trading.audit_log 실현손익 읽기) · `strategy_config`(점수 가중치·임계값) ·
 `weight_tuning`(주간 GPT 제안) · `kis_token` · `kis_night_future` · `telegram_user`.
 
 ### `routers/` — 엔드포인트
-`admin`(인증) · `contents`(콘텐츠) · `market`(주가/지수) · `stock_report`(리포트·갭) ·
+`admin`(인증) · `contents`(콘텐츠) · `news`(뉴스 재료 히트 `/api/news/heat`) · `market`(주가/지수) · `stock_report`(리포트·갭) ·
 `source`·`strategy_config`·`weight_tuning`·`telegram_user`(admin 전용) · `ticker`(조회 공개/수정 admin).
 새 라우터는 `routers/` 에 만들고 `api.py` 의 `include_router` 로 등록한다.
 
@@ -58,8 +60,9 @@ jongalab/
 | 워커 | 스케줄 | 역할 |
 |---|---|---|
 | `youtube_collector` | 15분 | 채널 RSS → 자막 → Ollama 분석 → `content_analysis` |
-| `telegram_listener` | 상시 | Telethon 채널 감시 → 메시지 분석 → `content_analysis` |
-| `cleanup_content` | 매일 04:00 | `content_analysis` 3개월 이전 행 삭제(테이블 비대화 방지) |
+| `telegram_listener` | 상시 | Telethon 감시. **일반 채널**(platform=telegram)→ LLM 분석 → `content_analysis`. **뉴스 채널**(platform=news, 고빈도)→ LLM 없이 사전매칭 → `news_mention` |
+| `news_ticker_seed` | 일 07:30 (등록 시 1회) | 키움 ka10099(코스피/코스닥) → `ticker_dictionary` ACTIVE 업서트. 뉴스 사전매칭 커버리지용 |
+| `cleanup_content` | 매일 04:00 | `content_analysis` 3개월 + `news_mention` 14일 이전 행 삭제(테이블 비대화 방지) |
 | `closing_bet` | 평일 08:30~20시(30분) | Phase 1/2 스크리닝 → `daily_stock_report` + `trade_signal` 적재 |
 | `gap_check` (`--retry`) | 평일 08:05 / 09:05 | 전날 top-10 현재가 → 갭 등락률 → ADMIN 알림 |
 | `weight_tuner` | 토 08:00 | 지난주 실현손익 → GPT 가중치 제안(`weight_tuning_proposal`) |
@@ -72,16 +75,19 @@ jongalab/
 
 ```
 콘텐츠 수집(youtube/telegram) ──► content_analysis (sentiment, 관련 종목)
+뉴스 속보 채널(고빈도) ──사전매칭(LLM X)──► news_mention (종목·헤드라인)
                                         │
 종가 분석(closing_bet, 평일 13:00~15:00)│
   Phase 1 거래대금·시총·정배열 필터 ─────┘
-  Phase 2 수급(기관/외인/개인/프로그램)+신고가+대장주+테마+콘텐츠 점수
-  종합점수 = 수급35 + 정배열15 + 신고가15 + 대장주10 + 테마10 + 콘텐츠15
-        │
-        ├─► daily_stock_report (score, rank_no)  ─► 대시보드/갭체크
+  Phase 2 수급(기관/외인/개인/프로그램)+신고가+대장주+테마+콘텐츠+뉴스 점수
+  종합점수 = 수급 + 정배열 + 신고가 + 대장주 + 테마 + 콘텐츠 + 뉴스(가중치 튜닝 대상)
+        │  · 뉴스 재료: news_count 집계 + 후보 소수 배치 LLM 요약 → daily_stock_report 표시
+        │    (SCORE_NEWS_BONUS 기본 0 → 현재 점수 무영향, 주간 튜너가 성과 따라 상향 가능)
+        ├─► daily_stock_report (score, rank_no, news_count/summary)  ─► 대시보드/갭체크
         └─► trade_signal (status=pending)        ─► trading 도메인이 집행
 다음날 아침 gap_check ─► daily_stock_report.gap_* 갱신
-주말 weight_tuner ─► 실현손익 피드백 ─► 가중치 제안
+주말 weight_tuner ─► 실현손익 + 지표(콘텐츠·뉴스 포함) 피드백 ─► 가중치 제안
+  └► 0 근처 가중치는 절대스텝 부트스트랩 클램프로 성장 가능(±15% 곱셈식이 0을 0에 고정하는 문제 해소)
   └► 관리자 승인 화면에서 백테스트 검증(제안 가중치 재적용, core/backtest.py) 확인 → 승인 시 strategy_config 반영
 ```
 

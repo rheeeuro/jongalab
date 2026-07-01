@@ -21,8 +21,9 @@ def save_stock_reports(candidates: list[dict]):
              inst_net_buy, frgn_net_buy,
              indv_net_buy, prog_net_buy, supply_days, supply_history,
              ma_aligned, near_high, hourly_candles,
-             is_leader, is_theme_stock, content_score, score, rank_no)
-            VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             is_leader, is_theme_stock, content_score,
+             news_count, news_summary, news_headlines, score, rank_no)
+            VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         for c in candidates:
             supply_history_json = json.dumps(
@@ -31,6 +32,9 @@ def save_stock_reports(candidates: list[dict]):
             hourly_candles_json = json.dumps(
                 c.get("hourly_candles", []), ensure_ascii=False
             ) if c.get("hourly_candles") else None
+            news_headlines_json = json.dumps(
+                c.get("news_headlines") or [], ensure_ascii=False
+            ) if c.get("news_headlines") else None
             cursor.execute(query, (
                 c["stock_code"], c["stock_name"], c["sector"],
                 c["current_price"], c["change_pct"],
@@ -42,6 +46,7 @@ def save_stock_reports(candidates: list[dict]):
                 c["ma_aligned"], c["near_high"], hourly_candles_json,
                 c["is_leader"], c.get("is_theme_stock", False),
                 c.get("content_score", 0),
+                c.get("news_count", 0), c.get("news_summary"), news_headlines_json,
                 c["score"], c["rank_no"],
             ))
         conn.commit()
@@ -289,6 +294,8 @@ def build_score_reason(row: dict) -> str:
         parts.append("프로그램 순매수")
     if (row.get("content_score") or 0) > 0:
         parts.append("콘텐츠 다수 언급")
+    if (row.get("news_count") or 0) > 0:
+        parts.append(f"뉴스 재료 {int(row['news_count'])}건")
 
     return " · ".join(parts)
 
@@ -318,6 +325,11 @@ def _serialize_dates(row: dict):
         row["hourly_candles"] = json.loads(row["hourly_candles"])
     if row.get("hourly_candles") is None:
         row["hourly_candles"] = []
+    # news_headlines JSON 파싱
+    if "news_headlines" in row and isinstance(row["news_headlines"], str):
+        row["news_headlines"] = json.loads(row["news_headlines"])
+    if row.get("news_headlines") is None:
+        row["news_headlines"] = []
     # 종합 점수 기반 매수 이유 파생
     if "score" in row:
         row["reason"] = build_score_reason(row)
