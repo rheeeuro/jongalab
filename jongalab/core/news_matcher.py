@@ -28,6 +28,10 @@ REFRESH_SECONDS = 3600
 _BOUNDARY_L = r"(?<![가-힣A-Za-z0-9])"
 _BOUNDARY_R = r"(?![가-힣A-Za-z0-9])"
 
+# 대괄호 안은 뉴스 발행처/말머리([한국경제]·[속보]·[단독] 등)라 종목이 아니다.
+# 매칭 전 제거해 발행처명이 상장사명과 겹칠 때의 오탐([한화]→한화 등)을 막는다. 【】도 함께 처리.
+_BRACKET_RE = re.compile(r"\[[^\]]*\]|【[^】]*】")
+
 _pattern: re.Pattern | None = None
 _name_to_ticker: dict[str, str] = {}
 _loaded_at: float = 0.0
@@ -83,6 +87,9 @@ def match_companies(text: str) -> list[dict]:
     _ensure_loaded()
     if _pattern is None:
         return []
+
+    # 발행처/말머리([한국경제]·[속보] 등)는 종목이 아니므로 매칭 전 제거
+    text = _BRACKET_RE.sub(" ", text)
 
     seen: set[str] = set()
     out: list[dict] = []

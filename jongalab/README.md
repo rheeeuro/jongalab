@@ -37,7 +37,7 @@ jongalab/
 | `market_data.py` | 통합 시세 조회(국내→키움, 선물→KIS, 지수/원자재/환율→yfinance) |
 | `sector_resolver.py` | 티커→섹터 해석(ticker_dictionary 캐시, TTL 1년) |
 | `ticker.py` | 기업명↔티커 변환, 신규 티커 등록, 콘텐츠 본문 기업명 추출 |
-| `news_matcher.py` | 뉴스 헤드라인 → 종목 사전매칭(LLM 없음). ticker_dictionary(ACTIVE) 인메모리 매처, 경계 룩어라운드로 오탐 억제 |
+| `news_matcher.py` | 뉴스 헤드라인 → 종목 사전매칭(LLM 없음). ticker_dictionary(ACTIVE) 인메모리 매처, 경계 룩어라운드 + 발행처 대괄호([]·【】) 제거로 오탐 억제 |
 | `news_summary.py` | 후보 소수 뉴스 재료 배치 요약(Ollama, `analyze_content` 경유). 프롬프트는 가드 파일과 분리 |
 | `filters.py` | 분석 결과 저장 여부 판단(점수 범위·티커 포함·환각 검증) |
 | `backtest.py` | 가중치 제안 백테스트 — `score_candidate` 공식을 미러링(`recompute_score`)해 저장된 표본에 제안 가중치를 재적용, 승자/패자 판별력 비교. ⚠️엔진 공식 변경 시 미러도 갱신(테스트가 드리프트 감지) |
