@@ -40,6 +40,11 @@ OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'exaone3.5:7.8b')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5.4-nano')
 
+# 스코어/선정 로직 유효 시작일(YYYY-MM-DD, inclusive) — 이 날짜 이전(2026-06-26 이하)은 구 로직이라
+# 가중치 튜닝 백테스트 표본에서 제외한다. weight_tuner 가 분석 주 시작을 이 날짜로 클램프.
+# (trading 쪽 레짐 게이트의 REGIME_MIN_DATE 와 같은 로직 변경을 가리킴 — 도메인 분리라 값만 맞춘다.)
+SCORE_LOGIC_MIN_DATE = os.getenv('SCORE_LOGIC_MIN_DATE', '2026-06-29')
+
 # 키움 데이터 서버 (별도 FastAPI, localhost) — core.kiwoom_client 가 호출
 KIWOOM_BASE_URL = os.getenv('KIWOOM_BASE_URL', 'http://127.0.0.1:8001')
 

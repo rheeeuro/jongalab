@@ -66,7 +66,7 @@ jongalab/
 | `closing_bet` | 평일 08:30~20시(30분) | Phase 1/2 스크리닝 → `daily_stock_report`(Phase 2 통과 **유니버스 전체** 저장, `selected=1`=상위 top-N) + `trade_signal`(selected만 핸드오프) 적재 |
 | `gap_check` (`--retry`) | 평일 08:05 / 09:05 | 전날 top-10(selected) 현재가 → 갭 등락률 → ADMIN 알림 |
 | `outcome_backfill` | 평일 09:30 | `daily_stock_report` 유니버스 전체에 `next_open_ret`(리포트일 종가→다음 거래일 시가 등락률) 균일 백필 — 엣지 연구용 결과 라벨. 수정주가 차트로 분할 상쇄·±35% 초과 아티팩트 스킵. 미완결(당일)분은 다음날 재시도 |
-| `weight_tuner` | 토 08:00 | 지난주 실현손익 → GPT 가중치 제안 → backtest 검증: IMPROVES=pending(승인 대상) / 그 외=archived(비적용·표시용) + [건강지표] 로깅 |
+| `weight_tuner` | 토 08:00 | 지난주 실현손익(단 `SCORE_LOGIC_MIN_DATE`=2026-06-29 이전 구 로직 주는 스킵) → GPT 가중치 제안 → backtest 검증: IMPROVES=pending(승인 대상) / 그 외=archived(비적용·표시용) + [건강지표] 로깅 |
 | `kis_night_futures_ws` | 평일 18:00~익일 새벽 | KIS WebSocket 야간선물 체결 → `kis_night_future` |
 | (토큰) `kis_token_refresh` | 매일 07:00 | 키움+KIS 토큰 갱신(`refresh_tokens.sh`) |
 

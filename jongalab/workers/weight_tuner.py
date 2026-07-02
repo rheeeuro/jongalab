@@ -17,6 +17,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 
+from core.config import SCORE_LOGIC_MIN_DATE
 from core.logging_setup import setup_logging
 from core.ai_service import complete_json
 from core.backtest import backtest_proposal, evaluate_weights
@@ -121,6 +122,13 @@ def _clamp(key: str, current: float, proposed: float) -> float:
 
 def run():
     week_start, week_end = _analysis_week()
+    # 구 스코어 로직(2026-06-26 이하) 표본 제외 — 분석 주 시작을 컷오프로 클램프.
+    if week_start < SCORE_LOGIC_MIN_DATE:
+        logger.info(f"구 로직 구간 제외 — 분석 주 시작 {week_start} → {SCORE_LOGIC_MIN_DATE}")
+        week_start = SCORE_LOGIC_MIN_DATE
+    if week_start > week_end:
+        logger.info(f"분석 주(~{week_end})가 전부 구 로직 컷오프({SCORE_LOGIC_MIN_DATE}) 이전 — 튜닝 스킵")
+        return
     logger.info(f"주간 가중치 튜닝 시작: {week_start} ~ {week_end}")
 
     results = get_weekly_trade_results(week_start, week_end)
