@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import type { MonitorState, NameMap, BuyPreview, BuyPreviewVenue, RegimeGateDiag } from "@/types";
+import type { MonitorState, MonitorPosition, NameMap, BuyPreview, BuyPreviewVenue, RegimeGateDiag } from "@/types";
 import { won, wonExact, pnlClass, ago, hhmmss } from "@/lib/format";
 import { eventMeta, eventDetail } from "@/lib/events";
 
@@ -196,8 +196,6 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {positions.map((p) => {
               const up = p.unrealized_pnl ?? 0;
-              const hardGap = gapPct(p.cur_prc ?? 0, p.hard_stop);
-              const stopGap = p.stop_price ? gapPct(p.cur_prc ?? 0, p.stop_price) : null;
               return (
                 <li key={p.stk_cd} className="py-3">
                   <div className="flex items-start justify-between gap-2">
@@ -219,17 +217,8 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
                       <p className={`text-xs font-semibold tabular-nums ${pnlClass(up)}`}>{won(up)}</p>
                     </div>
                   </div>
-                  {/* 스탑선 / 손절가 */}
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <StopPill
-                      label="스탑선"
-                      value={p.stop_price}
-                      gap={stopGap}
-                      pending={!p.plan_active}
-                      pendingText="장 시작 전"
-                    />
-                    <StopPill label="손절가" value={p.hard_stop} gap={hardGap} />
-                  </div>
+                  {/* 손절가·스탑선·평단·현재가 게이지 */}
+                  <PositionGauge p={p} />
                 </li>
               );
             })}
@@ -320,43 +309,154 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
   );
 }
 
-function StopPill({
-  label,
-  value,
-  gap,
-  pending,
-  pendingText,
-}: {
-  label: string;
-  value: number | null;
-  gap: number | null;
-  pending?: boolean;
-  pendingText?: string;
-}) {
-  if (pending || value == null) {
-    return (
-      <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
-        <p className="text-[11px] text-slate-400">{label}</p>
-        <p className="text-sm font-semibold text-slate-400">{pendingText ?? "—"}</p>
-      </div>
+// 손절가·스탑선·평단·현재가를 하나의 가격축 게이지로 압축 표시.
+// 트랙 = [최저값, 최고값]에 여백을 준 가격 범위. 왼쪽(빨강)=위험 구간(스탑 이하),
+// 스탑→현재 사이(emerald)=남은 여유. 현재가 노브는 손익 방향으로 채색(이익 rose/손실 blue).
+function PositionGauge({ p }: { p: MonitorPosition }) {
+  // hover(데스크탑)/탭(모바일)한 마커의 key — 툴팁으로 라벨·값을 표시
+  const [active, setActive] = useState<string | null>(null);
+  const cur = p.cur_prc ?? 0;
+  const avg = p.avg_price;
+  const hard = p.hard_stop;
+  const trail = p.plan_active ? p.stop_price : null; // 활성 청산계획 없으면 트레일링 미확정
+  const vals = [cur, avg, hard, trail].filter((v): v is number => typeof v === "number" && v > 0);
+
+  // 손절/스탑 가격 캡션 (게이지를 못 그려도 최소 정보는 유지)
+  const hardGap = gapPct(cur, hard);
+  const trailGap = trail ? gapPct(cur, trail) : null;
+  const gapChip = (g: number | null) =>
+    g == null ? null : (
+      <span className={g < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}>
+        {g < 0 ? "이탈 " : "여유 "}
+        {Math.abs(g).toFixed(1)}%
+      </span>
     );
-  }
-  // gap<0 = 현재가가 이미 스탑선 아래(이탈) → 경고색
-  const breached = gap != null && gap < 0;
+
+  const caption = (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] tabular-nums text-slate-400">
+      <span className="flex items-center gap-1">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" />
+        손절 {wonExact(hard)} {gapChip(hardGap)}
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+        {trail ? (
+          <>
+            스탑 {wonExact(trail)} {gapChip(trailGap)}
+          </>
+        ) : (
+          <span className="text-slate-400">스탑 장 시작 전</span>
+        )}
+      </span>
+    </div>
+  );
+
+  // 값이 부족하거나 현재가 미조회면 게이지 생략, 캡션만.
+  if (vals.length < 2 || !cur) return caption;
+
+  const lo = Math.min(...vals);
+  const hi = Math.max(...vals);
+  const span = hi - lo;
+  const pad = span > 0 ? span * 0.15 : hi * 0.02 || 1;
+  const dLo = lo - pad;
+  const dHi = hi + pad;
+  const at = (v: number) => Math.min(100, Math.max(0, ((v - dLo) / (dHi - dLo)) * 100));
+
+  const effStop = trail != null ? Math.max(hard, trail) : hard; // 먼저 닿는(=높은) 스탑이 실질 청산선
+  const curPct = at(cur);
+  const avgPct = at(avg);
+  const stopPct = at(effStop);
+  const up = cur >= avg; // 손익 방향 (한국 관례)
+
+  // 각 지점 — hover/탭 시 라벨·값·현재가 대비 여유를 툴팁으로 노출
+  const markers = [
+    { key: "hard", label: "손절가", value: hard, pct: at(hard), dot: "bg-red-500", gap: hardGap },
+    ...(trail != null
+      ? [{ key: "trail", label: "스탑선", value: trail, pct: at(trail), dot: "bg-amber-500", gap: trailGap }]
+      : []),
+    { key: "avg", label: "평단", value: avg, pct: avgPct, dot: "bg-slate-400", gap: gapPct(cur, avg) },
+    { key: "cur", label: "현재가", value: cur, pct: curPct, dot: up ? "bg-rose-500" : "bg-blue-500", gap: null },
+  ];
+  const activeM = markers.find((m) => m.key === active) ?? null;
+  // 툴팁이 트랙 좌/우 끝을 넘어가지 않도록 정렬 보정
+  const tipX = (pct: number) => (pct < 15 ? "0" : pct > 85 ? "-100%" : "-50%");
+  const clear = (key: string) => setActive((a) => (a === key ? null : a));
+
   return (
-    <div
-      className={`rounded-xl px-3 py-2 ${
-        breached ? "bg-red-50 dark:bg-red-950/30" : "bg-slate-50 dark:bg-slate-800/50"
-      }`}
-    >
-      <p className="text-[11px] text-slate-400">{label}</p>
-      <p className="text-sm font-semibold tabular-nums">{wonExact(value)}</p>
-      {gap != null && (
-        <p className={`text-[11px] tabular-nums ${breached ? "text-red-500" : "text-slate-400"}`}>
-          현재가 대비 {gap >= 0 ? "+" : ""}
-          {gap.toFixed(1)}%
-        </p>
-      )}
+    <div className="mt-3">
+      <div className="relative h-2 rounded-full bg-slate-100 dark:bg-slate-800">
+        {/* 위험 구간: 실질 청산선(스탑) 이하 */}
+        <div
+          className="absolute inset-y-0 left-0 rounded-l-full bg-red-400/50 dark:bg-red-500/40"
+          style={{ width: `${stopPct}%` }}
+        />
+        {/* 여유 구간: 스탑 → 현재가 (상승 시에만 의미) */}
+        {curPct > stopPct && (
+          <div
+            className="absolute inset-y-0 bg-emerald-400/60 dark:bg-emerald-500/40"
+            style={{ left: `${stopPct}%`, width: `${curPct - stopPct}%` }}
+          />
+        )}
+        {/* 평단 (손익분기) — 점선 세로선 */}
+        <div
+          className="pointer-events-none absolute -top-1 -bottom-1 w-0 border-l border-dashed border-slate-400 dark:border-slate-500"
+          style={{ left: `${avgPct}%` }}
+        />
+        {/* 손절가 틱 */}
+        <div
+          className="pointer-events-none absolute -top-0.5 -bottom-0.5 w-0.5 -translate-x-1/2 rounded bg-red-500"
+          style={{ left: `${at(hard)}%` }}
+        />
+        {/* 스탑선 틱 */}
+        {trail != null && (
+          <div
+            className="pointer-events-none absolute -top-0.5 -bottom-0.5 w-0.5 -translate-x-1/2 rounded bg-amber-500"
+            style={{ left: `${at(trail)}%` }}
+          />
+        )}
+        {/* 현재가 노브 */}
+        <div
+          className={`pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow transition-transform dark:border-slate-900 ${
+            up ? "bg-rose-500" : "bg-blue-500"
+          } ${active === "cur" ? "scale-125" : ""}`}
+          style={{ left: `${curPct}%` }}
+        />
+
+        {/* 넓은 히트 타깃 (틱/노브는 얇으므로 별도 오버레이로 hover/탭 수신) */}
+        {markers.map((m) => (
+          <button
+            key={m.key}
+            type="button"
+            aria-label={`${m.label} ${wonExact(m.value)}`}
+            className="absolute top-1/2 z-[1] h-6 w-7 -translate-x-1/2 -translate-y-1/2"
+            style={{ left: `${m.pct}%` }}
+            onMouseEnter={() => setActive(m.key)}
+            onMouseLeave={() => clear(m.key)}
+            onFocus={() => setActive(m.key)}
+            onBlur={() => clear(m.key)}
+            onClick={() => setActive((a) => (a === m.key ? null : m.key))}
+          />
+        ))}
+
+        {/* 툴팁 */}
+        {activeM && (
+          <div
+            className="pointer-events-none absolute bottom-full z-10 mb-2 flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-slate-800 px-2 py-1 text-[11px] font-medium text-white shadow-lg dark:bg-slate-700"
+            style={{ left: `${activeM.pct}%`, transform: `translateX(${tipX(activeM.pct)})` }}
+          >
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${activeM.dot}`} />
+            <span className="text-slate-300">{activeM.label}</span>
+            <span className="tabular-nums">{wonExact(activeM.value)}</span>
+            {activeM.gap != null && (
+              <span className={`tabular-nums ${activeM.gap < 0 ? "text-red-300" : "text-emerald-300"}`}>
+                {activeM.gap < 0 ? "이탈 " : "여유 "}
+                {Math.abs(activeM.gap).toFixed(1)}%
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      {caption}
     </div>
   );
 }
