@@ -31,6 +31,10 @@ logger = logging.getLogger("ClosingBet")
 NEWS_SUMMARY_MIN_COUNT = 3
 MAX_NEWS_SUMMARIES = 5
 
+# 실제 매매(trade_signal)로 핸드오프하는 상위 종목 수. 이 수 이하 rank_no 만 selected=1.
+# 나머지 후보는 selected=0 으로 '저장만' 한다(엣지 연구용 유니버스). 매매 행위는 불변.
+TRADED_TOP_N = 10
+
 
 class ClosingBetStrategy:
     def __init__(self):
@@ -236,24 +240,36 @@ class ClosingBetStrategy:
                 f"{'🔥테마' if c.is_theme_stock else ''}"
             )
 
-        # Phase 2 결과를 DB에 저장
-        self._save_phase2_reports(filtered[:10])
+        # Phase 2 결과를 DB에 저장 — 유니버스 전체 저장(엣지 연구용), 매매는 상위만 핸드오프
+        self._save_phase2_reports(filtered)
 
         return filtered
 
     # ── Phase 2 결과 저장 ──
     def _save_phase2_reports(self, candidates: list[StockCandidate]):
-        """Phase 2 분석 결과를 daily_stock_report 테이블에 저장"""
+        """Phase 2 분석 결과를 daily_stock_report 테이블에 저장.
+
+        점수순 정렬된 유니버스 전체를 저장한다(엣지 연구용). rank_no<=TRADED_TOP_N 만
+        selected=1 로 표시하고 trade_signal 로 핸드오프한다 — 실제 매매 대상은 불변.
+        LLM 뉴스 요약도 선정(top-N) 후보에만 부여해 비용을 종전과 동일하게 유지한다.
+        """
         reports = []
         summarized = 0
         for i, c in enumerate(candidates, 1):
             code = c.code.split("_")[0]
+            is_selected = 1 if i <= TRADED_TOP_N else 0
             news_count = getattr(c, "news_count", 0)
-            news_headlines, news_summary = self._build_news_fields(
-                c, code, news_count, summarized
-            )
-            if news_summary:
-                summarized += 1
+            if is_selected:
+                news_headlines, news_summary = self._build_news_fields(
+                    c, code, news_count, summarized
+                )
+                if news_summary:
+                    summarized += 1
+            else:
+                # 비선정 후보: 헤드라인만(표시·연구용), LLM 요약은 생략
+                news_headlines, news_summary = self._build_news_fields(
+                    c, code, news_count, MAX_NEWS_SUMMARIES
+                )
             reports.append({
                 "stock_code": code,
                 "stock_name": c.name,
@@ -280,6 +296,7 @@ class ClosingBetStrategy:
                 "news_headlines": news_headlines,
                 "score": c.score,
                 "rank_no": i,
+                "selected": is_selected,
             })
 
         try:
@@ -290,11 +307,12 @@ class ClosingBetStrategy:
 
         # 매수 시그널 핸드오프 — trading 도메인(trade_signal)으로 적재.
         # trading 의 리스크 엔진·사이징이 실제 매수 종목수를 제한하므로 상위 후보를 그대로 넘긴다.
+        # 유니버스 전체를 저장하더라도 핸드오프는 selected(top-N)만 — 실제 매매 대상은 불변.
         try:
             signals = [
                 {"stk_cd": r["stock_code"], "stk_nm": r["stock_name"],
                  "rank_no": r["rank_no"], "score": r["score"]}
-                for r in reports
+                for r in reports if r["selected"]
             ]
             n = push_trade_signals(datetime.now().strftime("%Y%m%d"), signals)
             logger.info(f"trade_signal 핸드오프 {len(signals)}건 (영향 {n}행)")

@@ -22,8 +22,8 @@ def save_stock_reports(candidates: list[dict]):
              indv_net_buy, prog_net_buy, supply_days, supply_history,
              ma_aligned, near_high, hourly_candles,
              is_leader, is_theme_stock, content_score,
-             news_count, news_summary, news_headlines, score, rank_no)
-            VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             news_count, news_summary, news_headlines, score, rank_no, selected)
+            VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         for c in candidates:
             supply_history_json = json.dumps(
@@ -47,7 +47,7 @@ def save_stock_reports(candidates: list[dict]):
                 c["is_leader"], c.get("is_theme_stock", False),
                 c.get("content_score", 0),
                 c.get("news_count", 0), c.get("news_summary"), news_headlines_json,
-                c["score"], c["rank_no"],
+                c["score"], c["rank_no"], c.get("selected", 1),
             ))
         conn.commit()
 
@@ -81,12 +81,17 @@ def get_stock_report_history(stock_code: str, days: int = 3) -> list[dict]:
         return results
 
 
-def get_stock_reports_by_date(report_date: str) -> list[dict]:
-    """특정 날짜의 전체 종목 리포트 목록 (점수순)"""
+def get_stock_reports_by_date(report_date: str, include_unselected: bool = False) -> list[dict]:
+    """특정 날짜의 종목 리포트 목록 (점수순).
+
+    기본은 selected=1(실매매 핸드오프된 상위 종목)만 — 기존 소비자(대시보드·gap_check)의
+    동작을 그대로 유지한다. include_unselected=True 면 비선정 후보까지 유니버스 전체(엣지 연구용).
+    """
+    cond = "" if include_unselected else " AND selected = 1"
     with get_db() as (conn, cursor):
         cursor.execute(
-            """SELECT * FROM daily_stock_report
-               WHERE report_date = %s
+            f"""SELECT * FROM daily_stock_report
+               WHERE report_date = %s{cond}
                ORDER BY rank_no ASC""",
             (report_date,),
         )
@@ -333,3 +338,56 @@ def _serialize_dates(row: dict):
     # 종합 점수 기반 매수 이유 파생
     if "score" in row:
         row["reason"] = build_score_reason(row)
+
+
+# ── 엣지 연구용 결과 백필 (outcome_backfill 워커) ──
+def get_dates_missing_outcome(min_date: str | None = None) -> list[str]:
+    """next_open_ret 이 아직 안 채워진 행이 하나라도 있는 report_date 목록(오래된→최신).
+
+    min_date(YYYY-MM-DD) 이후만. 오늘 날짜는 '다음 거래일 시가'가 아직 없으므로 제외한다.
+    """
+    with get_db() as (conn, cursor):
+        params: list = []
+        cond = "next_open_ret IS NULL AND report_date < CURDATE()"
+        if min_date:
+            cond += " AND report_date >= %s"
+            params.append(min_date)
+        cursor.execute(
+            f"""SELECT DISTINCT report_date FROM daily_stock_report
+                 WHERE {cond} ORDER BY report_date ASC""",
+            tuple(params),
+        )
+        rows = cursor.fetchall()
+    return [
+        r["report_date"].isoformat() if isinstance(r["report_date"], (date, datetime))
+        else str(r["report_date"])
+        for r in rows
+    ]
+
+
+def get_rows_missing_outcome(report_date: str) -> list[dict]:
+    """특정 report_date 에서 next_open_ret 이 비어있는 행(코드·리포트가) 목록."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT stock_code, current_price FROM daily_stock_report
+                WHERE report_date = %s AND next_open_ret IS NULL""",
+            (report_date,),
+        )
+        return cursor.fetchall()
+
+
+def save_next_open_ret(report_date: str, results: list[dict]) -> int:
+    """익일 시가 등락률 백필. results: [{stock_code, next_open_ret}]. 갱신 행 수 반환."""
+    if not results:
+        return 0
+    n = 0
+    with get_db() as (conn, cursor):
+        for r in results:
+            cursor.execute(
+                """UPDATE daily_stock_report SET next_open_ret = %s
+                    WHERE report_date = %s AND stock_code = %s""",
+                (r["next_open_ret"], report_date, r["stock_code"]),
+            )
+            n += cursor.rowcount
+        conn.commit()
+    return n

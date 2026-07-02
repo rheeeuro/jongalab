@@ -23,6 +23,7 @@ from core.config import BUY_PULLBACK_PCT
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.seed_allocator import allocate
+from core.regime_gate import seed_multiplier
 from core.kiwoom_data_client import to_int
 from core.repository import trade_signal as signal_repo
 from core.repository import blocklist as blocklist_repo
@@ -155,6 +156,17 @@ def main() -> int:
     seed = int(cash * venue_score / total_score) if total_score > 0 else 0
     logger.info("가용현금 %d × (거래소점수 %.0f / 전체 %.0f) → 시드 %d원, 후보 %d종목",
                 cash, venue_score, total_score, seed, len(venue_items))
+
+    # 롤링 엣지 게이트 — 최근 선정 종목의 점수 판별력이 역전된 레짐이면 총 시드를 축소.
+    #   등가중 사이징이라 조절 대상은 개별 비중이 아니라 총 노출(seed). 배분 로직은 불변.
+    mult, regime = seed_multiplier()
+    if mult < 1.0:
+        before = seed
+        seed = int(seed * mult)
+        logger.info("레짐 게이트 적용: 시드 %d → %d원 (배수 %.3f, 스프레드 %s)",
+                    before, seed, mult, regime.get("split"))
+        audit_log.append("regime_gate", args.venue,
+                         {"multiplier": mult, "seed_before": before, "seed_after": seed, **regime})
 
     # 3) 윈도우 시작 시점 현재가로 시드 배분 → 종목별 매수 수량 확정 (이후 눌려도 수량 고정)
     cands: list[dict] = [

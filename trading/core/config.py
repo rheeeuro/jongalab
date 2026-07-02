@@ -84,6 +84,16 @@ HARD_STOP_LOSS_PCT = float(os.getenv('HARD_STOP_LOSS_PCT', '2.0'))
 # 종목당 최대 투입 비율 — 시드 대비(고정금액 아님). 1.0 이상이면 사실상 무제한.
 SEED_MAX_NAME_PCT = float(os.getenv('SEED_MAX_NAME_PCT', '0.5'))
 
+# ── 롤링 엣지 게이트 (core.regime_gate) — 최근 선정 종목의 점수 판별력으로 총 시드 축소 ──
+# 근거: 엣지가 레짐 의존적이라(봄엔 고점수 우세, 6월엔 역전) 역전 구간엔 자본을 덜 싣는다.
+REGIME_GATE_ENABLED = os.getenv('REGIME_GATE_ENABLED', '1') == '1'
+REGIME_WINDOW_DAYS = int(os.getenv('REGIME_WINDOW_DAYS', '10'))     # 최근 몇 거래일 표본
+REGIME_MIN_SAMPLES = int(os.getenv('REGIME_MIN_SAMPLES', '30'))    # 이보다 적으면 게이트 미개입(1.0)
+# 점수 상위½−하위½ 익일시가수익 스프레드(%p). FULL 이상=건강(1.0), INVERT 이하=역전(MIN_MULT)
+REGIME_SPLIT_FULL = float(os.getenv('REGIME_SPLIT_FULL', '0.5'))
+REGIME_SPLIT_INVERT = float(os.getenv('REGIME_SPLIT_INVERT', '-0.5'))
+REGIME_MIN_MULT = float(os.getenv('REGIME_MIN_MULT', '0.3'))       # 역전 시 최소 시드 배수(30%)
+
 # ── ⚠️ 매매 안전장치 ──
 # 'paper': 모의(주문 미전송, 의도만 로깅·기록) / 'live': 실주문 전송. 기본값은 paper.
 TRADING_MODE = os.getenv('TRADING_MODE', 'paper').lower()
