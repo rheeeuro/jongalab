@@ -24,6 +24,7 @@ from core.config import (
     REGIME_SPLIT_FULL,
     REGIME_SPLIT_INVERT,
     REGIME_MIN_MULT,
+    REGIME_MIN_DATE,
 )
 
 logger = logging.getLogger("RegimeGate")
@@ -32,11 +33,13 @@ logger = logging.getLogger("RegimeGate")
 def _recent_samples(window: int) -> list[dict]:
     """최근 window 거래일(next_open_ret 확정분) 의 selected 종목 (score, next_open_ret)."""
     with get_jongalab_db() as (conn, cursor):
+        # report_date >= REGIME_MIN_DATE 만 대상 — 그 이전은 구 스코어 로직이라 판별력 비교 무의미.
         cursor.execute(
             """SELECT DISTINCT report_date FROM daily_stock_report
                 WHERE selected = 1 AND next_open_ret IS NOT NULL
+                  AND report_date >= %s
                 ORDER BY report_date DESC LIMIT %s""",
-            (window,),
+            (REGIME_MIN_DATE, window),
         )
         dates = [r["report_date"] for r in cursor.fetchall()]
         if not dates:
@@ -90,8 +93,9 @@ def seed_multiplier() -> tuple[float, dict]:
 
     n = len(samples)
     if n < REGIME_MIN_SAMPLES:
-        logger.info("레짐 표본 부족(%d < %d) — 게이트 미개입(1.0)", n, REGIME_MIN_SAMPLES)
-        return 1.0, {"gated": False, "reason": "insufficient", "n": n}
+        logger.info("레짐 표본 부족(%d < %d, %s 이후만) — 게이트 미개입(1.0)",
+                    n, REGIME_MIN_SAMPLES, REGIME_MIN_DATE)
+        return 1.0, {"gated": False, "reason": "insufficient", "n": n, "since": REGIME_MIN_DATE}
 
     split = _score_split(samples)
     mult = _split_to_mult(split)
