@@ -28,6 +28,8 @@ from core.repository import settle_plan as settle_plan_repo
 from core.kiwoom_data_client import KiwoomDataClient, to_int
 from core.kiwoom_order_client import KiwoomOrderClient
 from core.seed_allocator import allocate
+from core.regime_gate import seed_multiplier
+from core.futures_gate import sector_keep_factors, effective_keep
 
 setup_logging()
 logger = logging.getLogger("TradingAPI")
@@ -277,19 +279,36 @@ def buy_preview(date: str | None = None):
         logger.warning("buy-preview 가용현금 조회 실패: %s", e)
         cash = 0
 
+    # 롤링 엣지 게이트(레짐) 배수 — 두 거래소 시드에 공통 적용(executor 와 동일).
+    regime_mult, regime_diag = seed_multiplier()
+
     # 2) 거래소별 시드 = 가용현금 × (거래소 점수합 / 전체 점수합), 그 안에서 점수가중 배분
+    #    executor 와 동일하게 게이트를 반영한다: regime 은 총 시드 축소, futures(NXT)는 배분 뒤 섹터별 수량 감액.
+    #    가격·현금·야간선물은 호출 시점 실시간값이라 실제 집행과 다를 수 있다(미리보기).
     venues = []
     for exchange, want_nxt, window in (("KRX", False, "15:00~15:20"), ("NXT", True, "19:30~19:50")):
         items = [c for c in classified if c["is_nxt"] == want_nxt]
         venue_score = sum(c["score"] for c in items)
-        seed = int(cash * venue_score / total_score) if total_score > 0 else 0
+        seed_base = int(cash * venue_score / total_score) if total_score > 0 else 0
+        seed = int(seed_base * regime_mult) if regime_mult < 1.0 else seed_base
         cands = [{"stk_cd": c["sig"]["stk_cd"], "score": c["score"], "price": c["price"]} for c in items]
         allocate(seed, cands)
+
+        # 선물 섹터 게이트(NXT 전용) — 배분 뒤 섹터별 keep 으로 수량 감액(집행과 동일). 야간선물 개장 전이면 미개입.
+        factors, futures_diag = ({}, {"gated": False, "reason": "krx_skip"})
+        if want_nxt:
+            factors, futures_diag = sector_keep_factors("nxt", [c["sig"]["stk_cd"] for c in items])
+
         stocks = []
         for c, a in zip(items, cands):
             sig = c["sig"]
             shares, cost = a.get("shares", 0), a.get("cost", 0)
+            keep = effective_keep(factors.get(sig["stk_cd"], 1.0), regime_mult)  # 결합 하한 반영
+            if keep < 1.0:
+                shares = int(shares * keep)
+                cost = shares * c["price"]
             note = ("현재가 없음" if c["price"] <= 0
+                    else "선물 게이트 감액" if keep < 1.0 and shares < 1
                     else "배분 0주(시드 부족)" if shares < 1
                     else None)
             stocks.append({
@@ -300,19 +319,24 @@ def buy_preview(date: str | None = None):
                 "price": c["price"],
                 "shares": shares,
                 "cost": cost,
+                "keep": round(keep, 3) if keep < 1.0 else None,
                 "note": note,
             })
         stocks.sort(key=lambda s: (s["rank_no"] is None, s["rank_no"] or 0))
         venues.append({
             "exchange": exchange,
             "window": window,
+            "seed_base": seed_base,
             "seed": seed,
             "invested": sum(s["cost"] for s in stocks),
             "count": sum(1 for s in stocks if s["shares"] >= 1),
+            "futures": futures_diag if want_nxt else None,
             "stocks": stocks,
         })
 
-    return {"trade_date": trade_date, "cash": cash, "total_score": total_score, "venues": venues}
+    regime = {"multiplier": regime_mult, **regime_diag}
+    return {"trade_date": trade_date, "cash": cash, "total_score": total_score,
+            "regime": regime, "venues": venues}
 
 
 def _attach_reason(rows: list[dict]) -> list[dict]:

@@ -160,6 +160,7 @@ def last_heartbeat():
 _ACTIVITY_EVENTS = (
     "monitor_start", "monitor_trail", "monitor_stop", "monitor_hardstop",
     "buy_start", "buy_exec", "buy_skip",
+    "regime_gate", "futures_gate",  # 시드 축소 사유(레짐 역전 / 선물 하락 섹터 감액)
 )
 
 

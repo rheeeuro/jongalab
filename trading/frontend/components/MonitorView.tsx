@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import type { MonitorState, NameMap, BuyPreview } from "@/types";
+import type { MonitorState, NameMap, BuyPreview, BuyPreviewVenue, RegimeGateDiag } from "@/types";
 import { won, wonExact, pnlClass, ago, hhmmss } from "@/lib/format";
 import { eventMeta, eventDetail } from "@/lib/events";
 
@@ -361,6 +361,35 @@ function StopPill({
   );
 }
 
+// 매수 예정 목록의 시드 축소 사유(레짐·선물 게이트) — 왜 시드/수량이 줄었는지 한 줄로.
+function GateNotes({ regime, venue }: { regime: RegimeGateDiag; venue: BuyPreviewVenue }) {
+  const sp = (v?: number) => (typeof v === "number" ? `${v >= 0 ? "+" : ""}${v}` : "-");
+
+  const regimeLine =
+    regime && regime.multiplier < 1
+      ? `레짐 ×${regime.multiplier} · 점수 판별력 ${regime.inverted ? "역전" : "약화"} → 시드 ${wonExact(
+          venue.seed_base,
+        )}→${wonExact(venue.seed)}`
+      : null;
+
+  let futuresLine: string | null = null;
+  const f = venue.futures;
+  if (f?.gated) {
+    const env = `NQ ${sp(f.nq_pct)}%${f.nq_down ? "↓" : ""} · 야간 ${sp(f.night_pct)}%${f.night_down ? "↓" : ""}`;
+    futuresLine = f.nq_down || f.night_down ? `선물 ${env} → 섹터 감액` : `선물 ${env} · 감액 없음`;
+  } else if (f && f.reason === "unavailable") {
+    futuresLine = "선물 게이트 · 야간선물 대기 (19:50 집행 시 반영)";
+  }
+
+  if (!regimeLine && !futuresLine) return null;
+  return (
+    <div className="mb-2 space-y-0.5">
+      {regimeLine && <p className="text-[11px] leading-tight text-amber-600 dark:text-amber-400">{regimeLine}</p>}
+      {futuresLine && <p className="text-[11px] leading-tight text-amber-600 dark:text-amber-400">{futuresLine}</p>}
+    </div>
+  );
+}
+
 // 매수 집행 단계 전용 — 현재 거래소(KRX/NXT) 몫의 매수 예정 종목·예상 수량(실시간 미리보기).
 function BuyPreviewSection({
   preview,
@@ -397,6 +426,7 @@ function BuyPreviewSection({
           {venue.window} · 시드 {wonExact(venue.seed)}
         </p>
       ) : null}
+      {venue && preview ? <GateNotes regime={preview.regime} venue={venue} /> : null}
       {!preview ? (
         <p className="py-6 text-center text-sm text-slate-400">매수 예정 종목을 불러오는 중…</p>
       ) : stocks.length === 0 ? (
@@ -428,6 +458,11 @@ function BuyPreviewSection({
                     <>
                       <p className="font-semibold tabular-nums">{s.shares}주</p>
                       <p className="text-xs text-slate-400 tabular-nums">{wonExact(s.cost)}</p>
+                      {s.keep != null && (
+                        <p className="text-[10px] font-bold text-amber-600 tabular-nums dark:text-amber-400">
+                          선물 ×{s.keep}
+                        </p>
+                      )}
                     </>
                   ) : (
                     <p className="text-xs font-medium text-slate-400">{s.note ?? "매수 안 함"}</p>

@@ -3,11 +3,15 @@
 
 export type EventMeta = { label: string; tone: string };
 
+/** futures_gate payload.detail 의 종목별 항목 (섹터·keep-factor). */
+type GateDetail = { keep: number; sector: string | null; class?: string };
+
 const NEUTRAL = "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
 const MUTED = "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400";
 const RED = "bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400";
 const BUY = "bg-rose-100 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400";
 const SELL = "bg-blue-100 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400";
+const GATE = "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400";
 
 const EVENT_META: Record<string, EventMeta> = {
   // 매수 집행
@@ -32,6 +36,9 @@ const EVENT_META: Record<string, EventMeta> = {
   sell_rejected: { label: "매도 거부", tone: RED },
   sell_filled_paper: { label: "매도 체결", tone: SELL },
   sell_filled_live: { label: "매도 체결", tone: SELL },
+  // 시드 축소 게이트 (왜 시드가 줄었는지)
+  regime_gate: { label: "시드축소·레짐", tone: GATE },
+  futures_gate: { label: "선물 게이트", tone: GATE },
 };
 
 /** 이벤트명 → 라벨/색. 미정의 이벤트는 이벤트명 그대로(중립색) 노출해 누락이 없게 한다. */
@@ -41,6 +48,11 @@ export function eventMeta(event: string): EventMeta {
 
 function num(v: unknown): string {
   return typeof v === "number" ? v.toLocaleString() : "-";
+}
+
+/** 등락률 등 부호 있는 % 값: +0.8 / -1.5 형태. */
+function pct(v: unknown): string {
+  return typeof v === "number" ? `${v >= 0 ? "+" : ""}${v}` : "-";
 }
 
 /** payload → 한 줄 설명. 모니터 탭과 워커 로그 모달이 공유. 모르는 이벤트는 빈 문자열. */
@@ -84,6 +96,19 @@ export function eventDetail(event: string, payload: any): string {
       return `${num(p.qty)}주 @${num(p.price)} 체결 · 실현 ${num(p.realized)}원`;
     case "sell_filled_live":
       return `${num(p.qty)}주 @${num(p.price)} 체결 · 실현 ${num(p.realized)}원 (수수료 ${num(p.cmsn)}·세금 ${num(p.tax)})`;
+    case "regime_gate":
+      // 최근 선정종목 점수 판별력이 역전/약화 → 총 시드 축소
+      return `점수 판별력 ${p.inverted ? "역전" : "약화"}(스프레드 ${pct(p.split)}%p · 표본 ${p.n ?? "?"}) · 시드 ×${p.multiplier} (${num(p.seed_before)}→${num(p.seed_after)}원)`;
+    case "futures_gate": {
+      // 매수시점 NQ·야간선물 방향 → 하락 섹터 차등 감액 (둘 다 상승이면 감액 없음)
+      const env = `NQ ${pct(p.nq_pct)}%${p.nq_down ? "↓" : ""} · 야간 ${pct(p.night_pct)}%${p.night_down ? "↓" : ""}`;
+      const details = Object.values((p.detail ?? {}) as Record<string, GateDetail>);
+      const cuts = details.filter((d) => d?.keep < 1);
+      if (cuts.length === 0) return `${env} · 감액 없음`;
+      const minKeep = Math.min(...cuts.map((d) => d.keep));
+      const secs = [...new Set(cuts.map((d) => d.sector).filter(Boolean))].slice(0, 3).join("·");
+      return `${env} → ${cuts.length}종목 감액 (최대 ×${minKeep}${secs ? ` · ${secs}` : ""})`;
+    }
     default:
       return "";
   }

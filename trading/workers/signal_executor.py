@@ -24,6 +24,8 @@ from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.seed_allocator import allocate
 from core.regime_gate import seed_multiplier
+from core.futures_gate import sector_keep_factors, effective_keep
+from core.config import SEED_COMBINED_MIN_MULT
 from core.kiwoom_data_client import to_int
 from core.repository import trade_signal as signal_repo
 from core.repository import blocklist as blocklist_repo
@@ -165,8 +167,9 @@ def main() -> int:
         seed = int(seed * mult)
         logger.info("레짐 게이트 적용: 시드 %d → %d원 (배수 %.3f, 스프레드 %s)",
                     before, seed, mult, regime.get("split"))
-        audit_log.append("regime_gate", args.venue,
-                         {"multiplier": mult, "seed_before": before, "seed_after": seed, **regime})
+        audit_log.append("regime_gate", None,
+                         {"venue": args.venue, "multiplier": mult,
+                          "seed_before": before, "seed_after": seed, **regime})
 
     # 3) 윈도우 시작 시점 현재가로 시드 배분 → 종목별 매수 수량 확정 (이후 눌려도 수량 고정)
     cands: list[dict] = [
@@ -177,6 +180,29 @@ def main() -> int:
     for c in cands:
         c["high"] = c["price"]  # 장중 고점 초기값 = 윈도우 시작가
     allocate(seed, cands)
+
+    # 선물 환경 게이트(섹터 차등, NXT 전용) — 배분 뒤 섹터별 keep-factor 로 수량 감액(reduce-only).
+    #   NQ·야간선물 하락 시 고베타 섹터(반도체·IT)를 더, 방어주(통신·음식료)를 덜 깎는다.
+    #   그 시점 선물값+섹터별 keep 은 audit 로 스냅샷(추후 섹터×선물 실측·재튜닝용).
+    factors, futures = sector_keep_factors(args.venue, [c["stk_cd"] for c in cands])
+    detail = futures.get("detail") or {}
+    for c in cands:
+        raw = factors.get(c["stk_cd"], 1.0)
+        keep = effective_keep(raw, mult)  # 레짐×선물 결합 하한(SEED_COMBINED_MIN_MULT) 반영
+        if keep < 1.0:
+            before_sh = c["shares"]
+            c["shares"] = int(c["shares"] * keep)
+            c["cost"] = c["shares"] * c["price"]
+            logger.info("선물 섹터 감액 [%s] keep=%.3f(raw %.3f): %d → %d주",
+                        c["stk_cd"], keep, raw, before_sh, c["shares"])
+        # 감사: 실제 적용 keep 과 원본 섹터 keep(연구용) 둘 다 기록
+        if c["stk_cd"] in detail:
+            detail[c["stk_cd"]]["keep_raw"] = raw
+            detail[c["stk_cd"]]["keep"] = keep
+    if futures.get("gated"):
+        audit_log.append("futures_gate", None,
+                         {"seed": seed, "regime_mult": mult,
+                          "combined_min_mult": SEED_COMBINED_MIN_MULT, **futures})
 
     # 배분 0주는 즉시 스킵 처리
     for c in cands:

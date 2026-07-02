@@ -144,17 +144,41 @@ export interface BuyPreviewStock {
   rank_no: number | null;
   score: number;
   price: number; // 호출 시점 현재가 (0이면 조회 실패)
-  shares: number; // 예상 배분 수량
+  shares: number; // 예상 배분 수량 (게이트 반영 후)
   cost: number; // 예상 매수금액 (shares × price)
-  note: string | null; // "배분 0주(시드 부족)" / "현재가 없음" / null(매수 예정)
+  keep: number | null; // 선물 섹터 게이트 keep-factor(<1이면 감액됨), 감액 없으면 null
+  note: string | null; // "배분 0주(시드 부족)" / "현재가 없음" / "선물 게이트 감액" / null(매수 예정)
+}
+
+// 선물 섹터 게이트 진단 (buy-preview·audit 공유 shape)
+export interface FuturesGateDiag {
+  gated: boolean;
+  reason?: string; // 미개입 사유 (unavailable / krx_skip / disabled …)
+  nq_pct?: number;
+  night_pct?: number;
+  nq_down?: boolean;
+  night_down?: boolean;
+  night_note?: string;
+}
+
+// 롤링 엣지 게이트(레짐) 진단
+export interface RegimeGateDiag {
+  multiplier: number; // 총 시드 배수 (<1이면 축소)
+  gated: boolean;
+  split?: number; // 점수 스프레드(%p)
+  inverted?: boolean;
+  n?: number; // 표본 수
+  reason?: string;
 }
 
 export interface BuyPreviewVenue {
   exchange: "KRX" | "NXT";
   window: string; // 매수 윈도우 (예: "15:00~15:20")
-  seed: number; // 이 거래소 몫 시드 (가용현금 × 점수비율)
-  invested: number; // 예상 매수금액 합계
+  seed_base: number; // 게이트 전 시드 (가용현금 × 점수비율)
+  seed: number; // 레짐 게이트 반영 후 시드
+  invested: number; // 예상 매수금액 합계 (선물 게이트 반영 후)
   count: number; // 실제 매수 예정 종목 수 (1주 이상)
+  futures: FuturesGateDiag | null; // 선물 섹터 게이트 상태 (NXT만, KRX는 null)
   stocks: BuyPreviewStock[];
 }
 
@@ -162,6 +186,7 @@ export interface BuyPreview {
   trade_date: string;
   cash: number; // 가용현금 (현금주문가능금액)
   total_score: number;
+  regime: RegimeGateDiag; // 레짐 게이트(두 거래소 공통)
   venues: BuyPreviewVenue[];
 }
 
