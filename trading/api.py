@@ -29,7 +29,7 @@ from core.kiwoom_data_client import KiwoomDataClient, to_int
 from core.kiwoom_order_client import KiwoomOrderClient
 from core.seed_allocator import allocate
 from core.regime_gate import seed_multiplier
-from core.futures_gate import sector_keep_factors, effective_keep
+from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
 
 setup_logging()
 logger = logging.getLogger("TradingAPI")
@@ -294,10 +294,9 @@ def buy_preview(date: str | None = None):
         cands = [{"stk_cd": c["sig"]["stk_cd"], "score": c["score"], "price": c["price"]} for c in items]
         allocate(seed, cands)
 
-        # 선물 섹터 게이트(NXT 전용) — 배분 뒤 섹터별 keep 으로 수량 감액(집행과 동일). 야간선물 개장 전이면 미개입.
-        factors, futures_diag = ({}, {"gated": False, "reason": "krx_skip"})
-        if want_nxt:
-            factors, futures_diag = sector_keep_factors("nxt", [c["sig"]["stk_cd"] for c in items])
+        # 선물 섹터 게이트 — 배분 뒤 섹터별 keep 으로 수량 감액(집행과 동일). 코스피 축은 거래소별
+        #   (KRX=주간선물 / NXT=야간선물). 지표 취득 전(예: 야간선물 개장 전)이면 미개입.
+        factors, futures_diag = sector_keep_factors(exchange.lower(), [c["sig"]["stk_cd"] for c in items])
 
         stocks = []
         for c, a in zip(items, cands):
@@ -305,7 +304,7 @@ def buy_preview(date: str | None = None):
             shares, cost = a.get("shares", 0), a.get("cost", 0)
             keep = effective_keep(factors.get(sig["stk_cd"], 1.0), regime_mult)  # 결합 하한 반영
             if keep < 1.0:
-                shares = int(shares * keep)
+                shares = gated_shares(shares, keep)  # 반올림 감액(mild 컷이 1주를 0으로 안 만듦)
                 cost = shares * c["price"]
             note = ("현재가 없음" if c["price"] <= 0
                     else "선물 게이트 감액" if keep < 1.0 and shares < 1
@@ -330,7 +329,7 @@ def buy_preview(date: str | None = None):
             "seed": seed,
             "invested": sum(s["cost"] for s in stocks),
             "count": sum(1 for s in stocks if s["shares"] >= 1),
-            "futures": futures_diag if want_nxt else None,
+            "futures": futures_diag,
             "stocks": stocks,
         })
 

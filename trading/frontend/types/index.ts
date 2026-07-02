@@ -153,12 +153,14 @@ export interface BuyPreviewStock {
 // 선물 섹터 게이트 진단 (buy-preview·audit 공유 shape)
 export interface FuturesGateDiag {
   gated: boolean;
-  reason?: string; // 미개입 사유 (unavailable / krx_skip / disabled …)
+  reason?: string; // 미개입 사유 (unavailable / venue_skip / disabled …)
+  venue?: string;
+  kospi_label?: string; // 코스피 축 선물 이름 ("주간선물"/"야간선물")
   nq_pct?: number;
-  night_pct?: number;
+  kospi_pct?: number;
   nq_down?: boolean;
-  night_down?: boolean;
-  night_note?: string;
+  kospi_down?: boolean;
+  kospi_note?: string;
 }
 
 // 롤링 엣지 게이트(레짐) 진단

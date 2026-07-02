@@ -375,10 +375,15 @@ function GateNotes({ regime, venue }: { regime: RegimeGateDiag; venue: BuyPrevie
   let futuresLine: string | null = null;
   const f = venue.futures;
   if (f?.gated) {
-    const env = `NQ ${sp(f.nq_pct)}%${f.nq_down ? "↓" : ""} · 야간 ${sp(f.night_pct)}%${f.night_down ? "↓" : ""}`;
-    futuresLine = f.nq_down || f.night_down ? `선물 ${env} → 섹터 감액` : `선물 ${env} · 감액 없음`;
+    const kospi = f.kospi_label ?? "코스피선물";
+    const env = `NQ ${sp(f.nq_pct)}%${f.nq_down ? "↓" : ""} · ${kospi} ${sp(f.kospi_pct)}%${f.kospi_down ? "↓" : ""}`;
+    futuresLine = f.nq_down || f.kospi_down ? `선물 ${env} → 섹터 감액` : `선물 ${env} · 감액 없음`;
   } else if (f && f.reason === "unavailable") {
-    futuresLine = "선물 게이트 · 야간선물 대기 (19:50 집행 시 반영)";
+    // NXT 는 야간선물 개장(18:00) 전이면 흔히 미취득 — 안내. KRX 는 일반 미취득.
+    futuresLine =
+      venue.exchange === "NXT"
+        ? "선물 게이트 · 야간선물 대기 (19:50 집행 시 반영)"
+        : "선물 게이트 · 지표 대기 (집행 시 반영)";
   }
 
   if (!regimeLine && !futuresLine) return null;

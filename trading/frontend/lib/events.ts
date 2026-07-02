@@ -101,7 +101,8 @@ export function eventDetail(event: string, payload: any): string {
       return `점수 판별력 ${p.inverted ? "역전" : "약화"}(스프레드 ${pct(p.split)}%p · 표본 ${p.n ?? "?"}) · 시드 ×${p.multiplier} (${num(p.seed_before)}→${num(p.seed_after)}원)`;
     case "futures_gate": {
       // 매수시점 NQ·야간선물 방향 → 하락 섹터 차등 감액 (둘 다 상승이면 감액 없음)
-      const env = `NQ ${pct(p.nq_pct)}%${p.nq_down ? "↓" : ""} · 야간 ${pct(p.night_pct)}%${p.night_down ? "↓" : ""}`;
+      const kospi = p.kospi_label ?? "코스피선물";
+      const env = `NQ ${pct(p.nq_pct)}%${p.nq_down ? "↓" : ""} · ${kospi} ${pct(p.kospi_pct)}%${p.kospi_down ? "↓" : ""}`;
       const details = Object.values((p.detail ?? {}) as Record<string, GateDetail>);
       const cuts = details.filter((d) => d?.keep < 1);
       if (cuts.length === 0) return `${env} · 감액 없음`;

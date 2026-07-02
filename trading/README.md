@@ -34,7 +34,7 @@ trading/
 │   ├── execution_engine.py     # ⚠️ 주문 사이징·집행·멱등키
 │   ├── seed_allocator.py       # 시드 배분(거래소별): 상위10 선정(점수순)·등가중 배분·최소투입 우선 그리디·종목당 시드50% 캡
 │   ├── regime_gate.py          # 롤링 엣지 게이트: 최근 선정종목 점수판별력(익일시가 상위½−하위½)이 역전이면 총 시드 축소
-│   ├── futures_gate.py         # 선물 환경 게이트(NXT 전용): 매수시점 NQ·야간선물 하락 시 섹터별 차등 감액(반도체·IT 더, 방어주 덜)
+│   ├── futures_gate.py         # 선물 환경 게이트(KRX·NXT): 매수시점 NQ+코스피선물(KRX=주간/NXT=야간) 하락 시 섹터별 차등 감액(반도체·IT 더, 방어주 덜)
 │   ├── kiwoom_order_client.py  # 키움 REST 직접 호출(kt10000~3 주문, kt00018 잔고, ka10074~6)
 │   ├── kiwoom_data_client.py   # kiwoom 데이터 서버(:8001) 읽기(현재가·NXT·차트)
 │   ├── fill_sync.py            # 실거래 체결 동기화(ka10076 → fill/position)
@@ -68,7 +68,7 @@ trading/
 [jongalab closing_bet] → trade_signal(pending)
         │
 signal_executor (KRX 15:00 / NXT 19:30)
-  · 블록리스트 제외 → 거래소 분류 → 시드 산정 → **regime_gate(역전 레짐)로 총 시드 축소** → seed_allocator 등가중 배분 → **futures_gate(선물 하락, NXT만) 섹터별 수량 감액**
+  · 블록리스트 제외 → 거래소 분류 → 시드 산정 → **regime_gate(역전 레짐)로 총 시드 축소** → seed_allocator 등가중 배분 → **futures_gate(선물 하락 시 섹터별 수량 감액, KRX·NXT)**
   · 15초 폴링으로 장중 고점 추적, 고점 대비 되돌림(BUY_PULLBACK_PCT) 시 매수(IOC)
   · 마감 시각에 잔여분 시장가 집행 → 신호 status 갱신(done/skipped/rejected)
   · 주문 직전 live 주문가능금액(100stk_ord_alow_amt) 재조회로 수량 보정 — 시드는 윈도우 시작
@@ -113,7 +113,7 @@ reconcile (20:00) · kt00018 잔고 vs 로컬 position 대조 → 드리프트 �
 | 불변 감사로그 | `audit_log.py` | append-only(UPDATE/DELETE 없음) |
 | 블록리스트 | `blocklist.py`, `signal_executor.py` | 수동 보유 종목 자동매수 차단 |
 | 롤링 엣지 게이트 | `regime_gate.py`, `signal_executor.py` | 최근 REGIME_WINDOW_DAYS 선정종목의 점수 판별력(익일시가 상위½−하위½ 스프레드)이 역전이면 총 시드를 REGIME_MIN_MULT(기본 0.3)까지 선형 축소. jongalab `daily_stock_report.next_open_ret` 읽기전용 조회(단 `report_date >= REGIME_MIN_DATE` 만 — 그 이전은 구 스코어 로직이라 제외), 표본<REGIME_MIN_SAMPLES 면 미개입(1.0). 축소 시 `audit_log('regime_gate')` → 모니터 탭 활동 피드에 사유 노출. `/buy-preview`(매수 예정)도 동일 배수로 시드를 미리 반영·표시 |
-| 선물 환경 게이트(섹터 차등) | `futures_gate.py`, `signal_executor.py` | **NXT(19:50) 전용.** 매수시점 NQ 선물(jongalab market-indices)+코스피200 야간선물(jongalab DB `kis_night_future`, 신선도 FUTURES_STALE_SEC 초과 시 미개입) 방향으로, seed_allocator 등가중 배분 뒤 **종목 섹터(키움 업종명, `ticker_dictionary`)별 keep-factor(≤1.0)로 수량 감액**. 섹터 클래스별 축 민감도: 반도체·IT(NQ 민감)·경기민감주(자동차·화학·금융, 지수 민감)를 더 깎고 통신·음식료 등 방어주를 덜 깎음. `keep=∏_axis(1−MAX_CUT×민감도)`(하락 축에만), 하한 FUTURES_SECTOR_MIN_KEEP(0.25). 상승이면 감액 없음(reduce-only). **결합 하한**: 레짐×선물 곱이 SEED_COMBINED_MIN_MULT(0.3) 밑으로 안 내려가게 종목 keep 을 `effective_keep()` 로 클램프(REGIME_MIN_MULT>=이 값이어야 보장, 기본 둘 다 0.3). 지표 취득 실패면 미개입. 매 적용을 audit_log(`futures_gate`)에 선물값+섹터별 keep 스냅샷으로 기록 → 모니터 탭 활동 피드에 사유(NQ·야간선물 등락, 감액 종목수·섹터) 노출. `/buy-preview`도 동일 로직으로 예상 수량을 미리 감액·표시(야간세션 개장 전이면 미개입·"대기" 표기). ⚠️ **섹터 민감도는 통설 기반 미검증 가정** — 추후 stk_cd→섹터 조인으로 실측 후 재튜닝 |
+| 선물 환경 게이트(섹터 차등) | `futures_gate.py`, `signal_executor.py` | **KRX·NXT(`FUTURES_GATE_VENUES`).** 매수시점 NQ 선물(jongalab market-indices) + 코스피200 선물 방향으로. **코스피 축은 그 시각 살아있는 선물**: KRX(15:20)=주간선물(K200DF, market-indices 실시간) / NXT(19:50)=야간선물(K200NF, jongalab DB `kis_night_future`, 신선도 FUTURES_STALE_SEC 초과 시 미개입). seed_allocator 등가중 배분 뒤 **종목 섹터(키움 업종명, `ticker_dictionary`)별 keep-factor(≤1.0)로 수량 감액**. 섹터 클래스별 축 민감도: 반도체·IT(NQ 민감)·경기민감주(자동차·화학·금융, 지수 민감)를 더 깎고 통신·음식료 등 방어주를 덜 깎음. `keep=∏_axis(1−MAX_CUT×민감도×하락강도)`, 하락강도는 폭 비례(-FUTURES_FLAT_BAND=0 ~ -FUTURES_FULL_CUT_PCT=1) — 작은 하락(NQ -0.5%)은 살짝, 급락(-2%+)은 최대컷. 하한 FUTURES_SECTOR_MIN_KEEP(0.25). 상승/보합이면 감액 없음(reduce-only). 수량 적용은 `gated_shares()` 로 **반올림**(내림 아님) — mild 컷(keep≥0.5)이 1주짜리를 0주로 없애지 않도록(keep<0.5 만 0 가능). **결합 하한**: 레짐×선물 곱이 SEED_COMBINED_MIN_MULT(0.3) 밑으로 안 내려가게 종목 keep 을 `effective_keep()` 로 클램프(REGIME_MIN_MULT>=이 값이어야 보장, 기본 둘 다 0.3). 지표 취득 실패면 미개입. 매 적용을 audit_log(`futures_gate`)에 선물값+섹터별 keep 스냅샷으로 기록 → 모니터 탭 활동 피드에 사유(NQ·코스피선물 등락, 감액 종목수·섹터) 노출. `/buy-preview`도 동일 로직으로 예상 수량을 미리 감액·표시(NXT 는 야간세션 개장 전이면 미개입·"대기" 표기). ⚠️ **섹터 민감도는 통설 기반 미검증 가정** — 추후 stk_cd→섹터 조인으로 실측 후 재튜닝 |
 | 정합성 점검 | `reconcile.py` | 매일 브로커 잔고 vs 로컬 포지션 대조 |
 | 미실행 감시(dead-man's switch) | `watchdog.py` + `audit_log` worker_done 마커 | 핵심 워커가 완료 시 마커를 남기고, watchdog(평일 09:35)가 마커 누락 시 텔레그램 경보 |
 

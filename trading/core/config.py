@@ -107,9 +107,13 @@ REGIME_MIN_DATE = os.getenv('REGIME_MIN_DATE', '2026-06-29')
 FUTURES_GATE_ENABLED = os.getenv('FUTURES_GATE_ENABLED', '1') == '1'
 # 섹터 차등 감액 on/off. off 면 선물 게이트 감액 없음(현재 signal_executor 는 섹터 게이트만 사용).
 FUTURES_SECTOR_GATE_ENABLED = os.getenv('FUTURES_SECTOR_GATE_ENABLED', '1') == '1'
-# 적용 거래소(콤마 구분). 기본 nxt — 19:50엔 야간선물+NQ가 살아있어 익일 갭 신호가 유효하다.
-FUTURES_GATE_VENUES = {v.strip() for v in os.getenv('FUTURES_GATE_VENUES', 'nxt').split(',') if v.strip()}
+# 적용 거래소(콤마 구분). 기본 krx,nxt — 코스피 축은 그 시각 살아있는 선물을 쓴다:
+#   KRX(15:20)=주간선물(K200DF) / NXT(19:50)=야간선물(K200NF). NQ 축은 양쪽 공통.
+FUTURES_GATE_VENUES = {v.strip() for v in os.getenv('FUTURES_GATE_VENUES', 'krx,nxt').split(',') if v.strip()}
 FUTURES_FLAT_BAND = float(os.getenv('FUTURES_FLAT_BAND', '0.1'))   # ±%p 이내 등락은 보합(하락 아님)으로 취급
+# 감액을 하락 '폭'에 비례시킨다: 등락률이 -FLAT_BAND 에서 0, -FULL_CUT_PCT 이상에서 최대컷(강도 1.0).
+# 그 사이 선형. NQ -0.5% 같은 작은 하락은 살짝, -2%+ 급락은 최대컷. (이하이면 사실상 노이즈로 덜 반응)
+FUTURES_FULL_CUT_PCT = float(os.getenv('FUTURES_FULL_CUT_PCT', '2.0'))
 # 축(axis)당 최대 감액률 — 해당 축이 하락이고 섹터 민감도=1.0 일 때 깎는 비율. keep = ∏(1 − MAX_CUT×민감도).
 FUTURES_NQ_MAX_CUT = float(os.getenv('FUTURES_NQ_MAX_CUT', '0.5'))    # NQ 축
 FUTURES_IDX_MAX_CUT = float(os.getenv('FUTURES_IDX_MAX_CUT', '0.5'))  # 코스피200 야간선물 축

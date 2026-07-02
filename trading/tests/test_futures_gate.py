@@ -33,6 +33,37 @@ def test_sector_keep_no_cut_when_up():
     assert fg._sector_keep("전기/전자", 1.0, 0.5) == 1.0
 
 
+def test_gated_shares_rounds_not_floors():
+    # mild 컷(keep>=0.5)은 1주짜리를 0으로 없애지 않는다(반올림). keep<0.5 만 0 가능.
+    assert fg.gated_shares(1, 0.9) == 1       # 예전 int() 면 0 이었음
+    assert fg.gated_shares(1, 0.5) == 1
+    assert fg.gated_shares(1, 0.3) == 0       # 절반 넘게 컷이면 0 가능
+    assert fg.gated_shares(12, 0.5) == 6
+    assert fg.gated_shares(1, 1.0) == 1       # 감액 없음
+    # reduce-only: 절대 원래보다 많지 않다
+    for sh in (1, 3, 10, 25):
+        for k in (0.25, 0.5, 0.85, 0.99):
+            assert fg.gated_shares(sh, k) <= sh
+
+
+def test_cut_scales_with_magnitude():
+    # 같은 tech 라도 NQ 낙폭이 클수록 더 깎인다(작은 하락<큰 하락). 상승/보합은 감액 0.
+    small = fg._sector_keep("전기/전자", -0.5, 0.3)
+    big = fg._sector_keep("전기/전자", -2.5, 0.3)
+    flat = fg._sector_keep("전기/전자", -0.05, 0.3)  # 밴드 이내 → 감액 없음
+    assert flat == 1.0
+    assert big < small < 1.0
+    # 작은 하락(-0.5%)은 예전 이진 컷(×0.5)보다 훨씬 덜 깎여야 한다
+    assert small > 0.5
+
+
+def test_cut_intensity_clamps():
+    assert fg._cut_intensity(0.5) == 0.0            # 상승
+    assert fg._cut_intensity(-0.05) == 0.0          # 보합밴드 이내
+    assert fg._cut_intensity(-fg.FUTURES_FULL_CUT_PCT - 5) == 1.0  # 급락 → 상한 1.0
+    assert 0.0 < fg._cut_intensity(-0.5) < 1.0      # 중간
+
+
 def test_sector_keep_reduce_only_and_floor():
     # 강한 하락에도 keep 은 MIN_KEEP 이상, 1.0 이하
     k = fg._sector_keep("전기/전자", -5.0, -5.0)
@@ -73,22 +104,25 @@ def test_keep_factors_venue_not_targeted(monkeypatch):
     assert factors == {} and diag["gated"] is False and diag["reason"].startswith("venue_skip")
 
 
+def _state(ok, nq, kospi, label="야간선물"):
+    return {"ok": ok, "nq_pct": nq, "kospi_pct": kospi, "kospi_label": label,
+            "nq_note": "ok", "kospi_note": "ok"}
+
+
 def test_keep_factors_unavailable(monkeypatch):
     monkeypatch.setattr(fg, "FUTURES_GATE_VENUES", {"nxt"})
-    monkeypatch.setattr(fg, "_futures_state", lambda: {
-        "ok": False, "nq_pct": None, "night_pct": -1.0, "nq_note": "nq_http_error", "night_note": "ok"})
+    monkeypatch.setattr(fg, "_futures_state", lambda venue: _state(False, None, -1.0))
     factors, diag = fg.sector_keep_factors("nxt", ["005930"])
     assert factors == {} and diag["gated"] is False and diag["reason"] == "unavailable"
 
 
 def test_keep_factors_both_down_differentiates_sectors(monkeypatch):
     monkeypatch.setattr(fg, "FUTURES_GATE_VENUES", {"nxt"})
-    monkeypatch.setattr(fg, "_futures_state", lambda: {
-        "ok": True, "nq_pct": -1.5, "night_pct": -1.2, "nq_note": "ok", "night_note": "ok"})
+    monkeypatch.setattr(fg, "_futures_state", lambda venue: _state(True, -1.5, -1.2))
     monkeypatch.setattr(fg, "_sectors_for", lambda codes: {
         "AAA": "전기/전자", "BBB": "통신", "CCC": None})
     factors, diag = fg.sector_keep_factors("nxt", ["AAA", "BBB", "CCC"])
-    assert diag["gated"] is True and diag["nq_down"] and diag["night_down"]
+    assert diag["gated"] is True and diag["nq_down"] and diag["kospi_down"]
     # 전 종목 keep 반환, tech(AAA) < neutral(CCC) < defensive(BBB) 순으로 더 깎임
     assert set(factors) == {"AAA", "BBB", "CCC"}
     assert all(v <= 1.0 for v in factors.values())
@@ -96,10 +130,19 @@ def test_keep_factors_both_down_differentiates_sectors(monkeypatch):
     assert factors["AAA"] < factors["CCC"]
 
 
+def test_keep_factors_krx_uses_day_future(monkeypatch):
+    # KRX 도 게이트 적용 — 주간선물 축으로 감액, diag 라벨/필드 확인
+    monkeypatch.setattr(fg, "FUTURES_GATE_VENUES", {"krx", "nxt"})
+    monkeypatch.setattr(fg, "_futures_state", lambda venue: _state(True, -1.5, -1.2, label="주간선물"))
+    monkeypatch.setattr(fg, "_sectors_for", lambda codes: {"AAA": "전기/전자"})
+    factors, diag = fg.sector_keep_factors("krx", ["AAA"])
+    assert diag["gated"] is True and diag["venue"] == "krx" and diag["kospi_label"] == "주간선물"
+    assert factors["AAA"] < 1.0
+
+
 def test_keep_factors_all_up_no_cut(monkeypatch):
     monkeypatch.setattr(fg, "FUTURES_GATE_VENUES", {"nxt"})
-    monkeypatch.setattr(fg, "_futures_state", lambda: {
-        "ok": True, "nq_pct": 0.8, "night_pct": 0.5, "nq_note": "ok", "night_note": "ok"})
+    monkeypatch.setattr(fg, "_futures_state", lambda venue: _state(True, 0.8, 0.5))
     monkeypatch.setattr(fg, "_sectors_for", lambda codes: {"AAA": "전기/전자"})
     factors, diag = fg.sector_keep_factors("nxt", ["AAA"])
     assert diag["gated"] is True and factors["AAA"] == 1.0  # 상승이면 감액 없음

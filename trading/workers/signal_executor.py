@@ -24,7 +24,7 @@ from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.seed_allocator import allocate
 from core.regime_gate import seed_multiplier
-from core.futures_gate import sector_keep_factors, effective_keep
+from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
 from core.config import SEED_COMBINED_MIN_MULT
 from core.kiwoom_data_client import to_int
 from core.repository import trade_signal as signal_repo
@@ -191,7 +191,7 @@ def main() -> int:
         keep = effective_keep(raw, mult)  # 레짐×선물 결합 하한(SEED_COMBINED_MIN_MULT) 반영
         if keep < 1.0:
             before_sh = c["shares"]
-            c["shares"] = int(c["shares"] * keep)
+            c["shares"] = gated_shares(c["shares"], keep)  # 반올림 감액(mild 컷이 1주를 0으로 안 만듦)
             c["cost"] = c["shares"] * c["price"]
             logger.info("선물 섹터 감액 [%s] keep=%.3f(raw %.3f): %d → %d주",
                         c["stk_cd"], keep, raw, before_sh, c["shares"])
