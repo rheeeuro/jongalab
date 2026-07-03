@@ -22,8 +22,10 @@ def save_stock_reports(candidates: list[dict]):
              indv_net_buy, prog_net_buy, supply_days, supply_history,
              ma_aligned, near_high, hourly_candles,
              is_leader, is_theme_stock, content_score,
-             news_count, news_summary, news_headlines, score, rank_no, selected)
-            VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             news_count, news_unique_count, news_pm_count, news_first_today, news_prior_avg,
+             news_summary, news_sentiment, news_catalyst, news_headlines,
+             score, rank_no, selected)
+            VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         for c in candidates:
             supply_history_json = json.dumps(
@@ -46,7 +48,11 @@ def save_stock_reports(candidates: list[dict]):
                 c["ma_aligned"], c["near_high"], hourly_candles_json,
                 c["is_leader"], c.get("is_theme_stock", False),
                 c.get("content_score", 0),
-                c.get("news_count", 0), c.get("news_summary"), news_headlines_json,
+                c.get("news_count", 0), c.get("news_unique_count", 0),
+                c.get("news_pm_count", 0), c.get("news_first_today", 0),
+                c.get("news_prior_avg"),
+                c.get("news_summary"), c.get("news_sentiment"), c.get("news_catalyst"),
+                news_headlines_json,
                 c["score"], c["rank_no"], c.get("selected", 1),
             ))
         conn.commit()
@@ -314,7 +320,7 @@ def _serialize_dates(row: dict):
     if isinstance(row.get("gap_checked_at"), datetime):
         row["gap_checked_at"] = row["gap_checked_at"].isoformat()
     # boolean 변환 (MariaDB TINYINT → Python bool)
-    for key in ("ma_aligned", "near_high", "is_leader", "is_theme_stock"):
+    for key in ("ma_aligned", "near_high", "is_leader", "is_theme_stock", "news_first_today"):
         if key in row:
             row[key] = bool(row[key])
     # supply_score → supply_grade 파생 (DB에 등급은 저장하지 않음)

@@ -37,8 +37,10 @@ export function ThemeToggle({
   const [theme, setTheme] = useState<Theme>("light");
   const [mounted, setMounted] = useState(false);
 
+  // SSR 하이드레이션 후 localStorage 테마를 읽는 의도된 마운트 1회 초기화
   useEffect(() => {
     const initial = getStoredTheme() ?? getSystemTheme();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTheme(initial);
     setMounted(true);
   }, []);

@@ -44,8 +44,9 @@ export function MobileBottomTabs() {
   const searchParams = useSearchParams();
   const [moreOpen, setMoreOpen] = useState(false);
 
-  // 경로 변경 시 더보기 시트 자동 닫기
+  // 경로 변경 시 더보기 시트 자동 닫기 — 내비게이션에 반응하는 의도된 동기화
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMoreOpen(false);
   }, [pathname, searchParams]);
 

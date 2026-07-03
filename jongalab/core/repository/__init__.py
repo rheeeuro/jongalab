@@ -20,6 +20,7 @@ from core.repository.content import (
 from core.repository.news import (
     save_news_mentions,
     get_today_news_count_by_stock,
+    get_today_news_stats_by_stock,
     get_today_news_by_stock,
     get_news_heat,
     delete_old_news_mentions,

@@ -131,7 +131,13 @@ export interface StockReport {
   is_theme_stock: boolean;
   content_score: number;
   news_count: number;               // 당일 뉴스 언급 건수 (재료 신호)
+  news_unique_count?: number;       // 당일 고유 기사 수 (헤드라인 dedup, 연구 라벨)
+  news_pm_count?: number;           // 12시 이후 언급 수 (신선도, 연구 라벨)
+  news_first_today?: boolean;       // 직전 14일 내 첫 언급 여부 (연구 라벨)
+  news_prior_avg?: number | null;   // 직전 7일 일평균 언급 수 (서프라이즈 분모)
   news_summary?: string | null;     // 배치 LLM 재료 요약 (후보 소수만)
+  news_sentiment?: number | null;   // LLM 재료 방향 0~100 (요약 후보만)
+  news_catalyst?: string | null;    // LLM 재료 유형 (실적/수주계약/임상승인/M&A/정책테마/증자감자/지분변동/기타)
   news_headlines?: string[];        // 최근 헤드라인 목록
   score: number;
   reason: string;  // 종합 점수 구성요소로 자동 생성된 매수 이유

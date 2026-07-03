@@ -20,7 +20,7 @@ from core.trading_engine import (
 from core.repository.stock_report import save_stock_reports
 from core.repository.sector_report import save_sector_reports
 from core.repository.content import get_today_content_by_stock
-from core.repository.news import get_today_news_count_by_stock, get_today_news_by_stock
+from core.repository.news import get_today_news_stats_by_stock, get_today_news_by_stock
 from core.repository.trade_signal import push_trade_signals
 from core.news_summary import summarize_news
 
@@ -42,6 +42,9 @@ class ClosingBetStrategy:
         self.strategy_cfg.load_from_db()
         self.api = KiwoomRestClient()
         self.engine = AnalysisEngine(self.api, self.strategy_cfg)
+        # 종목코드 → 뉴스 연구 라벨(get_today_news_stats_by_stock 결과).
+        # StockCandidate(가드 파일)를 건드리지 않고 Phase 2 → 리포트 저장으로 전달한다.
+        self._news_stats: dict[str, dict] = {}
 
     def run(self):
         logger.info("=" * 60)
@@ -215,13 +218,23 @@ class ClosingBetStrategy:
             except Exception as e:
                 logger.warning(f"콘텐츠 분석 조회 실패 [{c.name}]: {e}")
 
-        # 뉴스 재료 반영 (오늘 관련 뉴스 언급 건수) — 사전매칭 집계, LLM 없음.
+        # 뉴스 재료 반영 (오늘 관련 뉴스 언급 건수 + 연구 라벨) — 사전매칭 집계, LLM 없음.
         # 종합점수 뉴스 가중치(SCORE_NEWS_BONUS)는 기본 0이라 지금은 점수 무영향(표시·튜닝 전용).
+        # 라벨(고유 기사·오후 건수·첫 등장·직전 7일 평균)은 daily_stock_report 에 저장돼
+        # next_open_ret 과 조인한 뉴스 팩터 엣지 검증에 쓰인다.
+        self._news_stats = {}
         for c in filtered:
+            code = c.code.split("_")[0]
             try:
-                c.news_count = get_today_news_count_by_stock(c.code.split("_")[0])
+                stats = get_today_news_stats_by_stock(code)
+                self._news_stats[code] = stats
+                c.news_count = stats["count"]
                 if c.news_count:
-                    logger.info(f"[{c.name}] 뉴스 언급 {c.news_count}건")
+                    logger.info(
+                        f"[{c.name}] 뉴스 언급 {c.news_count}건 "
+                        f"(고유 {stats['unique_count']}·오후 {stats['pm_count']}"
+                        f"{'·첫등장' if stats['first_today'] else ''})"
+                    )
             except Exception as e:
                 logger.warning(f"뉴스 언급 조회 실패 [{c.name}]: {e}")
 
@@ -264,16 +277,17 @@ class ClosingBetStrategy:
             is_selected = 1 if i <= TRADED_TOP_N else 0
             news_count = getattr(c, "news_count", 0)
             if is_selected:
-                news_headlines, news_summary = self._build_news_fields(
+                news_headlines, news_ai = self._build_news_fields(
                     c, code, news_count, summarized
                 )
-                if news_summary:
+                if news_ai:
                     summarized += 1
             else:
                 # 비선정 후보: 헤드라인만(표시·연구용), LLM 요약은 생략
-                news_headlines, news_summary = self._build_news_fields(
+                news_headlines, news_ai = self._build_news_fields(
                     c, code, news_count, MAX_NEWS_SUMMARIES
                 )
+            news_stats = self._news_stats.get(code) or {}
             reports.append({
                 "stock_code": code,
                 "stock_name": c.name,
@@ -296,7 +310,13 @@ class ClosingBetStrategy:
                 "is_theme_stock": c.is_theme_stock,
                 "content_score": self._calc_content_score(c),
                 "news_count": news_count,
-                "news_summary": news_summary,
+                "news_unique_count": news_stats.get("unique_count", 0),
+                "news_pm_count": news_stats.get("pm_count", 0),
+                "news_first_today": news_stats.get("first_today", 0),
+                "news_prior_avg": news_stats.get("prior_avg"),
+                "news_summary": news_ai["content"] if news_ai else None,
+                "news_sentiment": news_ai.get("sentiment") if news_ai else None,
+                "news_catalyst": news_ai.get("catalyst") if news_ai else None,
                 "news_headlines": news_headlines,
                 "score": c.score,
                 "rank_no": i,
@@ -402,12 +422,13 @@ class ClosingBetStrategy:
 
     @staticmethod
     def _build_news_fields(c: StockCandidate, code: str, news_count: int, summarized: int):
-        """뉴스 헤드라인 목록 + (조건 충족 시) 배치 LLM 재료 요약을 만든다.
-        반환: (headlines: list[str] | None, summary: str | None)."""
+        """뉴스 헤드라인 목록 + (조건 충족 시) 배치 LLM 재료 요약·라벨을 만든다.
+        반환: (headlines: list[str] | None,
+               news_ai: {"content","sentiment","catalyst"} | None)."""
         if news_count <= 0:
             return None, None
         headlines = None
-        summary = None
+        news_ai = None
         try:
             items = get_today_news_by_stock(code)
             headlines = [it["headline"] for it in items if it.get("headline")] or None
@@ -416,12 +437,15 @@ class ClosingBetStrategy:
         if (news_count >= NEWS_SUMMARY_MIN_COUNT and headlines
                 and summarized < MAX_NEWS_SUMMARIES):
             try:
-                summary = summarize_news(c.name, code, headlines)
-                if summary:
-                    logger.info(f"[{c.name}] 뉴스 재료 요약 생성")
+                news_ai = summarize_news(c.name, code, headlines)
+                if news_ai:
+                    logger.info(
+                        f"[{c.name}] 뉴스 재료 요약 생성 "
+                        f"(방향 {news_ai.get('sentiment')}·유형 {news_ai.get('catalyst')})"
+                    )
             except Exception as e:
                 logger.warning(f"뉴스 요약 실패 [{c.name}]: {e}")
-        return headlines, summary
+        return headlines, news_ai
 
     @staticmethod
     def _calc_content_score(c: StockCandidate) -> float:

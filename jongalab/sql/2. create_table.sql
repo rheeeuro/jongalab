@@ -104,8 +104,15 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     content_score FLOAT DEFAULT 0.0,
     -- 뉴스 재료 (news_mention 집계). news_count 는 종합점수 뉴스항(SCORE_NEWS_BONUS)의 입력이자
     -- 주간 가중치 튜너의 학습 피처. 기본 가중치 0이라 현재는 점수에 무영향(표시·튜닝 전용).
+    -- news_unique_count 이하 라벨은 엣지 연구용(next_open_ret 조인 백테스트 대상, 점수 무영향).
     news_count INT DEFAULT 0,               -- 당일 뉴스 언급 건수
+    news_unique_count INT DEFAULT 0,        -- 당일 고유 기사 수(헤드라인 정규화 dedup)
+    news_pm_count INT DEFAULT 0,            -- 당일 12시 이후 언급 수(신선도)
+    news_first_today TINYINT(1) DEFAULT 0,  -- 직전 14일 내 첫 언급 여부
+    news_prior_avg FLOAT DEFAULT NULL,      -- 직전 7일 일평균 언급 수(서프라이즈 분모)
     news_summary TEXT DEFAULT NULL,         -- 후보 소수만 배치 LLM 재료 요약
+    news_sentiment TINYINT DEFAULT NULL,    -- LLM 재료 방향 0~100(요약 후보만)
+    news_catalyst VARCHAR(20) DEFAULT NULL, -- LLM 재료 유형(실적/수주계약/임상승인/M&A/정책테마/증자감자/지분변동/기타)
     news_headlines JSON DEFAULT NULL,       -- 최근 헤드라인 목록(표시용)
     score FLOAT DEFAULT 0.0,
     rank_no INT DEFAULT 0,

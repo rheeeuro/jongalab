@@ -38,7 +38,7 @@ jongalab/
 | `sector_resolver.py` | 티커→섹터 해석(ticker_dictionary 캐시, TTL 1년) |
 | `ticker.py` | 기업명↔티커 변환, 신규 티커 등록, 콘텐츠 본문 기업명 추출 |
 | `news_matcher.py` | 뉴스 헤드라인 → 종목 사전매칭(LLM 없음). ticker_dictionary(ACTIVE) 인메모리 매처, 경계 룩어라운드 + 발행처 대괄호([]·【】) 제거로 오탐 억제 |
-| `news_summary.py` | 후보 소수 뉴스 재료 배치 요약(Ollama, `analyze_content` 경유). 프롬프트는 가드 파일과 분리 |
+| `news_summary.py` | 후보 소수 뉴스 재료 배치 요약(Ollama, `analyze_content` 경유). 요약과 함께 재료 방향(`news_sentiment` 0~100)·유형(`news_catalyst`, 화이트리스트 강제)을 같은 1회 호출로 라벨링. 프롬프트는 가드 파일과 분리 |
 | `filters.py` | 분석 결과 저장 여부 판단(점수 범위·티커 포함·환각 검증) |
 | `backtest.py` | 가중치 제안 백테스트 — `score_candidate` 공식을 미러링(`recompute_score`)해 저장된 표본에 제안 가중치를 재적용, 승자/패자 판별력 비교. ⚠️엔진 공식 변경 시 미러도 갱신(테스트가 드리프트 감지) |
 | `notifications.py` | 텔레그램 알림(재시도 포함) |
@@ -84,6 +84,10 @@ jongalab/
   종합점수 = 수급 + 정배열 + 신고가 + 대장주 + 테마 + 콘텐츠 + 뉴스 + 등락률(2~12% 가점 / 15%+ 감점) (가중치 튜닝 대상)
         │  · 뉴스 재료: news_count 집계 + 후보 소수 배치 LLM 요약 → daily_stock_report 표시
         │    (SCORE_NEWS_BONUS 기본 0 → 현재 점수 무영향, 주간 튜너가 성과 따라 상향 가능)
+        │  · 뉴스 연구 라벨(2026-07-03~, 점수 무영향 — next_open_ret 조인 엣지 검증용):
+        │    집계 — news_unique_count(헤드라인 dedup 고유 기사) · news_pm_count(12시 이후 신선도) ·
+        │           news_first_today(14일 내 첫 등장) · news_prior_avg(직전 7일 일평균, 서프라이즈 분모)
+        │    LLM — news_sentiment(방향 0~100) · news_catalyst(재료 유형) — 기존 배치 요약 호출에 출력 필드만 추가
         ├─► daily_stock_report — Phase 2 통과 유니버스 전체 저장(selected=1=상위 top-N, 0=비선정 후보)
         │     · 기본 조회(대시보드·gap_check)는 selected=1 만; 연구는 include_unselected=True 로 전체
         └─► trade_signal (status=pending, selected만)  ─► trading 도메인이 집행

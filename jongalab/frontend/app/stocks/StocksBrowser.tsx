@@ -20,7 +20,7 @@ export function StocksBrowser({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let result = q
+    const result = q
       ? reports.filter(
           (r) =>
             r.stock_name.toLowerCase().includes(q) ||

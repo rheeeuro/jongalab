@@ -22,6 +22,7 @@ class AnalysisResult:
     summary: list = field(default_factory=list)      # 핵심 요약 불릿 3개
     stocks: list = field(default_factory=list)       # [{name,stance,conviction,horizon,reason}]
     strategy: str = ""                               # 대응 전략 한 줄
+    raw: dict = field(default_factory=dict)          # 파싱된 원본 JSON — 프롬프트별 확장 필드 접근용
 
 
 _STANCE_EMOJI = {"호재": "📈", "악재": "📉", "중립": "➖"}
@@ -120,6 +121,7 @@ def analyze_content(prompt: str, model: str | None = None, **chat_options) -> An
             summary=summary,
             stocks=stocks,
             strategy=strategy,
+            raw=data,
         )
         logging.info(
             f"🔍 AI 분석 결과: score={result.sentiment_score}, "

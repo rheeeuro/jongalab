@@ -4,9 +4,21 @@
 '재료 감지 신호'로만 쓰며, 오늘 언급 건수/헤드라인을 closing_bet Phase 2 가 조회한다.
 """
 import json
+import re
 from datetime import datetime
 
 from core.db import get_db
+
+# 헤드라인 dedup 정규화: 발행처 대괄호 제거 후 한글/영숫자만 남긴다.
+# 같은 기사가 여러 채널에 복제될 때 채널별 말머리·구두점 차이를 흡수한다.
+_BRACKET_RE = re.compile(r"\[[^\]]*\]|【[^】]*】")
+_NON_WORD_RE = re.compile(r"[^가-힣A-Za-z0-9]+")
+
+
+def _normalize_headline(headline: str) -> str:
+    """dedup 키용 정규화. 빈 문자열이면 dedup 불가 → 호출부에서 원문 유지."""
+    text = _BRACKET_RE.sub(" ", headline or "")
+    return _NON_WORD_RE.sub("", text).lower()
 
 
 def save_news_mentions(rows: list[dict]) -> int:
@@ -44,6 +56,58 @@ def get_today_news_count_by_stock(stock_code: str) -> int:
             (code,),
         )
         return int(cursor.fetchone()["cnt"])
+
+
+def get_today_news_stats_by_stock(stock_code: str) -> dict:
+    """오늘 뉴스 언급의 연구 라벨 집계 (closing_bet 이 daily_stock_report 에 저장).
+
+    반환: {count, unique_count, pm_count, first_today, prior_avg}
+      - count        : 오늘 총 언급 건수 (기존 get_today_news_count_by_stock 과 동일 기준)
+      - unique_count : 헤드라인 정규화 dedup 고유 기사 수 (채널 복제 제거)
+      - pm_count     : 12시 이후 언급 수 (종가베팅 신선도 — 장중 늦게 터진 재료)
+      - first_today  : 직전 14일(보존 주기) 내 언급 이력이 없으면 1
+      - prior_avg    : 직전 7일 일평균 언급 수 (서프라이즈 배수의 분모). 오늘 언급 없으면 None
+    """
+    code = stock_code.split(".")[0].split("_")[0]
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """
+            SELECT headline, created_at FROM news_mention
+            WHERE ticker = %s AND DATE(created_at) = CURDATE()
+            """,
+            (code,),
+        )
+        today_rows = cursor.fetchall()
+        if not today_rows:
+            return {"count": 0, "unique_count": 0, "pm_count": 0,
+                    "first_today": 0, "prior_avg": None}
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS prior_total,
+                   SUM(created_at >= CURDATE() - INTERVAL 7 DAY) AS prior_7d
+            FROM news_mention
+            WHERE ticker = %s AND created_at < CURDATE()
+            """,
+            (code,),
+        )
+        prior = cursor.fetchone()
+
+    unique_keys = {_normalize_headline(r["headline"]) or (r["headline"] or "")
+                   for r in today_rows}
+    pm_count = sum(
+        1 for r in today_rows
+        if isinstance(r.get("created_at"), datetime) and r["created_at"].hour >= 12
+    )
+    prior_total = int(prior["prior_total"] or 0)
+    prior_7d = int(prior["prior_7d"] or 0)
+    return {
+        "count": len(today_rows),
+        "unique_count": len(unique_keys),
+        "pm_count": pm_count,
+        "first_today": 1 if prior_total == 0 else 0,
+        "prior_avg": round(prior_7d / 7.0, 2),
+    }
 
 
 def get_today_news_by_stock(stock_code: str, limit: int = 15) -> list[dict]:
