@@ -88,121 +88,90 @@ def send_analysis_alert(channel: str, title: str, analysis: str, score: int = 50
         logging.error(f"❌ 텔레그램 에러: {e}")
 
 
-def send_gap_check_alert(
-    report_date: str, check_time: str, rows: list[dict], is_retry: bool = False
-):
-    """갭상승 체크 리포트 — 활성 상태인 모든 유저에게 전송
+def build_gap_check_message(
+    report_date: str, check_time: str, rows: list[dict]
+) -> tuple[str, int, int]:
+    """갭 체크 최종 메시지 본문 생성. 반환: (message, wins, losses)
 
-    초기(8:10) rows: [{rank, name, report_price, now_price, pct, error?, pending?}]
-    재조회(9:10) rows: [{rank, name, report_price,
-        nxt_price?, nxt_pct?, krx_price?, krx_pct?, krx_from_nxt_pct?, error?}]
-        — 분류는 krx_pct(우선) / nxt_pct(폴백) 기준.
+    rows: [{rank, name, score, venue, base_price, now_price, pct, approx?, error?}]
+      venue "NXT": 전일 19:50 NXT → 당일 08:03 NXT
+      venue "KRX": 전일 15:20 KRX → 당일 09:03 KRX
+      approx=True 는 기준가 미수집 폴백(리포트 시점 가격 대비) — pct 뒤 ≈ 표시.
+    """
+    ups, downs, flats, errors = [], [], [], []
+    for r in rows:
+        pct = r.get("pct")
+        if r.get("error") or pct is None:
+            errors.append(r)
+        elif pct > 0:
+            ups.append(r)
+        elif pct < 0:
+            downs.append(r)
+        else:
+            flats.append(r)
+
+    def _fmt(r: dict, emoji: str) -> str:
+        mark = "≈" if r.get("approx") else ""
+        return (
+            f"{emoji} `{r['rank']:>2}`. *{r['name']}* `{r['score']}점`\n"
+            f"    `[{r['venue']}]` `{r['pct']:+.2f}%{mark}`  "
+            f"({r['base_price']:,} → {r['now_price']:,})"
+        )
+
+    def _fmt_simple(r: dict) -> str:
+        return f"   `{r['rank']:>2}`. *{r['name']}* `{r['score']}점`"
+
+    by_rank = lambda x: x["rank"]
+    sections = []
+    if ups:
+        sections.append(
+            f"🔴 *갭상승 ({len(ups)})*\n"
+            + "\n".join(_fmt(r, "•") for r in sorted(ups, key=by_rank))
+        )
+    if downs:
+        sections.append(
+            f"🔵 *갭하락 ({len(downs)})*\n"
+            + "\n".join(_fmt(r, "•") for r in sorted(downs, key=by_rank))
+        )
+    if flats:
+        sections.append(
+            f"⚪ *보합 ({len(flats)})*\n"
+            + "\n".join(_fmt(r, "•") for r in sorted(flats, key=by_rank))
+        )
+    if errors:
+        sections.append(
+            f"❓ *조회실패 ({len(errors)})*\n"
+            + "\n".join(_fmt_simple(r) for r in sorted(errors, key=by_rank))
+        )
+
+    wins, losses = len(ups), len(downs)
+    total_tracked = wins + losses + len(flats)
+    win_rate = (wins / total_tracked * 100) if total_tracked else 0.0
+
+    footnotes = ["_NXT: 전일 19:50→08:03 · KRX: 전일 15:20→09:03_"]
+    if any(r.get("approx") for r in rows):
+        footnotes.append("_≈ 기준가 미수집 → 리포트 시점 가격 대비_")
+
+    message = (
+        f"📊 *[갭 체크] {report_date} Top 10*\n"
+        f"({check_time} 확정)\n\n"
+        f"🏆 *{wins}승 {losses}패* "
+        f"(보합 {len(flats)} / 승률 {win_rate:.0f}%)\n"
+        f"──────────────────\n\n"
+        + "\n\n".join(sections)
+        + "\n\n"
+        + "\n".join(footnotes)
+    )
+    return message, wins, losses
+
+
+def send_gap_check_alert(report_date: str, check_time: str, rows: list[dict]):
+    """갭 체크 최종 리포트 전송 — KRX 체크(09:03)까지 끝난 뒤 하루 한 번만 호출된다.
+
+    rows 형식은 build_gap_check_message() docstring 참고.
     """
     try:
-        ups, downs, flats, pendings, errors = [], [], [], [], []
-        for r in rows:
-            if r.get("error"):
-                errors.append(r)
-                continue
-            if r.get("pending"):
-                pendings.append(r)
-                continue
-            if is_retry:
-                pct = r.get("krx_pct", r.get("nxt_pct"))
-            else:
-                pct = r.get("pct")
-            if pct is None:
-                errors.append(r)
-                continue
-            if pct > 0:
-                ups.append(r)
-            elif pct < 0:
-                downs.append(r)
-            else:
-                flats.append(r)
-
-        def _fmt_initial(r: dict, emoji: str) -> str:
-            return (
-                f"{emoji} `{r['rank']:>2}`. *{r['name']}* `{r['score']}점`\n"
-                f"    `{r['pct']:+.2f}%`  "
-                f"({r['report_price']:,} → {r['now_price']:,})"
-            )
-
-        def _fmt_retry(r: dict, emoji: str) -> str:
-            lines = [f"{emoji} `{r['rank']:>2}`. *{r['name']}* `{r['score']}점`"]
-            if "nxt_pct" in r:
-                lines.append(
-                    f"    `[NXT]` `{r['nxt_pct']:+.2f}%`  "
-                    f"({r['report_price']:,} → {r['nxt_price']:,})"
-                )
-            if "krx_pct" in r:
-                if "krx_from_nxt_pct" in r:
-                    lines.append(
-                        f"    `[KRX]` `{r['krx_from_nxt_pct']:+.2f}%`  "
-                        f"({r['nxt_price']:,} → {r['krx_price']:,})"
-                    )
-                else:
-                    lines.append(
-                        f"    `[KRX]` `{r['krx_pct']:+.2f}%`  "
-                        f"({r['report_price']:,} → {r['krx_price']:,})"
-                    )
-            return "\n".join(lines)
-
-        def _fmt_simple(r: dict) -> str:
-            return f"   `{r['rank']:>2}`. *{r['name']}* `{r['score']}점`"
-
-        _fmt = _fmt_retry if is_retry else _fmt_initial
-        by_rank = lambda x: x["rank"]
-        sections = []
-        if ups:
-            sections.append(
-                f"🔴 *갭상승 ({len(ups)})*\n"
-                + "\n".join(_fmt(r, "•") for r in sorted(ups, key=by_rank))
-            )
-        if downs:
-            sections.append(
-                f"🔵 *갭하락 ({len(downs)})*\n"
-                + "\n".join(_fmt(r, "•") for r in sorted(downs, key=by_rank))
-            )
-        if flats:
-            sections.append(
-                f"⚪ *보합 ({len(flats)})*\n"
-                + "\n".join(_fmt(r, "•") for r in sorted(flats, key=by_rank))
-            )
-        if pendings:
-            sections.append(
-                f"⏳ *장 시작 대기 ({len(pendings)})*\n"
-                + "\n".join(_fmt_simple(r) for r in sorted(pendings, key=by_rank))
-            )
-        if errors:
-            sections.append(
-                f"❓ *조회실패 ({len(errors)})*\n"
-                + "\n".join(_fmt_simple(r) for r in sorted(errors, key=by_rank))
-            )
-
-        wins, losses = len(ups), len(downs)
-        total_tracked = wins + losses + len(flats)
-        win_rate = (wins / total_tracked * 100) if total_tracked else 0.0
-
-        if is_retry:
-            message = (
-                f"🔄 *[갭 체크 최종] {report_date}*\n"
-                f"(장 시작 후 재조회 → {check_time})\n\n"
-                f"🏆 *{wins}승 {losses}패* "
-                f"(보합 {len(flats)} / 승률 {win_rate:.0f}%)\n"
-                f"──────────────────\n\n"
-                + "\n\n".join(sections)
-            )
-        else:
-            message = (
-                f"📊 *[갭 체크] {report_date} Top 10*\n"
-                f"(리포트 시각 → {check_time})\n\n"
-                f"🏆 *{wins}승 {losses}패* "
-                f"(보합 {len(flats)} / 승률 {win_rate:.0f}%)\n"
-                f"──────────────────\n\n"
-                + "\n\n".join(sections)
-            )
-
+        message, wins, losses = build_gap_check_message(report_date, check_time, rows)
         count = _send_telegram_message(message)
         logging.info(
             f"📨 갭 체크 전송 완료 -> {count}개 채팅방 "

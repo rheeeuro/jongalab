@@ -110,11 +110,14 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     score FLOAT DEFAULT 0.0,
     rank_no INT DEFAULT 0,
 
-    -- 갭 체크(다음날 아침) 결과 영구 보존: 08:10 NXT, 09:10 KRX 재조회 결과를 Top 10 종목에 업데이트
-    gap_nxt_price INT DEFAULT NULL COMMENT '갭 체크 NXT 가격(08:10)',
-    gap_nxt_pct FLOAT DEFAULT NULL COMMENT '리포트가 → NXT 등락률(%)',
-    gap_krx_price INT DEFAULT NULL COMMENT '갭 체크 KRX 가격(09:10)',
-    gap_krx_pct FLOAT DEFAULT NULL COMMENT '리포트가 → KRX 등락률(%)',
+    -- 갭 체크(다음날 아침) 결과 영구 보존 — 실매매 청산 창과 동일 기준. 종목별로 venue 하나만 채워진다:
+    --   NXT 상장 종목 → gap_nxt_*(전일 19:50 NXT → 당일 08:03 NXT)
+    --   KRX 전용 종목 → gap_krx_*(전일 15:20 KRX → 당일 09:03 KRX)
+    --   (2026-07-03 이전 행은 구 기준: 리포트가 → 08:10 NXT / 09:10 KRX, 두 컬럼 모두 존재 가능)
+    gap_nxt_price INT DEFAULT NULL COMMENT '갭 체크 NXT 가격(08:03)',
+    gap_nxt_pct FLOAT DEFAULT NULL COMMENT '전일 19:50 NXT → 08:03 NXT 등락률(%)',
+    gap_krx_price INT DEFAULT NULL COMMENT '갭 체크 KRX 가격(09:03)',
+    gap_krx_pct FLOAT DEFAULT NULL COMMENT '전일 15:20 KRX → 09:03 KRX 등락률(%)',
     gap_checked_at TIMESTAMP NULL DEFAULT NULL,
 
     -- 엣지 연구용: 상위 후보만이 아니라 Phase 2 통과 유니버스 전체를 저장한다.
