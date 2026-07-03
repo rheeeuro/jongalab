@@ -31,7 +31,7 @@ class StrategyConfig:
     MIN_TRADING_VALUE = 100_000_000_000      # 거래대금 최소 1,000억
     PREFERRED_TRADING_VALUE = 200_000_000_000
     MIN_MARKET_CAP = 200_000_000_000         # 시총 최소 2,000억
-    TOP_N_BY_VALUE = 20
+    TOP_N_BY_VALUE = 30      # 시장별 거래대금 상위 N (2026-07-03 풀 확대 20→30 — 점수가 실제 '선정'을 하도록)
 
     # ---- 이동평균 정배열 기준 ----
     MA_PERIODS = [5, 10, 20]
@@ -88,10 +88,17 @@ class StrategyConfig:
     SCORE_NEAR_HIGH_BONUS = 10        # 신고가 근처 가점
     SCORE_PREFERRED_VALUE_BONUS = 15  # 거래대금 우선 기준 충족 가점
     SCORE_MIN_VALUE_BONUS = 8         # 거래대금 최소 기준 충족 가점
-    SCORE_LEADER_BONUS = 10           # 대장주 가점
+    SCORE_LEADER_BONUS = 3            # 대장주 가점 (2026-07-03 실증: 대장주 승률 -3%p 역기여 → 10→3 축소)
     SCORE_EXTRA_SUPPLY_DAY_BONUS = 3  # 5일 초과 장기 연속 수급 1일당 가점
-    SCORE_PROGRAM_BUY_BONUS = 10      # 프로그램 양매수(prog_net_buy>0) 가점 (구 필수 조건 → 가산점화)
+    SCORE_PROGRAM_BUY_BONUS = 0.0     # 프로그램 양매수 가점 — 2026-07-03 실증 역효과(해당 종목 갭 승률 9.1%, n=33) → 0 (표시·튜닝 전용)
     SCORE_NEWS_BONUS = 0.0            # 뉴스 재료 가점 — 기본 0(표시·튜닝 전용). 주간 튜너가 성과 따라 상향 가능
+    # 당일 등락률 항 (2026-07-03 실증: 5~10% 상승 구간 승률 최고, 15%+ 과열·음전은 최악.
+    #  음전 제외는 closing_bet Phase 2 하드 필터가 담당)
+    SCORE_CHANGE_BAND_BONUS = 10.0    # 등락률 스윗스팟(2~12%) 가점
+    SCORE_OVERHEAT_PENALTY = 10.0     # 과열(15%+) 감점 — 감점 항이라 max_possible 에는 미포함
+    CHANGE_BAND_MIN_PCT = 2.0         # 스윗스팟 하한(%) — 비튜닝 상수
+    CHANGE_BAND_MAX_PCT = 12.0        # 스윗스팟 상한(%) — 비튜닝 상수
+    OVERHEAT_CHANGE_PCT = 15.0        # 과열 기준(%) — 비튜닝 상수
 
     def load_from_db(self):
         """DB에서 전략 설정값을 로드하여 인스턴스에 덮어씀"""
@@ -170,6 +177,8 @@ class AnalysisEngine:
     def __init__(self, api: KiwoomRestClient, config: StrategyConfig):
         self.api = api
         self.cfg = config
+        # ka10131 연속 순매수일 맵 캐시 (시장별 1회 조회, 워커 실행 단위)
+        self._consec_days_map: dict[str, int] | None = None
 
     # ── 가격 문자열 파싱 (키움 응답은 "+53500", "-1200" 형태) ──
     @staticmethod
@@ -482,6 +491,27 @@ class AnalysisEngine:
             return SupplyGrade.C
         return SupplyGrade.D
 
+    # ── 기관외국인 연속 순매수일 (ka10131) ──
+    def _consecutive_buy_days(self) -> dict[str, int]:
+        """{종목코드: 연속 순매수일} 맵. 코스피(001)+코스닥(101)을 1회씩 조회해 캐시한다.
+        응답 stk_cd 의 접미사("_AL" 등)는 제거하고, tot_cont_netprps_dys 가 양수(연속 순매수)인
+        종목만 담는다(음수는 연속 순매도라 제외)."""
+        if self._consec_days_map is not None:
+            return self._consec_days_map
+        days_map: dict[str, int] = {}
+        for mrkt in ("001", "101"):
+            try:
+                data = self.api.get_inst_foreign_consecutive(mrkt_tp=mrkt)
+                for item in data.get("orgn_frgnr_cont_trde_prst", []):
+                    code = item.get("stk_cd", "").split("_")[0]
+                    days = self.parse_price(item.get("tot_cont_netprps_dys", "0"))
+                    if code and days > 0:
+                        days_map[code] = days
+            except Exception as e:
+                logger.warning(f"연속매매현황 조회 실패 (mrkt={mrkt}): {e}")
+        self._consec_days_map = days_map
+        return days_map
+
     # ── 수급 분석 ──
     def analyze_supply_demand(self, stk_cd: str, current_price: int) -> dict:
         result = {
@@ -543,17 +573,10 @@ class AnalysisEngine:
         except Exception as e:
             logger.warning(f"장중투자자 조회 실패 [{stk_cd}]: {e}")
 
-        # (c) 기관외국인 연속매매현황 (ka10131)
-        try:
-            consec_data = self.api.get_inst_foreign_consecutive()
-            items = consec_data.get("orgn_frgnr_cont_trde_prst", [])
-            for item in items:
-                if item.get("stk_cd", "") == stk_cd:
-                    result["supply_days"] = abs(self.parse_price(
-                        item.get("tot_cont_netprps_dys", "0")))
-                    break
-        except Exception as e:
-            logger.warning(f"연속매매현황 조회 실패 [{stk_cd}]: {e}")
+        # (c) 기관외국인 연속매매현황 (ka10131) — 코스피+코스닥 캐시 맵에서 조회.
+        #     (구 구현 버그: 응답 stk_cd 의 "_AL" 접미사 미제거 + 코스피만 조회로 항상 0,
+        #      순매도 연속(음수)도 abs 로 집계될 위험 — 2026-07-03 수정)
+        result["supply_days"] = self._consecutive_buy_days().get(stk_cd.split("_")[0], 0)
 
         # (d) 거래원 체크 (ka10002) — 외국계 증권사 매수 우위
         FOREIGN_BROKERS = [
@@ -641,6 +664,12 @@ class AnalysisEngine:
         if c.is_theme_stock:
             raw += self.cfg.THEME_STOCK_BONUS
 
+        # 당일 등락률 — 스윗스팟(2~12%) 가점, 과열(15%+) 감점 (2026-07-03 실증 반영)
+        if self.cfg.CHANGE_BAND_MIN_PCT <= c.change_pct < self.cfg.CHANGE_BAND_MAX_PCT:
+            raw += self.cfg.SCORE_CHANGE_BAND_BONUS
+        elif c.change_pct >= self.cfg.OVERHEAT_CHANGE_PCT:
+            raw -= self.cfg.SCORE_OVERHEAT_PENALTY
+
         # 5일 초과 연속 수급 보너스
         # 5일 이내 연속성은 supply_score에 이미 반영되므로, 6~10일+ 장기 연속만 가산
         extra_days = max(c.supply_days - 5, 0)
@@ -672,9 +701,11 @@ class AnalysisEngine:
             + self.cfg.SCORE_LEADER_BONUS
             + self.cfg.SCORE_PROGRAM_BUY_BONUS
             + self.cfg.THEME_STOCK_BONUS
+            + self.cfg.SCORE_CHANGE_BAND_BONUS
             + 5 * self.cfg.SCORE_EXTRA_SUPPLY_DAY_BONUS
             + self.cfg.CONTENT_SCORE_MAX
             + self.cfg.SCORE_NEWS_BONUS
         )
-        c.score = round(raw / max_possible * 100, 1) if max_possible else 0.0
+        # 과열 감점으로 음수가 될 수 있어 0 에서 클램프 (0~100 보장)
+        c.score = round(max(raw, 0.0) / max_possible * 100, 1) if max_possible else 0.0
         return c.score

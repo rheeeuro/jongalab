@@ -20,6 +20,8 @@ _W_KEYS = [
     "SCORE_LEADER_BONUS", "SCORE_PROGRAM_BUY_BONUS", "THEME_STOCK_BONUS",
     "SCORE_EXTRA_SUPPLY_DAY_BONUS", "CONTENT_SCORE_MAX",
     "SCORE_NEWS_BONUS", "NEWS_HEAT_CAP",
+    "SCORE_CHANGE_BAND_BONUS", "SCORE_OVERHEAT_PENALTY",
+    "CHANGE_BAND_MIN_PCT", "CHANGE_BAND_MAX_PCT", "OVERHEAT_CHANGE_PCT",
 ]
 
 
@@ -38,22 +40,27 @@ def _row(c: StockCandidate) -> dict:
         "is_theme_stock": c.is_theme_stock, "supply_days": c.supply_days,
         "content_score": ClosingBetStrategy._calc_content_score(c),
         "news_count": c.news_count,
+        "change_pct": c.change_pct,
     }
 
 
-# 다양한 조합의 후보 (브래킷·플래그·콘텐츠·연속일 경계 포함)
+# 다양한 조합의 후보 (브래킷·플래그·콘텐츠·연속일·등락률 경계 포함)
 _CANDIDATES = [
     StockCandidate(code="A", name="a", sector="s"),  # 전부 기본(0/False)
     StockCandidate(code="B", name="b", sector="s", supply_score=100, ma_aligned=True,
                    near_high=True, trading_value=250_000_000_000, is_leader=True,
                    prog_net_buy=500, is_theme_stock=True, supply_days=12,
-                   content_count=3, content_avg_score=80, news_count=7),
+                   content_count=3, content_avg_score=80, news_count=7,
+                   change_pct=5.5),                       # 스윗스팟(2~12%) 가점
     StockCandidate(code="C", name="c", sector="s", supply_score=55,
                    trading_value=150_000_000_000, supply_days=7,
-                   content_count=1, content_avg_score=55),
+                   content_count=1, content_avg_score=55,
+                   change_pct=12.0),                      # 상한 경계(12%) — 가점 없음
     StockCandidate(code="D", name="d", sector="s", supply_score=30, ma_aligned=True,
                    trading_value=99_000_000_000, prog_net_buy=-10,
-                   content_count=2, content_avg_score=40),
+                   content_count=2, content_avg_score=40,
+                   change_pct=18.3),                      # 과열(15%+) 감점
+    StockCandidate(code="E", name="e", sector="s", change_pct=20.0),  # 감점 > 가점 → 0 클램프
 ]
 
 
@@ -75,6 +82,8 @@ def test_recompute_matches_engine_tuned_weights(c):
     cfg.CONTENT_SCORE_MAX = 4          # 콘텐츠 상한 < 10 → 재캡 경로 검증
     cfg.SCORE_PROGRAM_BUY_BONUS = 0
     cfg.SCORE_NEWS_BONUS = 8           # 뉴스 가중치 상향 → 뉴스 가점 경로 검증
+    cfg.SCORE_CHANGE_BAND_BONUS = 20.0 # 등락률 스윗스팟 가중치 변경 경로 검증
+    cfg.SCORE_OVERHEAT_PENALTY = 25.0  # 과열 감점 변경 + 0 클램프 경로 검증
     real = AnalysisEngine(api=None, config=cfg).score_candidate(c)
     mine = recompute_score(_row(c), _weights(cfg))
     assert mine == real
@@ -113,7 +122,7 @@ def _sample(stk, pnl, **kw):
                 outcome="WIN" if pnl > 0 else "LOSS" if pnl < 0 else "FLAT",
                 supply_score=50, ma_aligned=False, near_high=False, trading_value=0,
                 is_leader=False, prog_net_buy=0, is_theme_stock=False,
-                supply_days=0, content_score=0)
+                supply_days=0, content_score=0, change_pct=0.0)
     base.update(kw)
     return base
 

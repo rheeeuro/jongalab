@@ -7,7 +7,7 @@
 [정확 재현이 가능한 이유]
 `recompute_score()` 는 `trading_engine.AnalysisEngine.score_candidate()` 공식을 그대로 미러링한다.
 저장된 `daily_stock_report` 컴포넌트(supply_score/ma_aligned/near_high/trading_value/is_leader/
-prog_net_buy/is_theme_stock/supply_days/content_score)만으로 정확히 재현된다. 콘텐츠 항은 원천값이
+prog_net_buy/is_theme_stock/supply_days/content_score/change_pct)만으로 정확히 재현된다. 콘텐츠 항은 원천값이
 항상 ≤10 이라 저장된 content_score 를 그대로 콘텐츠 항으로 쓰고 상한(CONTENT_SCORE_MAX)만 다시 적용한다.
 
 ⚠️ 엔진(`core/trading_engine.py` score_candidate)이 가드로 보호되는 민감 파일이라 직접 수정은
@@ -53,6 +53,12 @@ def recompute_score(row: dict, w: dict) -> float:
     # 테마주
     if row.get("is_theme_stock"):
         raw += g("THEME_STOCK_BONUS")
+    # 당일 등락률 — 스윗스팟(2~12%) 가점, 과열(15%+) 감점
+    change_pct = float(row.get("change_pct") or 0)
+    if g("CHANGE_BAND_MIN_PCT") <= change_pct < g("CHANGE_BAND_MAX_PCT"):
+        raw += g("SCORE_CHANGE_BAND_BONUS")
+    elif change_pct >= g("OVERHEAT_CHANGE_PCT"):
+        raw -= g("SCORE_OVERHEAT_PENALTY")
     # 5일 초과 장기 연속 수급
     extra_days = max(int(row.get("supply_days") or 0) - 5, 0)
     raw += min(extra_days, 5) * g("SCORE_EXTRA_SUPPLY_DAY_BONUS")
@@ -70,11 +76,13 @@ def recompute_score(row: dict, w: dict) -> float:
         + g("SCORE_LEADER_BONUS")
         + g("SCORE_PROGRAM_BUY_BONUS")
         + g("THEME_STOCK_BONUS")
+        + g("SCORE_CHANGE_BAND_BONUS")
         + 5 * g("SCORE_EXTRA_SUPPLY_DAY_BONUS")
         + g("CONTENT_SCORE_MAX")
         + g("SCORE_NEWS_BONUS")
     )
-    return round(raw / max_possible * 100, 1) if max_possible else 0.0
+    # 과열 감점으로 음수가 될 수 있어 0 에서 클램프 (엔진과 동일)
+    return round(max(raw, 0.0) / max_possible * 100, 1) if max_possible else 0.0
 
 
 def _avg(xs: list) -> float:

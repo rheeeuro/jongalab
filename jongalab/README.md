@@ -30,7 +30,7 @@ jongalab/
 | `db.py` | 컨텍스트 매니저(`get_db`, `get_trading_db`) — 안전한 연결 관리 |
 | `ai_service.py` | **LLM 추상화(`analyze_content`)** — Ollama(콘텐츠 분석)/OpenAI(다이제스트) 분기. 직접 SDK 호출 금지, 항상 여기로. LLM 은 구조화 JSON(tldr/tags/summary/stocks/strategy)만 내보내고 `build_analysis_markdown()` 이 `analysis_content`(마크다운)를 재조립 |
 | `ai_utils.py` | LLM 응답 파싱(JSON 추출, 코드펜스/`<think>` 제거) |
-| `trading_engine.py` | **종가베팅 분석 엔진** ⚠️민감/가드. Phase 1 사전 스크리닝(수급·정배열·거래대금) → Phase 2 정밀(수급 그레이드·신고가·대장주·테마·콘텐츠) → 종합점수·top-N |
+| `trading_engine.py` | **종가베팅 분석 엔진** ⚠️민감/가드. Phase 1 사전 스크리닝(거래대금 상위 30·시총) → Phase 2 정밀(수급 그레이드·정배열/신고가·대장주·테마·콘텐츠·등락률) → 종합점수·top-N. 2026-07-03 실증 반영: 등락률 항(2~12% 가점/15%+ 감점) 신설, 대장주 10→3·프로그램 10→0 축소, ka10131 연속수급 버그(_AL 접미사·코스피만·abs) 수정 |
 | `prompts.py` | 콘텐츠 분석 프롬프트 ⚠️민감/가드. 구조화 출력(sentiment_score·tldr·tags·summary·stocks[방향/확신/시간축]·strategy·related_companies) |
 | `kiwoom_client.py` | 키움 데이터 서버(`:8001`) HTTP 클라이언트 — 기본/상세/수급/차트/주도주 |
 | `kis_client.py` | 한국투자증권(KIS) Open API — 코스피200 야간선물 시세, WebSocket 키 |
@@ -63,10 +63,10 @@ jongalab/
 | `telegram_listener` | 상시 | Telethon 감시. **일반 채널**(platform=telegram)→ LLM 분석 → `content_analysis`. **뉴스 채널**(platform=news, 고빈도)→ LLM 없이 사전매칭 → `news_mention` |
 | `news_ticker_seed` | 일 07:30 (등록 시 1회) | 키움 ka10099(코스피/코스닥) → `ticker_dictionary` ACTIVE 업서트. 뉴스 사전매칭 커버리지용 |
 | `cleanup_content` | 매일 04:00 | `content_analysis` 3개월 + `news_mention` 14일 이전 행 삭제(테이블 비대화 방지) |
-| `closing_bet` | 평일 08:30~20시(30분) | Phase 1/2 스크리닝 → `daily_stock_report`(Phase 2 통과 **유니버스 전체** 저장, `selected=1`=상위 top-N) + `trade_signal`(selected만 핸드오프) 적재 |
+| `closing_bet` | 평일 08:30~20시(30분) | Phase 1/2 스크리닝 → `daily_stock_report`(Phase 2 통과 **유니버스 전체** 저장, `selected=1`=상위 top-N) + `trade_signal`(selected만 핸드오프) 적재. Phase 2 하드 필터는 **음전 제외**뿐 — 정배열/신고가는 가점으로만 반영(2026-07-03 풀 확대) |
 | `gap_check` (`--base-krx`/`--base-nxt`/`--check-nxt`/`--check-krx`) | 평일 15:20 / 19:50 / 08:03 / 09:03 | 실매매 청산 창과 동일 기준의 갭 측정. 15:20 KRX·19:50 NXT 기준가를 state 로 수집(19:50 NXT 조회되는 종목=NXT 종목) → 익일 08:03 NXT 종목(`gap_nxt_*`), 09:03 KRX 종목(`gap_krx_*`) 확정 — 종목별로 자기 venue 창 하나만 채점. 기준가 미수집 시 리포트가 폴백(알림에 ≈ 표시). 텔레그램 알림은 09:03 확정 후 하루 1회 |
 | `outcome_backfill` | 평일 09:30 | `daily_stock_report` 유니버스 전체에 `next_open_ret`(리포트일 종가→다음 거래일 시가 등락률) 균일 백필 — 엣지 연구용 결과 라벨. 수정주가 차트로 분할 상쇄·±35% 초과 아티팩트 스킵. 미완결(당일)분은 다음날 재시도 |
-| `weight_tuner` | 토 08:00 | 지난주 실현손익(단 `SCORE_LOGIC_MIN_DATE`=2026-06-29 이전 구 로직 주는 스킵) → GPT 가중치 제안 → backtest 검증: IMPROVES=pending(승인 대상) / 그 외=archived(비적용·표시용) + [건강지표] 로깅 |
+| `weight_tuner` | 토 08:00 | 지난주 실현손익(단 `SCORE_LOGIC_MIN_DATE`=2026-07-06 이전 구 로직 주는 스킵) → GPT 가중치 제안 → backtest 검증: IMPROVES=pending(승인 대상) / 그 외=archived(비적용·표시용) + [건강지표] 로깅 |
 | `kis_night_futures_ws` | 평일 18:00~익일 새벽 | KIS WebSocket 야간선물 체결 → `kis_night_future` |
 | (토큰) `kis_token_refresh` | 매일 07:00 | 키움+KIS 토큰 갱신(`refresh_tokens.sh`) |
 
@@ -79,9 +79,9 @@ jongalab/
 뉴스 속보 채널(고빈도) ──사전매칭(LLM X)──► news_mention (종목·헤드라인)
                                         │
 종가 분석(closing_bet, 평일 13:00~15:00)│
-  Phase 1 거래대금·시총·정배열 필터 ─────┘
-  Phase 2 수급(기관/외인/개인/프로그램)+신고가+대장주+테마+콘텐츠+뉴스 점수
-  종합점수 = 수급 + 정배열 + 신고가 + 대장주 + 테마 + 콘텐츠 + 뉴스(가중치 튜닝 대상)
+  Phase 1 거래대금(시장별 상위 30)·시총 필터 ─┘
+  Phase 2 음전 제외(하드 필터) → 수급(기관/외인/개인/프로그램)+정배열/신고가+대장주+테마+콘텐츠+뉴스+등락률 점수
+  종합점수 = 수급 + 정배열 + 신고가 + 대장주 + 테마 + 콘텐츠 + 뉴스 + 등락률(2~12% 가점 / 15%+ 감점) (가중치 튜닝 대상)
         │  · 뉴스 재료: news_count 집계 + 후보 소수 배치 LLM 요약 → daily_stock_report 표시
         │    (SCORE_NEWS_BONUS 기본 0 → 현재 점수 무영향, 주간 튜너가 성과 따라 상향 가능)
         ├─► daily_stock_report — Phase 2 통과 유니버스 전체 저장(selected=1=상위 top-N, 0=비선정 후보)

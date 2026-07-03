@@ -94,9 +94,10 @@ REGIME_SPLIT_FULL = float(os.getenv('REGIME_SPLIT_FULL', '0.5'))
 REGIME_SPLIT_INVERT = float(os.getenv('REGIME_SPLIT_INVERT', '-0.5'))
 REGIME_MIN_MULT = float(os.getenv('REGIME_MIN_MULT', '0.3'))       # 역전 시 최소 시드 배수(30%)
 # 표본 하한 날짜(YYYY-MM-DD, inclusive) — 이 날짜 이전 report_date 는 레짐 표본에서 제외.
-# 근거: 2026-06-26 이전은 선정/스코어 로직이 달라 익일수익 판별력 비교가 무의미(=구로직). 6/29부터만 사용.
+# 근거: 선정/스코어 로직 변경 이전 표본은 익일수익 판별력 비교가 무의미(=구로직). 최신 변경일부터만 사용.
 # 창(REGIME_WINDOW_DAYS)이 이 날짜를 넘어 충분히 지나면 자연히 무의미해지는 자기소멸 가드.
-REGIME_MIN_DATE = os.getenv('REGIME_MIN_DATE', '2026-06-29')
+# 2026-07-06: jongalab 선정 로직 변경(등락률 항·풀 확대 등, SCORE_LOGIC_MIN_DATE 와 동기).
+REGIME_MIN_DATE = os.getenv('REGIME_MIN_DATE', '2026-07-06')
 
 # ── 선물 환경 게이트 (core.futures_gate) — 매수 시점 선물 방향으로 총 시드 축소(NXT 전용) ──
 # 근거: 종가베팅 손익은 익일 갭에 좌우된다. NQ(미국기술주)+코스피200 야간선물이 둘 다 하락이면

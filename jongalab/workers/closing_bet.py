@@ -158,10 +158,14 @@ class ClosingBetStrategy:
         filtered = []
         
         for c in candidates:
-            is_aligned, near_high = self.engine.check_ma_alignment(c.code)
-            if not is_aligned and not near_high:
-                logger.debug(f"정배열 아님 → 제외: {c.name}")
+            # 음전 종목 제외 — 종가베팅 전제(마감 강세)와 상충 (2026-07-03 실증: 음전 승률 최하)
+            if c.change_pct < 0:
+                logger.debug(f"음전 → 제외: {c.name} ({c.change_pct:+.1f}%)")
                 continue
+
+            # 정배열/신고가는 하드 필터에서 점수 가점으로 전환 (2026-07-03) —
+            # 필터가 풀을 하루 10개 미만까지 줄여 점수가 '선정'을 못 하던 문제 해소.
+            is_aligned, near_high = self.engine.check_ma_alignment(c.code)
             c.ma_aligned = is_aligned
             c.near_high = near_high
 
