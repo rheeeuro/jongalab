@@ -1,7 +1,12 @@
+import type { Metadata } from "next";
 import { StockReport } from "@/types";
 import { apiFetch } from "@/lib/api";
 import { StocksBrowser } from "./StocksBrowser";
 import { CandlestickChart } from "lucide-react";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/stocks" },
+};
 
 async function getLatestStockReports(): Promise<{
   date: string;

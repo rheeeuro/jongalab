@@ -1,7 +1,12 @@
+import type { Metadata } from "next";
 import { TopPick } from "@/types";
 import { apiFetch } from "@/lib/api";
 import Link from "next/link";
 import { FileText, ChevronLeft, ChevronRight } from "lucide-react";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/reports" },
+};
 import {
   ReportCalendarGrid,
   CalendarCellData,

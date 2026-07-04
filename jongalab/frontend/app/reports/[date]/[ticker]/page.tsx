@@ -57,6 +57,9 @@ export async function generateMetadata({
   return {
     title,
     description,
+    alternates: {
+      canonical: `/reports/${resolvedParams.date}/${resolvedParams.ticker}`,
+    },
     openGraph: {
       title,
       description,

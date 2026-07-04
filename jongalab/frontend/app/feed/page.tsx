@@ -1,8 +1,14 @@
+import type { Metadata } from "next";
 import { ContentAnalysis, PaginatedResponse } from "@/types";
 import { ContentCard } from "@/components/ContentCard";
 import { apiFetch } from "@/lib/api";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Newspaper } from "lucide-react";
+
+// 페이지네이션(?page=N) 변형은 기본 경로로 통합해 중복 색인을 방지한다.
+export const metadata: Metadata = {
+  alternates: { canonical: "/feed" },
+};
 
 async function getContents(
   page: number,

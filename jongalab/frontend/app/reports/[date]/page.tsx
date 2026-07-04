@@ -40,6 +40,7 @@ export async function generateMetadata({
   return {
     title,
     description,
+    alternates: { canonical: `/reports/${resolvedParams.date}` },
     openGraph: {
       title,
       description,

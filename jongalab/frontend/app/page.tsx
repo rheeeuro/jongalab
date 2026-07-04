@@ -1,5 +1,10 @@
+import type { Metadata } from "next";
 import { ContentAnalysis, StockReport, MentionStats, MarketIndex, PaginatedResponse, SectorReport, NewsHeatItem } from "@/types";
 import { apiFetch } from "@/lib/api";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 import { TodayHero } from "@/components/today/TodayHero";
 import { TopPicks } from "@/components/today/TopPicks";
 import { LeadingSectorsStrip } from "@/components/today/LeadingSectorsStrip";

@@ -1,7 +1,12 @@
+import type { Metadata } from "next";
 import { SectorReport, MentionStats } from "@/types";
 import { apiFetch } from "@/lib/api";
 import { Layers, Flame, TrendingUp, TrendingDown } from "lucide-react";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/sectors" },
+};
 
 async function getLatestSectorReport(): Promise<{
   date: string;

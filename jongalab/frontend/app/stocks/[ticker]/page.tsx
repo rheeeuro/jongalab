@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { ContentAnalysis, StockReport } from "@/types";
 import { ContentCard } from "@/components/ContentCard";
 import { StockPriceBadge } from "@/components/StockPriceBadge";
@@ -6,6 +7,21 @@ import { StockReportHistory } from "@/components/StockReportHistory";
 import { apiFetch } from "@/lib/api";
 import Link from "next/link";
 import { ArrowLeft, Sparkles } from "lucide-react";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: { ticker: string };
+}): Promise<Metadata> {
+  const resolvedParams = await Promise.resolve(params);
+  const decodedTicker = decodeURIComponent(resolvedParams.ticker).toUpperCase();
+  const stockName = await getStockName(decodedTicker);
+
+  return {
+    title: `${stockName} — 종목 분석`,
+    alternates: { canonical: `/stocks/${decodedTicker}` },
+  };
+}
 
 async function getTickerContents(ticker: string): Promise<ContentAnalysis[]> {
   return apiFetch(`/api/contents/${ticker}`, []);

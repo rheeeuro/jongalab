@@ -16,7 +16,12 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://jongalab.com";
+
 export const metadata: Metadata = {
+  // 모든 상대 canonical/openGraph URL의 기준 도메인. www/non-www·쿼리파라미터
+  // 변형이 원본으로 통합되도록 각 페이지는 metadataBase 기준 canonical을 선언한다.
+  metadataBase: new URL(SITE_URL),
   title: "종가랩 — 종가 전략 연구소",
   description: "AI가 분석해주는 매일의 주식 시장 요약",
   icons: {
