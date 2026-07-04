@@ -17,11 +17,15 @@ from core.trading_engine import (
     StockCandidate,
     AnalysisEngine,
 )
+from core.config import EDGE_SELECTION_MODE
 from core.repository.stock_report import save_stock_reports
 from core.repository.sector_report import save_sector_reports
 from core.repository.content import get_today_content_by_stock
 from core.repository.news import get_today_news_stats_by_stock, get_today_news_by_stock
 from core.repository.trade_signal import push_trade_signals
+from core.repository.edge_rule import list_rules
+from core.edge_selection import select_signals
+from core.edge_policy import family_role
 from core.news_summary import summarize_news
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -270,13 +274,23 @@ class ClosingBetStrategy:
         selected=1 로 표시하고 trade_signal 로 핸드오프한다 — 실제 매매 대상은 불변.
         LLM 뉴스 요약도 선정(top-N) 후보에만 부여해 비용을 종전과 동일하게 유지한다.
         """
+        # 섹터 상대치 파생 (F4 후발 확산형의 눈) — 유니버스 in-memory 계산, API 콜 없음.
+        # 저장 시점에 구워 넣어 rule 평가기를 행 단위 단순 비교로 유지한다(시점 재현 보장).
+        sector_chgs: dict[str, list[float]] = {}
+        for c in candidates:
+            sector_chgs.setdefault(c.sector or "기타", []).append(c.change_pct or 0.0)
+        sector_avg = {s: sum(v) / len(v) for s, v in sector_chgs.items()}
+        sector_max = {s: max(v) for s, v in sector_chgs.items()}
+
         reports = []
         summarized = 0
         for i, c in enumerate(candidates, 1):
             code = c.code.split("_")[0]
-            is_selected = 1 if i <= TRADED_TOP_N else 0
+            # LLM 뉴스 요약 예산은 점수 상위 top-N 에만 부여(비용 통제 — 선정 모드와 무관).
+            # 실제 selected(핸드오프) 판정은 아래 선정 레이어(모드 스위치)가 다시 정한다.
+            is_top_score = 1 if i <= TRADED_TOP_N else 0
             news_count = getattr(c, "news_count", 0)
-            if is_selected:
+            if is_top_score:
                 news_headlines, news_ai = self._build_news_fields(
                     c, code, news_count, summarized
                 )
@@ -320,8 +334,13 @@ class ClosingBetStrategy:
                 "news_headlines": news_headlines,
                 "score": c.score,
                 "rank_no": i,
-                "selected": is_selected,
+                "selected": is_top_score,  # 잠정값 — 아래 선정 레이어가 모드에 따라 다시 정함
+                "sector_rel_ret": (c.change_pct or 0.0) - sector_avg[c.sector or "기타"],
+                "sector_leader_chg": sector_max[c.sector or "기타"],
             })
+
+        # 선정 레이어(모드 스위치) — selected/핸드오프 대상만 정한다. 점수·rank_no·저장은 불변.
+        rule_names_by_code = self._apply_selection(reports)
 
         try:
             save_stock_reports(reports)
@@ -331,17 +350,60 @@ class ClosingBetStrategy:
 
         # 매수 시그널 핸드오프 — trading 도메인(trade_signal)으로 적재.
         # trading 의 리스크 엔진·사이징이 실제 매수 종목수를 제한하므로 상위 후보를 그대로 넘긴다.
-        # 유니버스 전체를 저장하더라도 핸드오프는 selected(top-N)만 — 실제 매매 대상은 불변.
+        # 유니버스 전체를 저장하더라도 핸드오프는 selected 만 — rule_names 로 선정 근거를 태깅한다.
         try:
             signals = [
                 {"stk_cd": r["stock_code"], "stk_nm": r["stock_name"],
-                 "rank_no": r["rank_no"], "score": r["score"]}
+                 "rank_no": r["rank_no"], "score": r["score"],
+                 "rule_names": rule_names_by_code.get(r["stock_code"])}
                 for r in reports if r["selected"]
             ]
             n = push_trade_signals(datetime.now().strftime("%Y%m%d"), signals)
             logger.info(f"trade_signal 핸드오프 {len(signals)}건 (영향 {n}행)")
         except Exception as e:
             logger.error(f"trade_signal 핸드오프 실패(trading DB 미설정?): {e}")
+
+    # ── 선정 레이어 (모드 스위치) ──
+    def _apply_selection(self, reports: list[dict]) -> dict[str, str]:
+        """EDGE_SELECTION_MODE 에 따라 각 report 의 selected 를 확정하고, 선정 종목의
+        rule_names 매핑을 반환한다. live rule 로드 실패 시 **모드 자체를 legacy 로 폴백**한다
+        — rules 모드를 빈 rule 목록으로 진행하면 매칭 0=그날 무거래가 되어 '폴백'이 아니게 된다.
+
+        점수·rank_no·저장은 이 함수가 건드리지 않는다(대조군 평가·프론트 표시 불변).
+        선정 시점(13~15시)엔 NXT 스냅샷·당일 market_snapshot 이 없어 그 피처 기반 rule 은
+        매칭될 수 없다 — 그런 rule 의 live 승격 자체를 edge_policy 실행 가능성 게이트가 막는다.
+        family 역할(selector/veto/benchmark) 판정은 core.edge_policy.FAMILY_ROLES 단일 소스.
+        """
+        mode = EDGE_SELECTION_MODE
+        live_rules, veto_rules = [], []
+        try:
+            live = list_rules(status="live")
+            veto_rules = [r for r in live if family_role(r["family"]) == "veto"]
+            # benchmark(control)는 선정에 쓰지 않는다 — selector 로 넣으면 predicate(selected==1)가
+            # 늘 top-N 을 매칭해 rules 모드의 '무거래' 의미가 깨진다(페이퍼 기준선으로만 채점).
+            live_rules = [r for r in live if family_role(r["family"]) == "selector"]
+        except Exception as e:
+            if mode != "legacy":
+                mode = "legacy"
+                logger.warning(f"live rule 로드 실패 — legacy 모드로 폴백(veto 미적용): {e}")
+            else:
+                logger.warning(f"veto rule 로드 실패 — veto 미적용: {e}")
+
+        selected_codes, rule_names_by_code, veto_log = select_signals(
+            mode, reports, live_rules, veto_rules, TRADED_TOP_N, market=None,
+        )
+        sel_set = set(selected_codes)
+        for r in reports:
+            r["selected"] = 1 if r["stock_code"] in sel_set else 0
+
+        for v in veto_log:
+            logger.info(f"veto 제외: {v['name']}({v['code']}) — {','.join(v['rules'])}")
+        logger.info(
+            f"선정 레이어(mode={mode}"
+            f"{'←' + EDGE_SELECTION_MODE + ' 폴백' if mode != EDGE_SELECTION_MODE else ''}): "
+            f"선정 {len(selected_codes)}건{' — 무거래' if not selected_codes else ''}, veto {len(veto_log)}건"
+        )
+        return rule_names_by_code
 
     # ── 관심 섹터 동적 로드 ──
     def _fetch_watchlist_sectors(self):

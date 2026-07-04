@@ -133,12 +133,46 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     --   백필(outcome_backfill 워커, 수정주가 차트로 분할 상쇄). 선정/비선정을 가르는 요인 측정용 라벨.
     selected TINYINT(1) DEFAULT 1 COMMENT '실매매 핸드오프 종목(1) / 비선정 후보(0)',
     next_open_ret FLOAT DEFAULT NULL COMMENT '리포트일 종가 → 다음 거래일 시가 등락률(%), 백필',
+    -- 결과 라벨 다중화 (Phase 2, 2026-07-04) — 앵커=KRX 확정 종가로 통일. 청산창 rule 비교용.
+    --   일봉 백필 3종(outcome_backfill, 과거 소급 가능):
+    next_high_ret FLOAT DEFAULT NULL COMMENT '종가→익일 고가 등락률(%) — 이론상 최대(VI/단일가 왜곡 유의)',
+    next_low_ret FLOAT DEFAULT NULL COMMENT '종가→익일 저가 등락률(%) — 꼬리 리스크(스톱 관통 측정)',
+    next_close_ret FLOAT DEFAULT NULL COMMENT '종가→익일 종가 등락률(%) — 홀드 시나리오',
+    --   실시간 2종(gap_check --label-nxt 08:06, 유니버스 전체, 소급 불가):
+    nxt_open_price INT DEFAULT NULL COMMENT '익일 08:06 NXT 가격(유니버스 전체)',
+    nxt_open_ret FLOAT DEFAULT NULL COMMENT 'KRX 확정 종가→익일 08:06 NXT 등락률(%) — 청산창 실측 우선 라벨',
+
+    -- 엣지 피처 스냅샷 (Phase 1, 2026-07-04) — 관측·기록 전용, 점수 무영향.
+    --   NXT 스냅샷(F3): gap_check --base-nxt(19:50)가 UPDATE. 종목당 KRX+NXT 2콜.
+    krx_close_price INT DEFAULT NULL COMMENT '15:30 확정 종가(19:50 수집)',
+    nxt_price_1950 INT DEFAULT NULL COMMENT '19:50 NXT 현재가(미상장/무거래 NULL)',
+    nxt_gap_pct FLOAT DEFAULT NULL COMMENT 'KRX 확정 종가 → 19:50 NXT 괴리율(%)',
+    nxt_after_value BIGINT DEFAULT NULL COMMENT 'NXT 세션 누적 거래대금 근사(거래량×현재가)',
+    nxt_listed TINYINT(1) DEFAULT NULL COMMENT '19:50 NXT 조회 성공 여부(NXT 상장 판별)',
+    --   섹터 상대치(F4): closing_bet 저장 시점 유니버스 in-memory 파생(API 콜 없음).
+    sector_rel_ret FLOAT DEFAULT NULL COMMENT '당일 등락률 − 동일 sector 평균 등락률(%p)',
+    sector_leader_chg FLOAT DEFAULT NULL COMMENT '동일 sector 최고 등락률(%) — 후발주 판정 분모',
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     UNIQUE KEY uq_date_code (report_date, stock_code),
     INDEX idx_report_date (report_date),
     INDEX idx_stock_code (stock_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 시장 스냅샷 (일 단위 시장 피처, F2 해외 동조·레짐 연구용). gap_check --base-nxt(19:50)가 1행 upsert.
+CREATE TABLE IF NOT EXISTS market_snapshot (
+    snapshot_date   DATE PRIMARY KEY,
+    captured_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    kospi_ret       FLOAT DEFAULT NULL,   -- 당일 코스피 등락률(%)
+    kosdaq_ret      FLOAT DEFAULT NULL,   -- 당일 코스닥 등락률(%)
+    nq_fut_ret      FLOAT DEFAULT NULL,   -- 나스닥100 선물(NQ=F) 등락률 — 19:50 시점
+    spx_ret         FLOAT DEFAULT NULL,   -- S&P500 전일 종가 등락률
+    sox_ret         FLOAT DEFAULT NULL,   -- 필라델피아 반도체(^SOX) 전일 등락률
+    vix             FLOAT DEFAULT NULL,   -- VIX 지수 값(등락률 아님)
+    usdkrw_ret      FLOAT DEFAULT NULL,   -- 원/달러 환율 등락률(%)
+    k200f_day_ret   FLOAT DEFAULT NULL,   -- 코스피200 주간선물 등락률(장 마감 기준)
+    k200f_night_ret FLOAT DEFAULT NULL    -- 야간선물 등락률(19:50 시점, kis_night_future)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 전략 설정 (단일 행, JSON으로 관리)
@@ -224,4 +258,39 @@ CREATE TABLE IF NOT EXISTS kis_night_future (
     quote_time     VARCHAR(8),                             -- 체결 시각 HHMMSS
     updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CHECK (id = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- Edge Ledger — 가설 원장 (Phase 3). rule_evaluator(09:40)가 매일 자동 채점.
+--   edge_rule: 1행 = 반증가능한 가설 1개(predicate=조건 AND 결합, status candidate→live→retired).
+--   edge_rule_daily: rule×날짜 평가 결과(스코어보드 시계열 + matched 감사 추적).
+-- 상세는 core/edge_predicate.py(평가기)·workers/rule_evaluator.py·routers/edge_rule.py.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS edge_rule (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    name          VARCHAR(50) NOT NULL UNIQUE,       -- 예: f3_nxt_gap_quality
+    family        VARCHAR(20) NOT NULL,              -- f1_news / f2_global / f3_nxt / f4_laggard / control / veto
+    description   VARCHAR(500) NOT NULL,             -- 인과 근거 필수: "누가 왜 내일 아침 사는가"
+    predicate     JSON NOT NULL,                     -- 조건 목록(AND 결합, edge_predicate DSL)
+    exit_label    VARCHAR(30) NOT NULL DEFAULT 'next_open_ret',  -- 채점에 쓸 결과 라벨 컬럼
+    status        VARCHAR(10) NOT NULL DEFAULT 'candidate',      -- candidate / live / retired
+    min_sample    INT NOT NULL DEFAULT 40,           -- 승격 심사 최소 표본(매칭 종목-일)
+    registered_at DATE NOT NULL,                     -- ★ 사전 등록일 — 이 날짜 이후 표본만 승격 판정
+    stats         JSON DEFAULT NULL,                 -- evaluator 캐시(n, mean_net, win_rate, std, ci_low, worst_low_ret, updated_through)
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    promoted_at   TIMESTAMP NULL DEFAULT NULL,
+    retired_at    TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS edge_rule_daily (
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    rule_id      INT NOT NULL,
+    report_date  DATE NOT NULL,
+    n_matched    INT NOT NULL DEFAULT 0,
+    mean_net_ret FLOAT DEFAULT NULL,                 -- 매칭 종목 평균 (exit_label − EDGE_COST_PCT)
+    matched      JSON DEFAULT NULL,                  -- [{code, name, ret, low}] 감사·복기용(ret=원본, 비용 미차감)
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_rule_date (rule_id, report_date),
+    INDEX idx_date (report_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

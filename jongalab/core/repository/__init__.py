@@ -42,9 +42,31 @@ from core.repository.stock_report import (
     get_stock_report_history,
     get_stock_reports_by_date,
     get_stock_report_dates,
+    get_report_dates_before_today,
     save_gap_check_results,
+    save_nxt_snapshot,
     get_gap_stats_by_dates,
     get_top_picks_by_dates,
+)
+
+from core.repository.market_snapshot import (
+    save_market_snapshot,
+    get_market_snapshots,
+)
+
+from core.repository.edge_rule import (
+    create_rule,
+    list_rules,
+    get_rule,
+    get_rule_by_name,
+    update_rule_stats,
+    set_rule_status,
+    count_promoted_in_month,
+    upsert_rule_daily,
+    get_scored_dates,
+    get_rule_daily,
+    get_rule_daily_since,
+    get_latest_matched,
 )
 
 from core.repository.sector_report import (

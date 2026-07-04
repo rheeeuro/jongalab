@@ -20,6 +20,13 @@ jongalab 이 만든 매수 신호(`trade_signal`)를 받아 **실제 주문을 �
 - `jongalab`(closing_bet) 가 **무엇을 살지** 결정 → `trade_signal` 적재
 - `trading` 이 **언제·얼마나·어떻게 집행**하고 포지션/리스크를 관리 (단방향, 신호만 읽음)
 
+### `trade_signal` 계약
+jongalab→trading 유일한 결합점. trading 은 `trade_date·stk_cd·stk_nm·rank_no·score·status` 를 읽어
+집행한다. `rule_names`(nullable, 2026-07-04 추가) 는 **선정 근거 edge_rule name 콤마 목록**으로
+jongalab 이 채우지만 **trading 도메인은 읽지 않는다**(하위호환 — risk_engine·execution_engine·
+seed_allocator 무변경). 실현손익→가설 귀속은 jongalab 이 `trade_signal ⨝ audit_log/fill` 로 계산.
+NULL = legacy 점수 선정(rule 미태깅). rules 모드 무거래일엔 신호 자체가 없다.
+
 ---
 
 ## 코드 구조

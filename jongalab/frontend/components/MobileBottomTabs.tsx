@@ -11,6 +11,7 @@ import {
   MoreHorizontal,
   Layers,
   FileText,
+  FlaskConical,
   Settings,
   X,
 } from "lucide-react";
@@ -18,12 +19,13 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 const PRIMARY_TABS = [
   { href: "/", label: "오늘", icon: Sparkles, match: "exact" as const },
+  { href: "/edge", label: "실험실", icon: FlaskConical },
   { href: "/market", label: "시장", icon: LineChart },
   { href: "/stocks", label: "종목", icon: CandlestickChart },
-  { href: "/feed", label: "콘텐츠", icon: Newspaper },
 ];
 
 const MORE_ITEMS = [
+  { href: "/feed", label: "콘텐츠", icon: Newspaper, desc: "유튜브·텔레그램 분석" },
   { href: "/sectors", label: "섹터", icon: Layers, desc: "섹터 트렌드 보기" },
   {
     href: "/reports",
@@ -68,6 +70,7 @@ export function MobileBottomTabs() {
   }
 
   const isMoreActive =
+    pathname.startsWith("/feed") ||
     pathname.startsWith("/sectors") ||
     pathname.startsWith("/reports") ||
     pathname.startsWith("/admin");

@@ -13,8 +13,9 @@ CREATE TABLE IF NOT EXISTS trade_signal (
     trade_date  CHAR(8) NOT NULL,                       -- YYYYMMDD
     stk_cd      VARCHAR(20) NOT NULL,
     stk_nm      VARCHAR(100),
-    rank_no     INT,                                    -- 종가베팅 후보 순위
+    rank_no     INT,                                    -- 종가베팅 후보 순위(rules 모드: rule 기대값 순)
     score       DECIMAL(6,2),
+    rule_names  VARCHAR(200) DEFAULT NULL,              -- 선정 근거 edge_rule name 목록(콤마) — NULL=legacy 점수 선정
     status      ENUM('pending','executing','done','skipped','rejected','expired') NOT NULL DEFAULT 'pending',
     note        VARCHAR(255),
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

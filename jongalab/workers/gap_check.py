@@ -6,10 +6,16 @@
 
 실행 모드(cron, 평일):
   --base-krx  15:20  당일 top-10 의 KRX 기준가 수집 → state 파일
-  --base-nxt  19:50  당일 top-10 의 NXT 기준가 수집 (조회되는 종목 = NXT 종목으로 분류)
-  --check-nxt 08:03  NXT 종목 갭 확정 → DB(gap_nxt_*) 저장. 알림 없음.
+  --base-nxt  19:50  당일 유니버스 전체의 KRX 확정 종가 + NXT 기준가 수집.
+                     → state 파일(top-10 갭 체크용, 기존 동작 불변)
+                     → daily_stock_report NXT 스냅샷 UPDATE(엣지 연구용, F3의 눈)
+                     → market_snapshot 1행 upsert(F2·레짐 연구용)
+  --check-nxt 08:03  NXT 종목 갭 확정 → DB(gap_nxt_*) 저장. 알림 없음. (실매매 경로, top-10)
   --check-krx 09:03  KRX 종목 갭 확정(+ 08:03 실패분 NXT 재시도) → DB(gap_krx_*) 저장
                      → 텔레그램 알림은 여기서 하루 한 번만 전송.
+  --label-nxt 08:06  [엣지 연구] 전일 유니버스 전체 NXT 상장 종목의 08:06 프리마켓 라벨
+                     (nxt_open_price·nxt_open_ret, 앵커=KRX 확정 종가). 실매매 08:03 경로와
+                     시각·부하 완전 분리(3분 늦어도 되는 가벼운 별도 패스). 알림 없음.
 
 기준가가 없으면(기준가 워커 미실행·마감 후 순위 진입 종목) 리포트 시점 가격으로
 폴백하고 알림에 * 로 표시한다. 이때 NXT/KRX 분류는 08:03 NXT 조회 성공 여부로 대신한다.
@@ -17,17 +23,23 @@
 import json
 import logging
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
 from core.logging_setup import setup_logging
 from core.kiwoom_client import KiwoomRestClient
 from core.trading_engine import AnalysisEngine
+from core.daily_ohlc import SANE_RET_PCT, build_ohlc_by_date
 from core.repository.stock_report import (
     get_stock_report_dates,
     get_stock_reports_by_date,
     save_gap_check_results,
+    save_nxt_snapshot,
+    save_nxt_open_labels,
 )
+from core.repository.market_snapshot import save_market_snapshot
+from core.market_data import fetch_edge_market_snapshot
 from core.notifications import send_gap_check_alert
 
 setup_logging()
@@ -79,6 +91,22 @@ def _fetch_price(api: KiwoomRestClient, code: str, nxt: bool) -> int:
     except Exception as e:
         logger.warning(f"현재가 조회 실패 [{stk_cd}]: {e}")
         return 0
+
+
+def _fetch_price_qty(api: KiwoomRestClient, code: str, nxt: bool) -> tuple[int, int]:
+    """현재가 + 누적 거래량 조회. 실패/무거래는 (0, 0). code 는 접미사 없는 종목코드.
+
+    ka10001 은 거래대금 필드가 없어 거래대금은 호출부에서 거래량×현재가로 근사한다.
+    """
+    stk_cd = code + ("_NX" if nxt else "")
+    try:
+        info = api.get_stock_basic_info(stk_cd)
+        price = abs(AnalysisEngine.parse_price(info.get("cur_prc", "0")))
+        qty = abs(AnalysisEngine.parse_price(info.get("trde_qty", "0")))
+        return price, qty
+    except Exception as e:
+        logger.warning(f"현재가/거래량 조회 실패 [{stk_cd}]: {e}")
+        return 0, 0
 
 
 def _row_meta(r: dict) -> dict:
@@ -146,6 +174,77 @@ def run_base(venue: str):
             got += 1
     _save_state(state)
     logger.info(f"{venue.upper()} 기준가 수집 {got}/{len(reports)}건 ({today})")
+
+
+def run_base_nxt():
+    """19:50 NXT 기준가 수집 (확장판) — 순수 관측·기록 레이어(매매 영향 0).
+
+    대상은 당일 유니버스 전체(include_unselected=True). 종목당 API 2콜(KRX 확정 종가 +
+    NXT 19:50 현재가, rate limit 안전권으로 콜마다 0.3s sleep).
+
+    3곳에 기록한다:
+      1) state 파일 — top-10 갭 체크용 NXT 기준가(기존 동작 불변. 전 유니버스를 담아도
+         08:03/09:03 체크는 top-10 코드만 조회하므로 무해).
+      2) daily_stock_report — krx_close_price·nxt_price_1950·nxt_gap_pct·nxt_after_value·
+         nxt_listed UPDATE(리포트 행이 이미 존재 → upsert 아님, F3의 눈).
+      3) market_snapshot — 당일 시장 지표 1행 upsert(F2·레짐의 눈).
+
+    조회 실패 종목은 NULL 유지(그날 그 종목만 F3 평가 제외) — 파이프라인은 계속 진행.
+    """
+    today = datetime.now().date().isoformat()
+    reports = get_stock_reports_by_date(today, include_unselected=True)
+    if not reports:
+        logger.info(f"{today} 리포트 없음 — 종료")
+        return
+
+    state = _state_for(today)
+    api = KiwoomRestClient()
+    api.ensure_token()
+
+    snapshot_rows = []
+    got = 0
+    for r in reports:
+        code = r["stock_code"].split(".")[0]
+        krx_price, _ = _fetch_price_qty(api, code, nxt=False)
+        time.sleep(0.3)
+        nxt_price, nxt_qty = _fetch_price_qty(api, code, nxt=True)
+        time.sleep(0.3)
+
+        nxt_listed = 1 if nxt_price > 0 else 0
+        nxt_gap_pct = None
+        if nxt_listed and krx_price > 0:
+            nxt_gap_pct = (nxt_price - krx_price) / krx_price * 100
+        # ka10001 에 거래대금 필드가 없어 거래량×현재가로 근사(순수 애프터마켓 아닌 NXT 세션 전체).
+        nxt_after_value = nxt_qty * nxt_price if (nxt_listed and nxt_qty > 0) else None
+
+        # top-10 갭 체크용 NXT 기준가(기존 run_base('nxt') 와 동일 키).
+        if nxt_price > 0:
+            state["base"].setdefault(code, {})["nxt_price"] = nxt_price
+            got += 1
+
+        snapshot_rows.append({
+            "stock_code": code,
+            "krx_close_price": krx_price or None,
+            "nxt_price_1950": nxt_price or None,
+            "nxt_gap_pct": nxt_gap_pct,
+            "nxt_after_value": nxt_after_value,
+            "nxt_listed": nxt_listed,
+        })
+
+    _save_state(state)
+    try:
+        save_nxt_snapshot(today, snapshot_rows)
+        logger.info(f"NXT 스냅샷 저장 {len(snapshot_rows)}건 (NXT 상장 {got}건, {today})")
+    except Exception as e:
+        logger.warning(f"NXT 스냅샷 DB 저장 실패: {e}")
+
+    # 시장 스냅샷 1행 upsert (F2 해외 동조·레짐 연구용)
+    try:
+        snap = fetch_edge_market_snapshot()
+        save_market_snapshot({"snapshot_date": today, **snap})
+        logger.info(f"market_snapshot 저장 완료 ({today})")
+    except Exception as e:
+        logger.warning(f"market_snapshot 저장 실패: {e}")
 
 
 # ── 갭 확정 (08:03 NXT / 09:03 KRX) ──
@@ -274,16 +373,93 @@ def run_check_krx():
     logger.info("갭 체크 완료 (알림 전송)")
 
 
+# ── 엣지 연구용 프리마켓 라벨 (08:06 NXT, 유니버스 전체) ──
+# 일봉 파싱·±35% 가드는 core.daily_ohlc 공유 모듈 — outcome_backfill 과 기준이 어긋나면
+# exit_label 간 청산창 비교가 오염되므로 반드시 같은 모듈을 쓴다.
+
+
+def _krx_close_from_chart(
+    api: KiwoomRestClient, code: str, report_dt: str,
+    cache: dict[str, dict[str, tuple[int, int, int, int]]],
+) -> int:
+    """수정주가 일봉에서 report_dt(YYYYMMDD) 종가 조회 — krx_close_price 미수집분 앵커 폴백.
+    종목당 1회만 조회(캐시). 없으면 0."""
+    if code not in cache:
+        cache[code] = build_ohlc_by_date(api, code)
+    bar = cache[code].get(report_dt)
+    return bar[3] if bar else 0
+
+
+def run_label_nxt():
+    """08:06 유니버스 전체 NXT 프리마켓 라벨 수집 (nxt_open_price·nxt_open_ret).
+
+    앵커는 전일 KRX 확정 종가(Phase 1 krx_close_price, 미수집 시 일봉 종가 폴백)로 통일한다.
+    NXT 상장 종목(nxt_listed=1)만 조회 — 미상장은 라벨 없음(4종만). 실매매 08:03 경로(top-10)와
+    시각·부하 완전 분리. 조회 실패는 NULL 유지(연구 표본만 감소, 매매 무영향).
+    """
+    logger.info("=" * 60)
+    logger.info("NXT 프리마켓 라벨 (08:06) 시작")
+    logger.info("=" * 60)
+
+    report_date = _most_recent_prior_date()
+    if not report_date:
+        logger.info("전날 리포트 없음 — 종료")
+        return
+    reports = get_stock_reports_by_date(report_date, include_unselected=True)
+    if not reports:
+        logger.info(f"{report_date} 리포트 데이터 없음 — 종료")
+        return
+
+    api = KiwoomRestClient()
+    api.ensure_token()
+
+    report_dt = report_date.replace("-", "")
+    close_cache: dict[str, dict[str, tuple[int, int, int, int]]] = {}
+    rows = []
+    listed = 0
+    for r in reports:
+        if not r.get("nxt_listed"):
+            continue  # NXT 미상장 → 프리마켓 라벨 없음(일봉 4종만 보유)
+        listed += 1
+        code = r["stock_code"].split(".")[0]
+        nxt_price = _fetch_price(api, code, nxt=True)
+        time.sleep(0.3)
+        if nxt_price <= 0:
+            continue
+
+        anchor = r.get("krx_close_price") or _krx_close_from_chart(api, code, report_dt, close_cache)
+        if not anchor or anchor <= 0:
+            continue
+        ret = (nxt_price - anchor) / anchor * 100
+        if abs(ret) > SANE_RET_PCT:
+            logger.warning(f"비정상 등락 스킵 [{code}]: {ret:+.1f}% (분할/데이터 아티팩트 의심)")
+            continue
+        rows.append({
+            "stock_code": r["stock_code"],
+            "nxt_open_price": nxt_price,
+            "nxt_open_ret": round(ret, 3),
+        })
+
+    try:
+        save_nxt_open_labels(report_date, rows)
+        logger.info(f"NXT 프리마켓 라벨 {len(rows)}/{listed}건 (NXT 상장 기준, {report_date})")
+    except Exception as e:
+        logger.warning(f"NXT 프리마켓 라벨 DB 저장 실패: {e}")
+
+
 if __name__ == "__main__":
     from core.market_calendar import exit_if_outside_window
-    # cron: --base-krx 20 15 / --base-nxt 50 19 / --check-nxt 3 8 / --check-krx 3 9 (평일)
+    # cron: --base-krx 20 15 / --base-nxt 50 19 / --check-nxt 3 8 / --label-nxt 6 8 / --check-krx 3 9 (평일)
     # 휴장일·해당 시간대 밖(pm2 수동 재기동 등)이면 종료.
     if "--base-krx" in sys.argv:
         exit_if_outside_window(15, 15)
         run_base("krx")
     elif "--base-nxt" in sys.argv:
         exit_if_outside_window(19, 19)
-        run_base("nxt")
+        run_base_nxt()
+    elif "--label-nxt" in sys.argv:
+        exit_if_outside_window(8, 8)
+        run_label_nxt()
     elif "--check-krx" in sys.argv or "--retry" in sys.argv:
         exit_if_outside_window(9, 9)
         run_check_krx()

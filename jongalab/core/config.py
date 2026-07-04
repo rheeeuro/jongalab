@@ -46,6 +46,19 @@ OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5.4-nano')
 # 2026-07-06: 등락률 항 신설·풀 확대·정배열 가점화·대장주/프로그램 가중 축소 반영(2026-07-03 실증).
 SCORE_LOGIC_MIN_DATE = os.getenv('SCORE_LOGIC_MIN_DATE', '2026-07-06')
 
+# Edge Ledger 왕복 거래비용(%) — 모든 가설 기대값은 이 값 차감 후로만 비교한다(README §5-2 비용 차감 원칙).
+# 기본 0.25 = 세금 0.15 + 수수료 + 슬리피지 보수 추정. trading `fill` 실측치로 분기별 보정하고
+# 보정 이력은 docs/plan/03-edge-ledger.md 에 기록한다.
+EDGE_COST_PCT = float(os.getenv('EDGE_COST_PCT', '0.25'))
+
+# 선정 레이어 모드(Phase 4). closing_bet 의 selected 판정·trade_signal 핸드오프에만 영향 —
+# 점수 계산·저장·rank_no 는 모든 모드에서 불변(대조군 평가·프론트 표시용). trading 도메인 무변경.
+#   legacy : 현행 점수 rank_no ≤ TRADED_TOP_N (기본값 — 데이터 게이트 통과 전까지 유지)
+#   hybrid : live rule 매칭 우선 + 잔여 슬롯 점수순 (총 상한 TRADED_TOP_N)
+#   rules  : live rule 매칭 합집합만(상한 초과 시 rule 기대값 순). 매칭 0 = 그날 무거래
+# veto(감액·제외) rule 은 모드와 무관하게 선정 직전 적용. 롤백: 이 값을 legacy 로 되돌리면 즉시 원복.
+EDGE_SELECTION_MODE = os.getenv('EDGE_SELECTION_MODE', 'legacy')
+
 # 키움 데이터 서버 (별도 FastAPI, localhost) — core.kiwoom_client 가 호출
 KIWOOM_BASE_URL = os.getenv('KIWOOM_BASE_URL', 'http://127.0.0.1:8001')
 

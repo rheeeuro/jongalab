@@ -111,6 +111,7 @@ MARKET_INDICES = {
         {"symbol": "^GSPC", "name": "S&P 500"},
         {"symbol": "^IXIC", "name": "NASDAQ"},
         {"symbol": "^DJI", "name": "다우존스"},
+        {"symbol": "^SOX", "name": "필라델피아 반도체"},
         {"symbol": "^VIX", "name": "VIX (공포지수)"},
         {"symbol": "DX-Y.NYB", "name": "달러 인덱스"},
     ],
@@ -386,3 +387,43 @@ def fetch_market_indices() -> dict:
     grouped["FUTURES"] = [fut_night, fut_day] + grouped.get("FUTURES", [])
 
     return grouped
+
+
+# ── 엣지 연구용 시장 스냅샷 (market_snapshot 테이블 1행) ──
+
+def fetch_edge_market_snapshot() -> dict:
+    """일 단위 시장 피처 한 세트 조회 — market_snapshot 컬럼과 1:1 대응(F2·레짐 연구용).
+
+    기존 표시용 조회 경로를 그대로 재사용한다: 미국·환율은 yfinance(_fetch_quote),
+    국내 지수는 KIS(inquire_index_price), 코스피200 선물은 주간/야간 헬퍼.
+    개별 실패 항목은 None(그 지표만 제외, 나머지는 계속). vix 는 등락률이 아닌 지수 값.
+    """
+    yf_items = [
+        {"symbol": "NQ=F", "name": "NQ"},
+        {"symbol": "^GSPC", "name": "SPX"},
+        {"symbol": "^SOX", "name": "SOX"},
+        {"symbol": "^VIX", "name": "VIX"},
+        {"symbol": "USDKRW=X", "name": "USDKRW"},
+    ]
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        q = list(executor.map(_fetch_quote, yf_items))
+    nq, spx, sox, vix, usdkrw = q
+
+    def _kis_index_pct(index_code: str) -> float | None:
+        try:
+            quote = _get_kis().inquire_index_price(index_code)
+            return quote.get("change_percent") if quote else None
+        except Exception:
+            return None
+
+    return {
+        "kospi_ret": _kis_index_pct("0001"),
+        "kosdaq_ret": _kis_index_pct("1001"),
+        "nq_fut_ret": nq.get("change_percent"),
+        "spx_ret": spx.get("change_percent"),
+        "sox_ret": sox.get("change_percent"),
+        "vix": vix.get("price"),
+        "usdkrw_ret": usdkrw.get("change_percent"),
+        "k200f_day_ret": _kospi200_day_future().get("change_percent"),
+        "k200f_night_ret": _kospi200_night_future().get("change_percent"),
+    }

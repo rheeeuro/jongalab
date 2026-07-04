@@ -17,6 +17,7 @@ from routers.strategy_config import router as strategy_config_router
 from routers.weight_tuning import router as weight_tuning_router
 from routers.telegram_user import router as telegram_user_router
 from routers.ticker import router as ticker_router
+from routers.edge_rule import router as edge_rule_router
 
 app = FastAPI()
 
@@ -44,6 +45,8 @@ app.include_router(telegram_user_router, dependencies=[Depends(require_admin)])
 # ticker-dictionary 는 GET(목록/resolve)이 공개 sitemap 등에서 쓰이므로 라우터 단위로 막지 않고,
 # 변경(PUT/DELETE)에만 ticker.py 에서 개별 require_admin 을 건다.
 app.include_router(ticker_router)
+# edge-rules 는 GET(스코어보드)이 공개, 변경(등록/승격/강등)만 edge_rule.py 에서 개별 require_admin.
+app.include_router(edge_rule_router)
 
 
 @app.get("/")

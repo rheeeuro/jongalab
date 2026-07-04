@@ -271,3 +271,70 @@ export interface WeightTuningProposal {
   created_at: string;
   applied_at: string | null;
 }
+
+// ── Edge Ledger (가설 스코어보드) — 백엔드 edge_rule / edge_rule_daily 응답 shape 과 1:1 ──
+export interface EdgeRuleStats {
+  n: number;
+  mean_net: number | null;      // 비용(EDGE_COST_PCT) 차감 후 평균 순수익(%)
+  win_rate: number | null;
+  std: number | null;
+  ci_low: number | null;        // 단측 95% 신뢰구간 하한 — 승격 게이트(>0)
+  worst_low_ret: number | null; // 매칭 종목 익일 저가 최악값(꼬리)
+  updated_through: string | null;
+  recent_n?: number;
+  recent_mean_net?: number | null;
+  // 승격 게이트(core/edge_policy.check_promotion) 통과 여부 — 평가기가 계산해 저장.
+  // 프론트는 이 값을 렌더링만 한다(조건을 프론트에서 재계산하지 않음 — 단일 소스).
+  promo_eligible?: boolean;
+}
+
+export interface PredicateCond {
+  col: string;
+  op: string;
+  value?: unknown;
+}
+
+export interface EdgeRule {
+  id: number;
+  name: string;
+  family: string;              // f1_news / f2_global / f3_nxt / f4_laggard / control / veto
+  description: string;
+  predicate: PredicateCond[];
+  exit_label: string;
+  status: 'candidate' | 'live' | 'retired';
+  min_sample: number;
+  registered_at: string;
+  stats: EdgeRuleStats | null;
+  created_at: string;
+  promoted_at: string | null;
+  retired_at: string | null;
+}
+
+export interface EdgeRuleMatched {
+  code: string;
+  name: string;
+  ret: number | null;   // exit_label 값(비용 미차감 원본)
+  low: number | null;   // next_low_ret(꼬리)
+}
+
+// daily 시계열은 matched(일별 매칭 종목 전체)를 싣지 않는다 — 페이로드 비대화 방지.
+// 상세 뷰의 '최근 매칭 종목'은 latest_matched(1일치)로 별도 수신.
+export interface EdgeRuleDaily {
+  id: number;
+  rule_id: number;
+  report_date: string;
+  n_matched: number;
+  mean_net_ret: number | null;
+  created_at: string;
+}
+
+export interface EdgeRuleLatestMatched {
+  report_date: string;
+  matched: EdgeRuleMatched[] | null;
+}
+
+// 서버 페이지가 rule + 일별 시계열(+최신 매칭 1일치)을 함께 실어 카드/상세로 내려준다.
+export type EdgeRuleWithDaily = EdgeRule & {
+  daily: EdgeRuleDaily[];
+  latest_matched: EdgeRuleLatestMatched | null;
+};

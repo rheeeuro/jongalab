@@ -165,6 +165,62 @@ def build_gap_check_message(
     return message, wins, losses
 
 
+def send_edge_rule_alert(
+    promotions: list[dict], demotions: list[dict], exec_pending: list[dict] | None = None
+):
+    """Edge Ledger 상태 전이 알림 — 관리자(ADMIN)에게만. 실제 전이는 수동 승인이며 이건 알림뿐.
+
+    promotions:   승격 후보 — core.edge_policy.check_promotion 게이트 전체 충족 candidate.
+    exec_pending: 집행 설계 필요 — 통계 게이트는 충족했지만 선정 시점(13~15시) 실행 불가
+                  피처를 써서 승격이 막힌 candidate(페이퍼 엣지 확인, 집행 시점 재설계 후보).
+    demotions:    강등 검토(최근 표본 mean_net<0) live rule 요약.
+    각 항목: {name, family, n, mean_net, ci_low[, reason]}. 전부 비면 전송하지 않는다.
+    """
+    exec_pending = exec_pending or []
+    if not promotions and not demotions and not exec_pending:
+        return
+
+    def _pct(v) -> str:
+        return f"{v:+.2f}%" if v is not None else "—"  # 표본 0 등 미산출 값 방어
+
+    def _rule_line(r: dict, prefix: str = "평균순수익") -> str:
+        line = f"• *{r['name']}* (`{r['family']}`) — n={r['n']}, {prefix} {_pct(r.get('mean_net'))}"
+        if "ci_low" in r:
+            line += f", CI하한 {_pct(r.get('ci_low'))}"
+        return line
+
+    try:
+        sections = []
+        if promotions:
+            sections.append(
+                "🟢 *승격 후보 (candidate→live 검토)*\n"
+                + "\n".join(_rule_line(r) for r in promotions)
+            )
+        if exec_pending:
+            sections.append(
+                "🟡 *집행 설계 필요 (통계 충족, 선정 시점 실행 불가 피처)*\n"
+                + "\n".join(_rule_line(r) for r in exec_pending)
+            )
+        if demotions:
+            sections.append(
+                "🔴 *강등 검토 (live→retired 판단)*\n"
+                + "\n".join(_rule_line(r, prefix="최근 평균순수익") for r in demotions)
+            )
+        message = (
+            "🧪 *[Edge Ledger] 상태 전이 알림*\n"
+            "_전이는 관리자 API 수동 승인 — 아래는 후보일 뿐입니다._\n"
+            "──────────────────\n\n"
+            + "\n\n".join(sections)
+        )
+        count = _send_telegram_admin(message)
+        logging.info(
+            f"📨 Edge Ledger 알림 전송 -> {count}개 (승격후보 {len(promotions)} / "
+            f"집행설계필요 {len(exec_pending)} / 강등검토 {len(demotions)})"
+        )
+    except Exception as e:
+        logging.error(f"❌ Edge Ledger 알림 실패: {e}")
+
+
 def send_gap_check_alert(report_date: str, check_time: str, rows: list[dict]):
     """갭 체크 최종 리포트 전송 — KRX 체크(09:03)까지 끝난 뒤 하루 한 번만 호출된다.
 

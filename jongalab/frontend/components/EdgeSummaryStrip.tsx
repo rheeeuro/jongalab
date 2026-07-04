@@ -1,0 +1,35 @@
+import type { EdgeRule } from "@/types";
+import { isPromotionCandidate } from "@/lib/edge";
+
+// 요약 스탯 타일(가로 스크롤). 모바일에서 한 줄에 다 안 들어가도 스크롤로 본다.
+export function EdgeSummaryStrip({ rules }: { rules: EdgeRule[] }) {
+  const live = rules.filter((r) => r.status === "live").length;
+  const candidate = rules.filter((r) => r.status === "candidate").length;
+  const retired = rules.filter((r) => r.status === "retired").length;
+  const promo = rules.filter(isPromotionCandidate).length;
+
+  const tiles: { label: string; value: number; accent: string }[] = [
+    { label: "실전 적용", value: live, accent: "text-emerald-600 dark:text-emerald-400" },
+    { label: "검증 중", value: candidate, accent: "text-slate-700 dark:text-slate-200" },
+    { label: "검증 통과", value: promo, accent: "text-rose-600 dark:text-rose-400" },
+    { label: "종료", value: retired, accent: "text-slate-400 dark:text-slate-500" },
+  ];
+
+  return (
+    <div className="-mx-4 flex gap-2.5 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {tiles.map((t) => (
+        <div
+          key={t.label}
+          className="flex min-w-[92px] shrink-0 flex-col rounded-2xl border border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-[#1c1c22]"
+        >
+          <span className="text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+            {t.label}
+          </span>
+          <span className={`mt-0.5 text-2xl font-extrabold tabular-nums ${t.accent}`}>
+            {t.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}

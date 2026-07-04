@@ -10,12 +10,14 @@ import {
   Newspaper,
   CandlestickChart,
   FileText,
+  FlaskConical,
   Settings,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const NAV_ITEMS = [
   { href: "/", label: "오늘", icon: Sparkles, match: "exact" as const },
+  { href: "/edge", label: "실험실", icon: FlaskConical },
   { href: "/market", label: "시장", icon: LineChart },
   { href: "/stocks", label: "종목", icon: CandlestickChart },
   { href: "/sectors", label: "섹터", icon: Layers },

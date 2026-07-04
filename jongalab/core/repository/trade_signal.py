@@ -15,37 +15,55 @@ from core.db import get_trading_db
 logger = logging.getLogger("TradeSignal")
 
 
+# rule_names 컬럼 존재 여부(Phase 4 마이그레이션 적용 여부) — 프로세스당 1회만 프로브.
+# 워커는 단발 프로세스라 마이그레이션 적용은 다음 실행부터 자연 반영된다.
+_HAS_RULE_NAMES: bool | None = None
+
+
+def _has_rule_names(cursor) -> bool:
+    global _HAS_RULE_NAMES
+    if _HAS_RULE_NAMES is None:
+        cursor.execute(
+            """SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = 'trade_signal' AND COLUMN_NAME = 'rule_names'"""
+        )
+        _HAS_RULE_NAMES = bool(cursor.fetchone()["c"])
+    return _HAS_RULE_NAMES
+
+
 def push_trade_signals(trade_date: str, candidates: list[dict]) -> int:
     """후보 목록을 trade_signal 에 upsert. 반영된 행 수 반환.
 
-    candidates: [{stk_cd, stk_nm, rank_no, score}, ...]
-    신규는 status='pending' 으로 삽입, 기존은 stk_nm/rank_no/score 갱신 + expired→pending 복귀
-    (done/skipped/rejected/executing 보존).
+    candidates: [{stk_cd, stk_nm, rank_no, score, rule_names?}, ...]
+    신규는 status='pending' 으로 삽입, 기존은 stk_nm/rank_no/score(+rule_names) 갱신 +
+    expired→pending 복귀(done/skipped/rejected/executing 보존).
+    rule_names 는 선정 근거 edge_rule name 콤마 목록(legacy 선정은 None). 컬럼이 없으면
+    (Phase 4 마이그레이션 미적용) 조용히 무시하고 기존 컬럼만 쓴다(하위호환).
+    SQL 은 컬럼 목록에서 한 번만 조립한다 — 유무 분기용 문장 2벌 유지 금지(드리프트 방지).
     """
     if not candidates:
         return 0
 
-    rows = [
-        (
-            trade_date,
-            c["stk_cd"],
-            c.get("stk_nm"),
-            c.get("rank_no"),
-            c.get("score"),
-        )
-        for c in candidates
-    ]
     codes = [c["stk_cd"] for c in candidates]
     with get_trading_db() as (conn, cursor):
+        # 갱신 대상 컬럼(candidates dict 키와 1:1). rule_names 는 마이그레이션 적용 시에만.
+        value_cols = ["stk_nm", "rank_no", "score"]
+        if _has_rule_names(cursor):
+            value_cols.append("rule_names")
+        cols = ["trade_date", "stk_cd", *value_cols]
+        rows = [
+            (trade_date, c["stk_cd"], *(c.get(k) for k in value_cols))
+            for c in candidates
+        ]
+        updates = ",\n                       ".join(f"{k} = VALUES({k})" for k in value_cols)
         cursor.executemany(
-            """INSERT INTO trade_signal (trade_date, stk_cd, stk_nm, rank_no, score, status)
-               VALUES (%s, %s, %s, %s, %s, 'pending')
+            f"""INSERT INTO trade_signal ({", ".join(cols)}, status)
+               VALUES ({", ".join(["%s"] * len(cols))}, 'pending')
                ON DUPLICATE KEY UPDATE
-                   stk_nm = VALUES(stk_nm),
-                   rank_no = VALUES(rank_no),
-                   score = VALUES(score),
-                   status = IF(status = 'expired', 'pending', status),
-                   updated_at = CURRENT_TIMESTAMP""",
+                       {updates},
+                       status = IF(status = 'expired', 'pending', status),
+                       updated_at = CURRENT_TIMESTAMP""",
             rows,
         )
         upserted = cursor.rowcount

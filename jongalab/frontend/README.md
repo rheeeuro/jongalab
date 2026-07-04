@@ -19,6 +19,23 @@ frontend/
 - 차트는 recharts, 아이콘은 lucide-react, 스타일은 Tailwind 4 유틸리티.
 - 새 카드 컴포넌트는 `/new-card` 스캐폴드를 사용한다.
 - 타입은 `types/index.ts` 에 정의하고 백엔드 응답과 어긋나지 않게 유지한다.
+- admin 변경(POST)은 클라이언트에서 직접 백엔드를 부르지 않고 **로컬 라우트 핸들러**(`app/api/*`)를
+  거친다 — 서버에서 httpOnly 세션 쿠키를 백엔드 인증 헤더로 주입한다(`lib/api.adminAuthHeaders`).
+
+## 주요 화면
+- `/edge` — **전략 실험실**(Edge Ledger, 네비 라벨 "실험실"). **읽기 전용 공개 화면** — 서버
+  컴포넌트가 `getEdgeRules()`+각 rule 일별 시계열(+최신 매칭 1일치)을 실어 `EdgeBoard`(클라)로
+  내려준다. 상태 그룹(실전 적용→검증 중→종료 접힘) 카드 + 요약 스트립 + 상세 바텀시트(일별
+  막대차트·선정 조건·최근 매칭) + 접이식 도움말("이 화면은 어떻게 보나요?").
+  검증 중은 회색조+진행바(모의), 실전 적용은 컬러 — "모의 성적 ≠ 실탄"을 시각 구분.
+  **용어 원칙**: 코드 용어(rule/candidate/predicate/CI)를 노출하지 않는다 — 한국어 라벨·도움말은
+  전부 `lib/edge.ts`(STATUS_LABEL·STAT_META·FAMILY_META·condText 컬럼 사전)에서 일괄 관리.
+  컴포넌트: `EdgeSummaryStrip`·`EdgeRuleCard`·`EdgeRuleDetail`.
+- `/admin/edge-rules` — **전략 관리**(admin 탭). 실전 투입(promote)/종료(retire)는 **여기서만**
+  한다(공개 화면엔 버튼 없음). 섹션: 검증 통과 대기 → 실전 적용 중 → 검증 중 → 종료(접힘).
+  확인 다이얼로그 후 `app/api/edge-rules/[id]`(admin 프록시, httpOnly 쿠키 주입) 호출 —
+  조건 미충족 409 사유를 그대로 표시(게이트는 백엔드 단일 소스). 목록은 `app/api/edge-rules`
+  GET 프록시로 조회.
 
 ## 개발 / 검증
 ```bash

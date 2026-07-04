@@ -24,8 +24,8 @@ def save_stock_reports(candidates: list[dict]):
              is_leader, is_theme_stock, content_score,
              news_count, news_unique_count, news_pm_count, news_first_today, news_prior_avg,
              news_summary, news_sentiment, news_catalyst, news_headlines,
-             score, rank_no, selected)
-            VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             score, rank_no, selected, sector_rel_ret, sector_leader_chg)
+            VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         for c in candidates:
             supply_history_json = json.dumps(
@@ -54,6 +54,7 @@ def save_stock_reports(candidates: list[dict]):
                 c.get("news_summary"), c.get("news_sentiment"), c.get("news_catalyst"),
                 news_headlines_json,
                 c["score"], c["rank_no"], c.get("selected", 1),
+                c.get("sector_rel_ret"), c.get("sector_leader_chg"),
             ))
         conn.commit()
 
@@ -173,6 +174,37 @@ def save_gap_check_results(report_date: str, rows: list[dict]):
                        gap_checked_at = CURRENT_TIMESTAMP
                    WHERE report_date = %s AND rank_no = %s""",
                 (nxt_price, nxt_pct, krx_price, krx_pct, rd, rank),
+            )
+        conn.commit()
+
+
+def save_nxt_snapshot(report_date: str, rows: list[dict]):
+    """19:50 NXT 스냅샷을 daily_stock_report 에 UPDATE (upsert 아님 — 리포트 행이 이미 존재).
+
+    rows 항목: {stock_code, krx_close_price, nxt_price_1950, nxt_gap_pct,
+                nxt_after_value, nxt_listed}. None 값은 COALESCE 로 기존 값 보존.
+    stock_code(6자리) 기준으로 매칭 — closing_bet 저장 코드와 동일 형식.
+    """
+    if not rows:
+        return
+    with get_db() as (conn, cursor):
+        for r in rows:
+            code = r.get("stock_code")
+            if not code:
+                continue
+            cursor.execute(
+                """UPDATE daily_stock_report
+                   SET krx_close_price = COALESCE(%s, krx_close_price),
+                       nxt_price_1950  = COALESCE(%s, nxt_price_1950),
+                       nxt_gap_pct     = COALESCE(%s, nxt_gap_pct),
+                       nxt_after_value = COALESCE(%s, nxt_after_value),
+                       nxt_listed      = COALESCE(%s, nxt_listed)
+                   WHERE report_date = %s AND stock_code = %s""",
+                (
+                    r.get("krx_close_price"), r.get("nxt_price_1950"),
+                    r.get("nxt_gap_pct"), r.get("nxt_after_value"),
+                    r.get("nxt_listed"), report_date, code,
+                ),
             )
         conn.commit()
 
@@ -346,15 +378,37 @@ def _serialize_dates(row: dict):
         row["reason"] = build_score_reason(row)
 
 
-# ── 엣지 연구용 결과 백필 (outcome_backfill 워커) ──
-def get_dates_missing_outcome(min_date: str | None = None) -> list[str]:
-    """next_open_ret 이 아직 안 채워진 행이 하나라도 있는 report_date 목록(오래된→최신).
+def get_report_dates_before_today() -> list[str]:
+    """과거(오늘 제외) report_date 전체(오래된→최신) — rule_evaluator catch-up 채점 후보용.
 
-    min_date(YYYY-MM-DD) 이후만. 오늘 날짜는 '다음 거래일 시가'가 아직 없으므로 제외한다.
+    get_stock_report_dates(최신순·limit)와 달리 상한 없이 전체를 오름차순으로 준다.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT DISTINCT report_date FROM daily_stock_report
+                WHERE report_date < CURDATE() ORDER BY report_date ASC"""
+        )
+        return [
+            r["report_date"].isoformat() if hasattr(r["report_date"], "isoformat")
+            else str(r["report_date"])
+            for r in cursor.fetchall()
+        ]
+
+
+# ── 엣지 연구용 결과 백필 (outcome_backfill 워커) ──
+# 일봉 백필 라벨 4종(같은 일봉 1회 조회에서 파생). nxt_open_ret 은 실시간 수집이라 별도.
+_OUTCOME_LABELS = ("next_open_ret", "next_high_ret", "next_low_ret", "next_close_ret")
+_OUTCOME_MISSING_COND = " OR ".join(f"{c} IS NULL" for c in _OUTCOME_LABELS)
+
+
+def get_dates_missing_outcome(min_date: str | None = None) -> list[str]:
+    """일봉 라벨 4종 중 하나라도 안 채워진 행이 있는 report_date 목록(오래된→최신).
+
+    min_date(YYYY-MM-DD) 이후만. 오늘 날짜는 '다음 거래일'이 아직 없으므로 제외한다.
     """
     with get_db() as (conn, cursor):
         params: list = []
-        cond = "next_open_ret IS NULL AND report_date < CURDATE()"
+        cond = f"({_OUTCOME_MISSING_COND}) AND report_date < CURDATE()"
         if min_date:
             cond += " AND report_date >= %s"
             params.append(min_date)
@@ -372,27 +426,61 @@ def get_dates_missing_outcome(min_date: str | None = None) -> list[str]:
 
 
 def get_rows_missing_outcome(report_date: str) -> list[dict]:
-    """특정 report_date 에서 next_open_ret 이 비어있는 행(코드·리포트가) 목록."""
+    """특정 report_date 에서 일봉 라벨 4종 중 하나라도 비어있는 행 목록.
+
+    반환: stock_code·current_price + 라벨 4종(이미 채워진 라벨은 COALESCE 로 보존되므로
+    호출부는 전부 재계산해 넘겨도 무방).
+    """
+    labels = ", ".join(_OUTCOME_LABELS)
     with get_db() as (conn, cursor):
         cursor.execute(
-            """SELECT stock_code, current_price FROM daily_stock_report
-                WHERE report_date = %s AND next_open_ret IS NULL""",
+            f"""SELECT stock_code, current_price, {labels} FROM daily_stock_report
+                WHERE report_date = %s AND ({_OUTCOME_MISSING_COND})""",
             (report_date,),
         )
         return cursor.fetchall()
 
 
-def save_next_open_ret(report_date: str, results: list[dict]) -> int:
-    """익일 시가 등락률 백필. results: [{stock_code, next_open_ret}]. 갱신 행 수 반환."""
+def save_outcome_labels(report_date: str, results: list[dict]) -> int:
+    """일봉 결과 라벨 백필. results: [{stock_code, next_open_ret, next_high_ret,
+    next_low_ret, next_close_ret}]. None 라벨은 COALESCE 로 기존 값 보존(멱등). 갱신 행 수 반환.
+    """
     if not results:
         return 0
+    sets = ", ".join(f"{c} = COALESCE(%s, {c})" for c in _OUTCOME_LABELS)
     n = 0
     with get_db() as (conn, cursor):
         for r in results:
             cursor.execute(
-                """UPDATE daily_stock_report SET next_open_ret = %s
+                f"""UPDATE daily_stock_report SET {sets}
                     WHERE report_date = %s AND stock_code = %s""",
-                (r["next_open_ret"], report_date, r["stock_code"]),
+                (*(r.get(c) for c in _OUTCOME_LABELS), report_date, r["stock_code"]),
+            )
+            n += cursor.rowcount
+        conn.commit()
+    return n
+
+
+def save_next_open_ret(report_date: str, results: list[dict]) -> int:
+    """하위호환 shim — 단일 next_open_ret 만 담긴 results 를 save_outcome_labels 로 위임."""
+    return save_outcome_labels(report_date, results)
+
+
+def save_nxt_open_labels(report_date: str, rows: list[dict]) -> int:
+    """08:06 NXT 프리마켓 라벨 UPDATE. rows: [{stock_code, nxt_open_price, nxt_open_ret}].
+    None 은 COALESCE 로 기존 값 보존. 갱신 행 수 반환.
+    """
+    if not rows:
+        return 0
+    n = 0
+    with get_db() as (conn, cursor):
+        for r in rows:
+            cursor.execute(
+                """UPDATE daily_stock_report
+                   SET nxt_open_price = COALESCE(%s, nxt_open_price),
+                       nxt_open_ret   = COALESCE(%s, nxt_open_ret)
+                   WHERE report_date = %s AND stock_code = %s""",
+                (r.get("nxt_open_price"), r.get("nxt_open_ret"), report_date, r["stock_code"]),
             )
             n += cursor.rowcount
         conn.commit()
