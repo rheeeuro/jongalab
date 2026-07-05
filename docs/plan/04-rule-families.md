@@ -56,6 +56,60 @@
 - **predicate**: `is_leader == 0` AND `sector_leader_chg >= 8` (대장 급등) AND
   `sector_rel_ret between [-3, 0]` (후발 저반응) AND `change_pct >= 0`
 
+### `f4_theme_follower` (2026-07-05 추가 — 테마 단위 정밀판)
+- **매수자**: 테마 대장이 부담스러운 추격 매수자 — 관심이 동일 테마 후발주로 확산.
+- **predicate**: `theme_strength >= 3` (테마 당일 +3%↑) AND `change_pct between [0, 4]` (본인 저반응)
+
+## F5 — 수급 구조형 (2026-07-05 추가 — 키움 장중 수급·차트 피처, 전부 선정 시점 컬럼)
+
+### `f5_inst_frgn_dual_buy`
+- **매수자**: 포지션을 하루에 다 못 채운 기관·외국인. 정보 우위 주체 둘이 같은 날 동반
+  순매수하며 연속 수급까지 붙은 종목은 익일에도 이어 담는다(수급 연속성).
+- **predicate**: `inst_net_buy > 0` AND `frgn_net_buy > 0` AND `supply_days >= 3` AND
+  `change_pct between [0, 10]`
+
+### `f5_retail_solo_pump` — **음의 가설 (착시 검증용)**
+- **가설**: 기관·외국인이 순매도하는데 개인 매수만으로 오른 급등(`change_pct >= 5`)은
+  받아줄 다음 매수자가 없어 익일 되돌림(기대: mean_net ≤ 0).
+- **의미**: 검증되면 veto rule 전환 근거가 된다.
+- **predicate**: `indv_net_buy > 0` AND `inst_net_buy < 0` AND `frgn_net_buy < 0` AND
+  `change_pct >= 5`
+
+### `f5_breakout_structure`
+- **매수자**: 아침 신고가 돌파를 확인하고 진입하는 추세추종자. 52주 신고가 부근은 물린
+  매물(저항)이 없어 정배열 돌파에 후속 자금이 붙는다.
+- **predicate**: `ma_aligned == 1` AND `near_high == 1` AND `change_pct between [1, 8]`
+
+### `f5_foreign_broker_top` (파생 컬럼 2차, 2026-07-05 등록)
+- **매수자**: 창구를 통해 계속 사는 외국계 기관 — 상위 5 매수거래원 중 외국계 2곳 이상은
+  기관성 자금 흔적이고, 포지션을 하루에 다 채우지 못한다.
+- **predicate**: `foreign_brokers_buying == 1` AND `supply_score >= 50` AND `change_pct between [0, 12]`
+
+### `f5_late_day_strength`
+- **매수자**: 마감 강세를 확인하고 다음날 아침 따라붙는 모멘텀 매수자 — 오후장까지 매수
+  우위가 유지되면 못 채운 수요가 익일 시초가로 이월된다.
+- **predicate**: `afternoon_ret >= 1.5` (13시 시가 대비) AND `change_pct between [1, 12]`
+
+### `f5_volume_surprise`
+- **매수자**: 당일 소식을 저녁에 접하고 익일 아침 유입되는 후발 관심 매수자 — 평소 대비
+  거래량 폭증은 신규 관심의 가장 원초적 신호.
+- **predicate**: `vol_ratio >= 5` (20일 평균 대비) AND `change_pct between [2, 12]`
+
+### `f5_prog_persistent` — f5_prog_negative_check 의 분리 가설
+- **가설**: 하루치 프로그램 순매수는 역효과 의심이지만, 5일 중 4일 이상 연속 순매수는
+  바스켓 리밸런싱성 지속 매수라 다르다.
+- **predicate**: `prog_buy_days >= 4` AND `change_pct between [0, 10]`
+
+### `f5_universe_new_entry`
+- **매수자**: 새 주도주 후보를 다음날 발견하고 진입하는 후발 참여자 — 직전 14일 유니버스에
+  없던 거래대금 상위 첫 등장은 시장 관심의 신규 발생(news_first_today 의 가격·수급 버전).
+- **predicate**: `first_seen == 1` AND `change_pct between [3, 15]`
+
+### `f5_frgn_exhaust_rise`
+- **매수자**: 지분 확대 중인 외국인 — 소진율 실증가는 장중 잠정 순매수보다 확정적이고,
+  지분을 늘리는 외국인은 며칠에 걸쳐 나눠 산다.
+- **predicate**: `frgn_exhaust_chg >= 0.2` (%p, 직전 리포트 거래일 대비) AND `change_pct between [0, 10]`
+
 ## veto — 감액·제외 전용 (검증 없이 조기 live 가능, README §5-4)
 
 ### `veto_overheat_gap`

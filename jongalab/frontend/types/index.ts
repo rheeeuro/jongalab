@@ -297,7 +297,7 @@ export interface PredicateCond {
 export interface EdgeRule {
   id: number;
   name: string;
-  family: string;              // f1_news / f2_global / f3_nxt / f4_laggard / control / veto
+  family: string;              // f1_news / f2_global / f3_nxt / f4_laggard / f5_supply / control / veto
   description: string;
   predicate: PredicateCond[];
   exit_label: string;

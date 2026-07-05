@@ -24,8 +24,10 @@ def save_stock_reports(candidates: list[dict]):
              is_leader, is_theme_stock, content_score,
              news_count, news_unique_count, news_pm_count, news_first_today, news_prior_avg,
              news_summary, news_sentiment, news_catalyst, news_headlines,
-             score, rank_no, selected, sector_rel_ret, sector_leader_chg)
-            VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             score, rank_no, selected, sector_rel_ret, sector_leader_chg,
+             foreign_brokers_buying, afternoon_ret, vol_ratio, prog_buy_days,
+             first_seen, theme_strength, frgn_exhaust_rate, frgn_exhaust_chg)
+            VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         for c in candidates:
             supply_history_json = json.dumps(
@@ -55,8 +57,36 @@ def save_stock_reports(candidates: list[dict]):
                 news_headlines_json,
                 c["score"], c["rank_no"], c.get("selected", 1),
                 c.get("sector_rel_ret"), c.get("sector_leader_chg"),
+                c.get("foreign_brokers_buying"), c.get("afternoon_ret"),
+                c.get("vol_ratio"), c.get("prog_buy_days"),
+                c.get("first_seen"), c.get("theme_strength"),
+                c.get("frgn_exhaust_rate"), c.get("frgn_exhaust_chg"),
             ))
         conn.commit()
+
+
+def get_recent_report_codes(days: int = 14) -> set[str]:
+    """직전 days 일(오늘 제외) 리포트에 등장한 종목코드 집합 — first_seen 피처 파생용."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT DISTINCT stock_code FROM daily_stock_report
+               WHERE report_date < CURDATE()
+                 AND report_date >= CURDATE() - INTERVAL %s DAY""",
+            (int(days),),
+        )
+        return {r["stock_code"] for r in cursor.fetchall()}
+
+
+def get_prev_frgn_exhaust_map() -> dict[str, float]:
+    """직전 리포트 거래일의 종목코드 → 외인소진율 맵 — frgn_exhaust_chg 피처 파생용."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT stock_code, frgn_exhaust_rate FROM daily_stock_report
+               WHERE report_date = (SELECT MAX(report_date) FROM daily_stock_report
+                                     WHERE report_date < CURDATE())
+                 AND frgn_exhaust_rate IS NOT NULL"""
+        )
+        return {r["stock_code"]: float(r["frgn_exhaust_rate"]) for r in cursor.fetchall()}
 
 
 def get_stock_report(report_date: str, stock_code: str) -> dict | None:

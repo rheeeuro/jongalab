@@ -18,7 +18,12 @@ from core.trading_engine import (
     AnalysisEngine,
 )
 from core.config import EDGE_SELECTION_MODE
-from core.repository.stock_report import save_stock_reports
+from core.edge_features import afternoon_ret, prog_buy_days, vol_ratio
+from core.repository.stock_report import (
+    save_stock_reports,
+    get_recent_report_codes,
+    get_prev_frgn_exhaust_map,
+)
 from core.repository.sector_report import save_sector_reports
 from core.repository.content import get_today_content_by_stock
 from core.repository.news import get_today_news_stats_by_stock, get_today_news_by_stock
@@ -49,6 +54,11 @@ class ClosingBetStrategy:
         # 종목코드 → 뉴스 연구 라벨(get_today_news_stats_by_stock 결과).
         # StockCandidate(가드 파일)를 건드리지 않고 Phase 2 → 리포트 저장으로 전달한다.
         self._news_stats: dict[str, dict] = {}
+        # 종목코드 → F5 수급 구조 피처(외국계 거래원·오후 강세·거래량 배율·프로그램 연속·외인소진율).
+        # 이미 조회 중인 키움 응답에서 캡처해 저장만 한다(점수 무영향) — 위와 같은 전달 패턴.
+        self._feat: dict[str, dict] = {}
+        # 종목코드 → 소속 테마 당일 등락률 최대값(_fetch_watchlist_sectors 에서 구축)
+        self._theme_strength: dict[str, float] = {}
 
     def run(self):
         logger.info("=" * 60)
@@ -101,6 +111,7 @@ class ClosingBetStrategy:
                         info = self.api.get_stock_basic_info(code)
                         mc_raw = self.engine.parse_price(info.get("mac", "0"))
                         mc = mc_raw * 100_000_000
+                        self._capture_basic_features(code, info)
                         time.sleep(0.3)
                     except Exception:
                         mc = 0
@@ -132,6 +143,7 @@ class ClosingBetStrategy:
                     chg = self.engine.parse_float(info.get("flu_rt", "0"))
                     mc_raw = self.engine.parse_price(info.get("mac", "0"))
                     mc = mc_raw * 100_000_000
+                    self._capture_basic_features(code, info)
                     if mc >= self.strategy_cfg.MIN_MARKET_CAP:
                         # 기본정보(ka10001)엔 거래대금이 없어 일봉(ka10081)에서 별도 조회
                         time.sleep(0.3)
@@ -147,6 +159,27 @@ class ClosingBetStrategy:
                     logger.warning(f"종목 조회 실패 [{code}]: {e}")
 
         return candidates
+
+    def _capture_basic_features(self, code: str, info: dict):
+        """기본정보(ka10001) 응답에서 F5 연구 피처를 캡처 — 외인소진율(for_exh_rt)."""
+        fer = info.get("for_exh_rt")
+        self._feat.setdefault(code, {})["frgn_exhaust_rate"] = (
+            self.engine.parse_float(fer) if fer else None
+        )
+
+    def _fetch_vol_ratio(self, code: str) -> float | None:
+        """일봉(ka10081) 거래량으로 당일 ÷ 직전 20일 평균 배율. 실패 시 None(피처만 결측)."""
+        try:
+            data = self.api.get_daily_chart(code)
+            candles = data.get("stk_dt_pole_chart_qry", [])
+            vols = [
+                (cd.get("dt", ""), abs(self.engine.parse_price(cd.get("trde_qty", "0"))))
+                for cd in candles[:30]
+            ]
+            return vol_ratio(vols, datetime.now().strftime("%Y%m%d"))
+        except Exception as e:
+            logger.warning(f"거래량 배율 조회 실패 [{code}]: {e}")
+            return None
 
     def _fetch_trading_value(self, code: str) -> int:
         """일봉(ka10081) 최신 캔들의 거래대금(trde_prica, 단위 백만원)을 원 단위로 환산.
@@ -186,6 +219,13 @@ class ClosingBetStrategy:
             c.supply_days = supply["supply_days"]
             c.supply_history = supply.get("supply_history", [])
 
+            # F5 수급 구조 피처 캡처 — 이미 조회된 응답의 파생값(외국계 거래원·프로그램 연속)
+            # + 거래량 배율(일봉 1콜). 저장 전용, 점수·선정에 무영향.
+            feat = self._feat.setdefault(c.code, {})
+            feat["foreign_brokers_buying"] = 1 if supply.get("foreign_brokers_buying") else 0
+            feat["prog_buy_days"] = prog_buy_days(c.supply_history)
+            feat["vol_ratio"] = self._fetch_vol_ratio(c.code)
+
             # 프로그램 양매수(순매수 > 0)는 더 이상 필수 조건이 아니다.
             #   필터 대신 score_candidate()의 가산점(SCORE_PROGRAM_BUY_BONUS)으로 반영한다.
             #   프로그램 데이터 조회 실패 시 prog_net_buy=0 → 가산점만 미부여(제외하지 않음).
@@ -193,6 +233,9 @@ class ClosingBetStrategy:
             # 1시간봉 캔들 데이터 조회
             c.hourly_candles = self.engine.fetch_hourly_candles(c.code)
             logger.debug(f"[{c.name}] 1시간봉 {len(c.hourly_candles)}개 수집")
+            feat["afternoon_ret"] = afternoon_ret(
+                c.hourly_candles, c.current_price, datetime.now().strftime("%Y-%m-%d")
+            )
 
             filtered.append(c)
             time.sleep(0.5)
@@ -282,6 +325,19 @@ class ClosingBetStrategy:
         sector_avg = {s: sum(v) / len(v) for s, v in sector_chgs.items()}
         sector_max = {s: max(v) for s, v in sector_chgs.items()}
 
+        # F5 파생 — 첫 등장(직전 14일 유니버스 부재)·외인소진율 변화(직전 리포트 거래일 대비).
+        # 조회 실패 시 해당 피처만 NULL(rule 은 NULL=매칭 실패로 보수 처리) — 저장은 계속한다.
+        recent_codes: set[str] | None = None
+        try:
+            recent_codes = get_recent_report_codes(14)
+        except Exception as e:
+            logger.warning(f"first_seen 파생용 최근 유니버스 조회 실패: {e}")
+        prev_exhaust: dict[str, float] = {}
+        try:
+            prev_exhaust = get_prev_frgn_exhaust_map()
+        except Exception as e:
+            logger.warning(f"외인소진율 직전일 맵 조회 실패: {e}")
+
         reports = []
         summarized = 0
         for i, c in enumerate(candidates, 1):
@@ -302,6 +358,9 @@ class ClosingBetStrategy:
                     c, code, news_count, MAX_NEWS_SUMMARIES
                 )
             news_stats = self._news_stats.get(code) or {}
+            feat = self._feat.get(code) or {}
+            fer = feat.get("frgn_exhaust_rate")
+            prev_fer = prev_exhaust.get(code)
             reports.append({
                 "stock_code": code,
                 "stock_name": c.name,
@@ -337,6 +396,19 @@ class ClosingBetStrategy:
                 "selected": is_top_score,  # 잠정값 — 아래 선정 레이어가 모드에 따라 다시 정함
                 "sector_rel_ret": (c.change_pct or 0.0) - sector_avg[c.sector or "기타"],
                 "sector_leader_chg": sector_max[c.sector or "기타"],
+                "foreign_brokers_buying": feat.get("foreign_brokers_buying"),
+                "afternoon_ret": feat.get("afternoon_ret"),
+                "vol_ratio": feat.get("vol_ratio"),
+                "prog_buy_days": feat.get("prog_buy_days"),
+                "first_seen": (
+                    (0 if code in recent_codes else 1) if recent_codes is not None else None
+                ),
+                "theme_strength": self._theme_strength.get(code),
+                "frgn_exhaust_rate": fer,
+                "frgn_exhaust_chg": (
+                    round(fer - prev_fer, 2)
+                    if fer is not None and prev_fer is not None else None
+                ),
             })
 
         # 선정 레이어(모드 스위치) — selected/핸드오프 대상만 정한다. 점수·rank_no·저장은 불변.
@@ -438,6 +510,13 @@ class ClosingBetStrategy:
                     codes = [s["stk_cd"] for s in stocks if s.get("stk_cd")]
                     if codes:
                         watchlist[thema_nm] = codes
+                        # F4 테마 후발 피처: 소속 테마 당일 등락률의 최대값(복수 테마면 최강 테마)
+                        theme_flu = float(theme.get("flu_rt", "0").replace("+", ""))
+                        for rc in codes:
+                            base = rc.split("_")[0]
+                            prev = self._theme_strength.get(base)
+                            if prev is None or theme_flu > prev:
+                                self._theme_strength[base] = theme_flu
                     time.sleep(0.3)
                 except Exception as e:
                     logger.warning(f"테마 구성종목 조회 실패 [{thema_nm}]: {e}")

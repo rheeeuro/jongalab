@@ -44,6 +44,7 @@ jongalab/
 | `edge_predicate.py` | **Edge Ledger predicate 평가기**(순수 함수, DB 무의존). `evaluate(predicate, row, market)` — 조건 목록 AND 결합(op 9종: == != > >= < <= between in not_null, `market.` 접두사로 market_snapshot 참조, NULL=매칭실패). `validate_predicate` 로 저장 전 검증. 단위 테스트 `tests/test_edge_predicate.py` 가 계약 고정 |
 | `edge_selection.py` | **선정 레이어**(순수 함수). `select_signals(mode, candidates, live_rules, veto_rules, top_n, market)` — `EDGE_SELECTION_MODE`(legacy/hybrid/rules)별 selected 판정 + veto(reduce-only, 전 모드) + rule_names 귀속. 점수·rank_no·저장은 불변. 단위 테스트 `tests/test_edge_selection.py` |
 | `edge_policy.py` | **Edge Ledger 정책 단일 소스**(순수 함수). ① family 역할 레지스트리(`FAMILY_ROLES`: selector/veto/benchmark — closing_bet 선정·라우터 검증이 공유) ② 선정 시점 실행 가능성(`selection_executable` — 19:50/익일 수집 피처를 쓰는 rule 은 선정 때 NULL→무음 no-op 라 live 부적격) ③ 승격 게이트(`check_promotion`: n·ci_low·**live 대조군 우위**(부재 시 fail-closed)·실행 가능성 — 라우터 409 사유·평가기 알림·`stats.promo_eligible` 이 전부 이 함수에서 파생). 단위 테스트 `tests/test_edge_policy.py` |
+| `edge_features.py` | **F5 수급 구조 피처 파생**(순수 함수, DB 무의존). `afternoon_ret`(당일 13시 시간봉 시가→현재가 %)·`prog_buy_days`(최근 5일 중 프로그램 순매수일)·`vol_ratio`(당일 거래량÷20일 평균) — closing_bet 이 이미 수집한 응답에서 스칼라를 굽는다. 결측=None(predicate 의 NULL=매칭실패 계약과 맞물림). 단위 테스트 `tests/test_edge_features.py` |
 | `daily_ohlc.py` | 수정주가 일봉(ka10081) 파싱 + 결과 라벨 아티팩트 가드(`SANE_RET_PCT`=±35%) **공유 모듈** — outcome_backfill·gap_check --label-nxt 가 함께 사용(라벨 간 유효성 기준이 어긋나면 청산창 비교가 오염되므로 라벨 경로는 반드시 이 모듈만) |
 | `notifications.py` | 텔레그램 알림(재시도 포함) |
 | `market_calendar.py` | KRX 개장일 판별(exchange_calendars XKRX) |
@@ -97,6 +98,12 @@ jongalab/
         ├─► daily_stock_report — Phase 2 통과 유니버스 전체 저장(selected=1=핸드오프, 0=비선정 후보)
         │     · 기본 조회(대시보드·gap_check)는 selected=1 만; 연구는 include_unselected=True 로 전체
         │     · 저장 시점 파생(API 콜 없음, F4의 눈): sector_rel_ret(등락률−동일섹터 평균)·sector_leader_chg(동일섹터 최고 등락률)
+        │     · F5 수급 구조·테마 피처(2026-07-05~, 점수 무영향 — 전부 선정 시점 수집이라 live 자격):
+        │       기수집 응답 캡처 — foreign_brokers_buying(ka10002 외국계 창구 2곳+) · prog_buy_days(ka90013 5일 중 순매수일) ·
+        │                        afternoon_ret(ka10080 13시 시가→현재가) · theme_strength(ka90001 소속 테마 당일 등락 최대) ·
+        │                        frgn_exhaust_rate(ka10001 for_exh_rt)
+        │       추가 1콜 — vol_ratio(ka10081 당일 거래량÷20일 평균) / DB 파생 — first_seen(직전 14일 유니버스 부재) ·
+        │                  frgn_exhaust_chg(직전 리포트 거래일 대비 소진율 %p, repository.get_prev_frgn_exhaust_map)
         │     · 선정 레이어(edge_selection, EDGE_SELECTION_MODE): legacy=점수 top-N(기본) / hybrid=live rule 우선+점수 채움 / rules=live rule 합집합(매칭0=무거래). veto 는 전 모드 선정 직전 제외. live rule 로드 실패 시 모드 자체를 legacy 로 폴백(로그 명시) — 빈 rule 목록으로 rules 를 돌려 무거래가 되는 사고 방지
         └─► trade_signal (status=pending, selected만, rule_names 귀속)  ─► trading 도메인이 집행(도메인 로직 무변경, rule_names 는 안 읽음)
 당일 15:20 gap_check --base-krx ─► top-10 KRX 기준가(state) · 다음날 08:03/09:03 --check-* ─► daily_stock_report.gap_*(top-10) 갱신(NXT: 19:50→08:03, KRX: 15:20→09:03)

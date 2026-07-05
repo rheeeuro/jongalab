@@ -30,6 +30,7 @@ export const FAMILY_META: Record<string, { label: string; hint: string }> = {
   f2_global: { label: '해외 연동 전략', hint: '밤사이 미국 시장 움직임을 아직 못 따라간 종목을 노립니다' },
   f3_nxt: { label: '야간시장 전략', hint: '저녁 NXT 거래에서 생긴 가격 차이를 노립니다' },
   f4_laggard: { label: '후발주 전략', hint: '섹터 1등이 급등한 뒤 아직 덜 오른 동종 종목을 노립니다' },
+  f5_supply: { label: '수급 전략', hint: '기관·외국인 매수 흐름과 차트 구조에서 익일 연속성을 노립니다' },
   control: { label: '기준선', hint: '현행 점수 방식 — 새 전략이 이겨야 할 비교 기준입니다' },
   veto: { label: '위험 회피', hint: '수익용이 아니라 위험한 종목을 매수에서 빼는 용도입니다' },
 };
@@ -69,6 +70,10 @@ const COL_LABELS: Record<string, string> = {
   market_cap: '시가총액',
   supply_score: '수급 점수',
   supply_days: '연속 수급일',
+  inst_net_buy: '기관 순매수(원)',
+  frgn_net_buy: '외국인 순매수(원)',
+  indv_net_buy: '개인 순매수(원)',
+  prog_net_buy: '프로그램 순매수(원)',
   ma_aligned: '정배열',
   near_high: '신고가 근처',
   is_leader: '섹터 대장주',
@@ -89,6 +94,14 @@ const COL_LABELS: Record<string, string> = {
   selected: '점수 상위 10 선정',
   score: '종합점수',
   rank_no: '점수 순위',
+  foreign_brokers_buying: '외국계 창구 매수 우위',
+  afternoon_ret: '오후장(13시~) 상승률(%)',
+  vol_ratio: '거래량 배율(÷20일 평균)',
+  prog_buy_days: '최근 5일 중 프로그램 순매수일',
+  first_seen: '2주 만에 첫 등장',
+  theme_strength: '소속 테마 당일 등락률(%)',
+  frgn_exhaust_rate: '외인 소진율(%)',
+  frgn_exhaust_chg: '외인 소진율 변화(%p)',
   'market.sox_ret': '미국 반도체지수 등락(%)',
   'market.nq_fut_ret': '나스닥 선물 등락(%)',
   'market.spx_ret': 'S&P500 등락(%)',
@@ -106,7 +119,7 @@ export function condText(c: { col: string; op: string; value?: unknown }): strin
   const col = colText(c.col);
   const v = c.value;
   // 예/아니오형(0/1) 컬럼은 자연어로
-  const isBoolCol = ['news_first_today', 'is_leader', 'nxt_listed', 'ma_aligned', 'near_high', 'is_theme_stock', 'selected'].includes(c.col);
+  const isBoolCol = ['news_first_today', 'is_leader', 'nxt_listed', 'ma_aligned', 'near_high', 'is_theme_stock', 'selected', 'foreign_brokers_buying', 'first_seen'].includes(c.col);
   if (c.op === 'not_null') return `${col} 있음`;
   if (c.op === 'between' && Array.isArray(v)) return `${col} ${v[0]}~${v[1]}`;
   if (c.op === 'in' && Array.isArray(v)) return `${col}: ${v.join(', ')} 중 하나`;

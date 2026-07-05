@@ -17,6 +17,7 @@ FAMILY_ROLES: dict[str, str] = {
     "f2_global": "selector",
     "f3_nxt": "selector",
     "f4_laggard": "selector",
+    "f5_supply": "selector",
     "control": "benchmark",
     "veto": "veto",
 }
@@ -42,6 +43,9 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     "news_prior_avg", "news_sentiment", "news_catalyst",
     "score", "rank_no", "selected",
     "sector_rel_ret", "sector_leader_chg",
+    # F5 수급 구조·테마 피처 (2026-07-05) — closing_bet 선정 시점 수집
+    "foreign_brokers_buying", "afternoon_ret", "vol_ratio", "prog_buy_days",
+    "first_seen", "theme_strength", "frgn_exhaust_rate", "frgn_exhaust_chg",
 })
 
 _MARKET_PREFIX = "market."

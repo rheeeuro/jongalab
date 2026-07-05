@@ -152,6 +152,15 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     --   섹터 상대치(F4): closing_bet 저장 시점 유니버스 in-memory 파생(API 콜 없음).
     sector_rel_ret FLOAT DEFAULT NULL COMMENT '당일 등락률 − 동일 sector 평균 등락률(%p)',
     sector_leader_chg FLOAT DEFAULT NULL COMMENT '동일 sector 최고 등락률(%) — 후발주 판정 분모',
+    --   수급 구조·테마 피처(F5·F4 2차, 2026-07-05): closing_bet 선정 시점(13~15시) 수집, 점수 무영향.
+    foreign_brokers_buying TINYINT(1) DEFAULT NULL COMMENT '외국계 거래원 매수창구 2곳 이상(ka10002)',
+    afternoon_ret FLOAT DEFAULT NULL COMMENT '당일 13시 시가 → 선정 시점 현재가 등락률(%)',
+    vol_ratio FLOAT DEFAULT NULL COMMENT '당일 거래량 ÷ 직전 20일 평균 거래량',
+    prog_buy_days TINYINT DEFAULT NULL COMMENT '최근 5일 중 프로그램 순매수일 수',
+    first_seen TINYINT(1) DEFAULT NULL COMMENT '직전 14일 유니버스에 없던 첫 등장',
+    theme_strength FLOAT DEFAULT NULL COMMENT '소속 테마 당일 등락률 최대(%) — 비테마 NULL',
+    frgn_exhaust_rate FLOAT DEFAULT NULL COMMENT '외인소진율(%) — ka10001 for_exh_rt',
+    frgn_exhaust_chg FLOAT DEFAULT NULL COMMENT '직전 리포트 거래일 대비 외인소진율 변화(%p)',
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
