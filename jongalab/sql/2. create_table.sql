@@ -278,6 +278,7 @@ CREATE TABLE IF NOT EXISTS kis_night_future (
 CREATE TABLE IF NOT EXISTS edge_rule (
     id            INT AUTO_INCREMENT PRIMARY KEY,
     name          VARCHAR(50) NOT NULL UNIQUE,       -- 예: f3_nxt_gap_quality
+    title         VARCHAR(80) DEFAULT NULL,          -- 카드 제목(한글) — NULL 이면 프론트가 name 폴백
     family        VARCHAR(20) NOT NULL,              -- f1_news / f2_global / f3_nxt / f4_laggard / control / veto
     description   VARCHAR(500) NOT NULL,             -- 인과 근거 필수: "누가 왜 내일 아침 사는가"
     predicate     JSON NOT NULL,                     -- 조건 목록(AND 결합, edge_predicate DSL)

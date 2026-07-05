@@ -43,8 +43,8 @@ export default function EdgeRulesAdminPage() {
   async function act(rule: EdgeRule, action: "promote" | "retire") {
     const confirmText =
       action === "promote"
-        ? `'${familyMeta(rule.family).label} (${rule.name})' 전략을 실전 매매에 투입합니다.\n다음 매수 사이클부터 실제 주문에 반영됩니다. 진행할까요?`
-        : `'${familyMeta(rule.family).label} (${rule.name})' 전략을 종료합니다.\n${rule.status === "live" ? "실전 매매에서 즉시 빠집니다. " : ""}진행할까요?`;
+        ? `'${rule.title ?? rule.name}' 전략을 실전 매매에 투입합니다.\n다음 매수 사이클부터 실제 주문에 반영됩니다. 진행할까요?`
+        : `'${rule.title ?? rule.name}' 전략을 종료합니다.\n${rule.status === "live" ? "실전 매매에서 즉시 빠집니다. " : ""}진행할까요?`;
     if (!window.confirm(confirmText)) return;
 
     setActing(rule.id);
@@ -229,10 +229,11 @@ function RuleRow({ rule, action }: { rule: EdgeRule; action?: React.ReactNode })
     <div className="flex flex-col gap-2.5 rounded-2xl border border-slate-100 bg-white p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-[#1c1c22]">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{fam.label}</span>
+          <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{rule.title ?? rule.name}</span>
           <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[rule.status]}`}>
             {STATUS_LABEL[rule.status]}
           </span>
+          <span className="text-[10px] font-semibold text-slate-400">{fam.label}</span>
           <span className="font-mono text-[10px] text-slate-400">{rule.name}</span>
         </div>
         <p className="mt-1 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{rule.description}</p>

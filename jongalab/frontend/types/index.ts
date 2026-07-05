@@ -297,6 +297,7 @@ export interface PredicateCond {
 export interface EdgeRule {
   id: number;
   name: string;
+  title: string | null;        // 카드 제목(한글) — NULL 이면 name 슬러그 폴백
   family: string;              // f1_news / f2_global / f3_nxt / f4_laggard / f5_supply / control / veto
   description: string;
   predicate: PredicateCond[];

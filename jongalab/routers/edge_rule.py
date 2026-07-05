@@ -31,6 +31,7 @@ _MONTHLY_PROMOTE_CAP = 2  # 다중 가설 보정: live 승격 월 상한(README 
 
 class RuleCreate(BaseModel):
     name: str
+    title: str  # 카드 제목(한글) — 화면에서 가설을 구분하는 이름, 필수
     family: str
     description: str
     predicate: list
@@ -78,6 +79,8 @@ def post_edge_rule(body: RuleCreate):
         raise HTTPException(status_code=400, detail=f"exit_label 은 {list(ALLOWED_EXIT_LABELS)} 중 하나여야 합니다.")
     if not body.description.strip():
         raise HTTPException(status_code=400, detail="description(인과 근거)은 필수입니다.")
+    if not body.title.strip():
+        raise HTTPException(status_code=400, detail="title(카드 제목)은 필수입니다.")
     try:
         validate_predicate(body.predicate)
     except PredicateError as e:
@@ -86,9 +89,10 @@ def post_edge_rule(body: RuleCreate):
         raise HTTPException(status_code=409, detail=f"이미 등록된 rule 이름입니다: {body.name}")
     try:
         rule_id = create_rule(
-            name=body.name, family=body.family, description=body.description,
-            predicate=body.predicate, exit_label=body.exit_label,
-            min_sample=body.min_sample, registered_at=body.registered_at,
+            name=body.name, title=body.title.strip(), family=body.family,
+            description=body.description, predicate=body.predicate,
+            exit_label=body.exit_label, min_sample=body.min_sample,
+            registered_at=body.registered_at,
         )
         return {"ok": True, "id": rule_id, "rule": get_rule(rule_id)}
     except Exception as e:

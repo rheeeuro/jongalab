@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Settings } from "lucide-react";
-import Link from "next/link";
+import { X } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -105,8 +104,9 @@ export function EdgeRuleDetail({
               <span className="text-[11px] font-semibold text-slate-400">{fam.label}</span>
             </div>
             <h2 className="mt-1 break-keep text-base font-bold text-slate-900 dark:text-slate-100">
-              {fam.hint}
+              {rule.title ?? rule.name}
             </h2>
+            <p className="mt-0.5 break-keep text-xs text-slate-400 dark:text-slate-500">{fam.hint}</p>
             <p className="mt-0.5 font-mono text-[10px] text-slate-400 dark:text-slate-500">{rule.name}</p>
           </div>
           <button

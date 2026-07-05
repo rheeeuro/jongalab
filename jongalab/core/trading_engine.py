@@ -368,6 +368,8 @@ class AnalysisEngine:
             total_inst += institution
 
             # 1. 외국인 + 기관 양매수 (1순위)
+            # 기관/외인 0 은 ka10059 잠정치 미반영 가능성(개인 항과 동일 기준) → 중립:
+            # 가점 없이 스트릭을 유지하고, 순매도(<0)일 때만 스트릭을 끊는다 (1~3 공통).
             if foreigner > 0 and institution > 0:
                 consec_double += 1
                 daily_raw += self.cfg.SUPPLY_DOUBLE_BUY_BASE_SCORE * weight
@@ -376,7 +378,7 @@ class AnalysisEngine:
                     * self.cfg.SUPPLY_DOUBLE_BUY_AMOUNT_SCORE
                     * weight
                 )
-            else:
+            elif foreigner < 0 or institution < 0:
                 consec_double = 0
 
             # 2. 기관 순매수 (2순위)
@@ -388,7 +390,7 @@ class AnalysisEngine:
                     * self.cfg.SUPPLY_INST_BUY_AMOUNT_SCORE
                     * weight
                 )
-            else:
+            elif institution < 0:
                 consec_inst = 0
 
             # 3. 외국인 순매수
@@ -400,7 +402,7 @@ class AnalysisEngine:
                     * self.cfg.SUPPLY_FRGN_BUY_AMOUNT_SCORE
                     * weight
                 )
-            else:
+            elif foreigner < 0:
                 consec_frgn = 0
 
             # 4. 개인 매도/매수 (개인 매수는 종가베팅 관점 감점)

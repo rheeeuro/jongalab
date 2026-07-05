@@ -45,15 +45,17 @@ def create_rule(
     min_sample: int = 40,
     registered_at: str | None = None,
     status: str = "candidate",
+    title: str | None = None,
 ) -> int:
-    """신규 rule 등록. registered_at 미지정 시 오늘(사전 등록일). 반환: rule id."""
+    """신규 rule 등록. registered_at 미지정 시 오늘(사전 등록일). 반환: rule id.
+    title 은 카드 제목(한글) — NULL 이면 프론트가 name 슬러그로 폴백."""
     pred = json.dumps(predicate, ensure_ascii=False)
     with get_db() as (conn, cursor):
         cursor.execute(
             """INSERT INTO edge_rule
-               (name, family, description, predicate, exit_label, status, min_sample, registered_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURDATE()))""",
-            (name, family, description, pred, exit_label, status, int(min_sample), registered_at),
+               (name, title, family, description, predicate, exit_label, status, min_sample, registered_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURDATE()))""",
+            (name, title, family, description, pred, exit_label, status, int(min_sample), registered_at),
         )
         conn.commit()
         return int(cursor.lastrowid)
