@@ -30,7 +30,7 @@ jongalab/
 | `db.py` | 컨텍스트 매니저(`get_db`, `get_trading_db`) — 안전한 연결 관리 |
 | `ai_service.py` | **LLM 추상화(`analyze_content`)** — Ollama(콘텐츠 분석)/OpenAI(다이제스트) 분기. 직접 SDK 호출 금지, 항상 여기로. LLM 은 구조화 JSON(tldr/tags/summary/stocks/strategy)만 내보내고 `build_analysis_markdown()` 이 `analysis_content`(마크다운)를 재조립 |
 | `ai_utils.py` | LLM 응답 파싱(JSON 추출, 코드펜스/`<think>` 제거) |
-| `trading_engine.py` | **종가베팅 분석 엔진** ⚠️민감/가드. Phase 1 사전 스크리닝(거래대금 상위 30·시총) → Phase 2 정밀(수급 그레이드·정배열/신고가·대장주·테마·콘텐츠·등락률) → 종합점수·top-N. 2026-07-03 실증 반영: 등락률 항(2~12% 가점/15%+ 감점) 신설, 대장주 10→3·프로그램 10→0 축소, ka10131 연속수급 버그(_AL 접미사·코스피만·abs) 수정. 2026-07-06: 5일 수급점수에서 기관/외인 순매수 0(ka10059 잠정치 미반영 가능성)을 중립 처리 — 가점 없이 스트릭 유지, 순매도(<0)만 스트릭 리셋(당일 집계 지연이 연속매수 보너스를 무너뜨리던 문제 수정) |
+| `trading_engine.py` | **종가베팅 분석 엔진** ⚠️민감/가드. Phase 1 사전 스크리닝(거래대금 상위 50·시총) → Phase 2 정밀(수급 그레이드·정배열/신고가·대장주·테마·콘텐츠·등락률) → 종합점수·top-N. 2026-07-03 실증 반영: 등락률 항(2~12% 가점/15%+ 감점) 신설, 대장주 10→3·프로그램 10→0 축소, ka10131 연속수급 버그(_AL 접미사·코스피만·abs) 수정. 2026-07-07: 거래대금 후보 풀 30→50 확대, 테마 보너스는 거래대금 상위 50 교집합에만 부여. 2026-07-06: 5일 수급점수에서 기관/외인 순매수 0(ka10059 잠정치 미반영 가능성)을 중립 처리 — 가점 없이 스트릭 유지, 순매도(<0)만 스트릭 리셋(당일 집계 지연이 연속매수 보너스를 무너뜨리던 문제 수정) |
 | `prompts.py` | 콘텐츠 분석 프롬프트 ⚠️민감/가드. 구조화 출력(sentiment_score·tldr·tags·summary·stocks[방향/확신/시간축]·strategy·related_companies) |
 | `kiwoom_client.py` | 키움 데이터 서버(`:8001`) HTTP 클라이언트 — 기본/상세/수급/차트/주도주 |
 | `kis_client.py` | 한국투자증권(KIS) Open API — 코스피200 야간선물 시세, WebSocket 키 |
@@ -73,7 +73,7 @@ jongalab/
 | `gap_check` (`--base-krx`/`--base-nxt`/`--check-nxt`/`--label-nxt`/`--check-krx`) | 평일 15:20 / 19:50 / 08:03 / 08:06 / 09:03 | 실매매 청산 창과 동일 기준의 갭 측정. 15:20 KRX(top-10)·19:50 NXT 기준가를 state 로 수집(19:50 NXT 조회되는 종목=NXT 종목) → 익일 08:03 NXT 종목(`gap_nxt_*`), 09:03 KRX 종목(`gap_krx_*`) 확정 — 종목별로 자기 venue 창 하나만 채점. 기준가 미수집 시 리포트가 폴백(알림에 ≈ 표시). 텔레그램 알림은 09:03 확정 후 하루 1회. **19:50(`--base-nxt`)은 확장 관측**: 유니버스 전체에 KRX 확정 종가+NXT 현재가(종목당 2콜)를 붙여 `daily_stock_report` NXT 스냅샷(`krx_close_price`·`nxt_price_1950`·`nxt_gap_pct`·`nxt_after_value`·`nxt_listed`) UPDATE + `market_snapshot` 1행 upsert. **08:06(`--label-nxt`)은 엣지 연구 라벨**: 전일 유니버스 전체 NXT 상장 종목의 08:06 NXT 가격 → `nxt_open_price`·`nxt_open_ret`(앵커=KRX 확정 종가) UPDATE — 실매매 08:03(settle·check-nxt, top-10)과 시각·부하 완전 분리. 관측 확장은 매매 영향 0 |
 | `outcome_backfill` | 평일 09:30 | `daily_stock_report` 유니버스 전체에 **일봉 결과 라벨 4종**(`next_open_ret`·`next_high_ret`·`next_low_ret`·`next_close_ret` = 리포트일 종가→다음 거래일 시가/고가/저가/종가 등락률) 균일 백필 — 같은 일봉 1회 조회에서 파생(추가 API 콜 0). 라벨 4종 중 하나라도 NULL 이면 대상. 수정주가 차트로 분할 상쇄·±35% 초과 아티팩트 스킵. 미완결(당일)분은 다음날 재시도. 신규 3종은 과거 유니버스에 자동 소급 |
 | `rule_evaluator` | 평일 09:40 | **Edge Ledger 일별 채점(2-pass)** — pass1: 활성 rule(status≠retired)을 유니버스 전체 + `market_snapshot` 에 적용(`edge_predicate.evaluate`), `exit_label` 결과 수집 → `mean_net = 평균 − EDGE_COST_PCT` → `edge_rule_daily` upsert(catch-up: 라벨 미도래 날짜는 다음날 재시도, 14일 초과 시 n=0 sentinel 종결 — 실시간 라벨은 소급 불가라 영구 재시도 방지) + registered_at 이후 표본만으로 누적 stats 재계산. pass2: 전 rule stats 가 신선해진 뒤 `edge_policy.check_promotion`(라우터와 동일 게이트)으로 `stats.promo_eligible` 저장 + 텔레그램 알림 — 승격 후보(게이트 전체 충족) / 집행 설계 필요(통계·표본 충족이나 선정 시점 실행 불가 피처) / 강등 검토(live, 최근 30표본 mean_net<0). 전이는 관리자 API 수동, 매매 집행 없음 |
-| `weight_tuner` | 토 08:00 | 지난주 실현손익(단 `SCORE_LOGIC_MIN_DATE`=2026-07-06 이전 구 로직 주는 스킵) → GPT 가중치 제안 → backtest 검증: IMPROVES=pending(승인 대상) / 그 외=archived(비적용·표시용) + [건강지표] 로깅 |
+| `weight_tuner` | 토 08:00 | 지난주 실현손익(단 `SCORE_LOGIC_MIN_DATE`=2026-07-07 이전 구 로직 주는 스킵) → GPT 가중치 제안 → backtest 검증: IMPROVES=pending(승인 대상) / 그 외=archived(비적용·표시용) + [건강지표] 로깅 |
 | `kis_night_futures_ws` | 평일 18:00~익일 새벽 | KIS WebSocket 야간선물 체결 → `kis_night_future` |
 | (토큰) `kis_token_refresh` | 매일 07:00 | 키움+KIS 토큰 갱신(`refresh_tokens.sh`) |
 
@@ -86,9 +86,9 @@ jongalab/
 뉴스 속보 채널(고빈도) ──사전매칭(LLM X)──► news_mention (종목·헤드라인)
                                         │
 종가 분석(closing_bet, 평일 13:00~15:00)│
-  Phase 1 거래대금(시장별 상위 30)·시총 필터 ─┘
+  Phase 1 거래대금(시장별 상위 50)·시총 필터 ─┘
   Phase 2 음전 제외(하드 필터) → 수급(기관/외인/개인/프로그램)+정배열/신고가+대장주+테마+콘텐츠+뉴스+등락률 점수
-  종합점수 = 수급 + 정배열 + 신고가 + 대장주 + 테마 + 콘텐츠 + 뉴스 + 등락률(2~12% 가점 / 15%+ 감점) (가중치 튜닝 대상)
+  종합점수 = 수급 + 정배열 + 신고가 + 대장주 + 테마(거래대금 상위 50 교집합만) + 콘텐츠 + 뉴스 + 등락률(2~12% 가점 / 15%+ 감점) (가중치 튜닝 대상)
         │  · 뉴스 재료: news_count 집계 + 후보 소수 배치 LLM 요약 → daily_stock_report 표시
         │    (SCORE_NEWS_BONUS 기본 0 → 현재 점수 무영향, 주간 튜너가 성과 따라 상향 가능)
         │  · 뉴스 연구 라벨(2026-07-03~, 점수 무영향 — next_open_ret 조인 엣지 검증용):

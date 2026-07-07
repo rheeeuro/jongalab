@@ -13,7 +13,7 @@ class StrategyConfigResponse(BaseModel):
     MIN_TRADING_VALUE: int = 0
     PREFERRED_TRADING_VALUE: int = 0
     MIN_MARKET_CAP: int = 0
-    TOP_N_BY_VALUE: int = 20
+    TOP_N_BY_VALUE: int = 50
     # 이동평균
     MA_PERIODS: List[int] = [5, 10, 20]
     # 수급 기준

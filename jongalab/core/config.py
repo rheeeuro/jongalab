@@ -43,8 +43,8 @@ OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5.4-nano')
 # 스코어/선정 로직 유효 시작일(YYYY-MM-DD, inclusive) — 이 날짜 이전은 구 로직이라
 # 가중치 튜닝 백테스트 표본에서 제외한다. weight_tuner 가 분석 주 시작을 이 날짜로 클램프.
 # (trading 쪽 레짐 게이트의 REGIME_MIN_DATE 와 같은 로직 변경을 가리킴 — 도메인 분리라 값만 맞춘다.)
-# 2026-07-06: 등락률 항 신설·풀 확대·정배열 가점화·대장주/프로그램 가중 축소 반영(2026-07-03 실증).
-SCORE_LOGIC_MIN_DATE = os.getenv('SCORE_LOGIC_MIN_DATE', '2026-07-06')
+# 2026-07-07: 거래대금 후보 풀 30→50 확대 + 테마 보너스 거래대금 상위 50 교집합 조건 반영.
+SCORE_LOGIC_MIN_DATE = os.getenv('SCORE_LOGIC_MIN_DATE', '2026-07-07')
 
 # Edge Ledger 왕복 거래비용(%) — 모든 가설 기대값은 이 값 차감 후로만 비교한다(README §5-2 비용 차감 원칙).
 # 기본 0.25 = 세금 0.15 + 수수료 + 슬리피지 보수 추정. trading `fill` 실측치로 분기별 보정하고

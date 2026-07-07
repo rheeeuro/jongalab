@@ -59,6 +59,9 @@ class ClosingBetStrategy:
         self._feat: dict[str, dict] = {}
         # 종목코드 → 소속 테마 당일 등락률 최대값(_fetch_watchlist_sectors 에서 구축)
         self._theme_strength: dict[str, float] = {}
+        # 거래대금 순위 API에서 시장별 TOP_N_BY_VALUE 안에 들어온 종목.
+        # 테마 보너스는 이 유동성 상위권과 교차할 때만 부여한다.
+        self._top_value_codes: set[str] = set()
 
     def run(self):
         logger.info("=" * 60)
@@ -99,6 +102,7 @@ class ClosingBetStrategy:
                 for item in items[:self.strategy_cfg.TOP_N_BY_VALUE]:
                     code = item.get("stk_cd", "").split("_")[0]
                     name = item.get("stk_nm", "")
+                    self._top_value_codes.add(code)
                     tv = abs(self.engine.parse_price(item.get("trde_prica", "0"))) * 1_000_000
                     cp = abs(self.engine.parse_price(item.get("cur_prc", "0")))
                     chg = self.engine.parse_float(item.get("flu_rt", "0"))
@@ -247,7 +251,8 @@ class ClosingBetStrategy:
         for codes in self.strategy_cfg.WATCHLIST_SECTORS.values():
             theme_codes.update(code.split("_")[0] for code in codes)
         for c in filtered:
-            c.is_theme_stock = c.code.split("_")[0] in theme_codes
+            code = c.code.split("_")[0]
+            c.is_theme_stock = code in theme_codes and code in self._top_value_codes
 
         # 콘텐츠 분석 반영 (오늘 관련 콘텐츠 건수 + 평균 sentiment)
         for c in filtered:

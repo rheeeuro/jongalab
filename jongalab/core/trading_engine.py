@@ -31,7 +31,7 @@ class StrategyConfig:
     MIN_TRADING_VALUE = 100_000_000_000      # 거래대금 최소 1,000억
     PREFERRED_TRADING_VALUE = 200_000_000_000
     MIN_MARKET_CAP = 200_000_000_000         # 시총 최소 2,000억
-    TOP_N_BY_VALUE = 30      # 시장별 거래대금 상위 N (2026-07-03 풀 확대 20→30 — 점수가 실제 '선정'을 하도록)
+    TOP_N_BY_VALUE = 50      # 시장별 거래대금 상위 N (2026-07-07 풀 확대 30→50 — 테마 후보도 유동성 상위권만 가점)
 
     # ---- 이동평균 정배열 기준 ----
     MA_PERIODS = [5, 10, 20]
