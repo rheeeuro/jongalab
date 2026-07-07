@@ -148,10 +148,11 @@ class ClosingBetStrategy:
                     mc_raw = self.engine.parse_price(info.get("mac", "0"))
                     mc = mc_raw * 100_000_000
                     self._capture_basic_features(code, info)
-                    if mc >= self.strategy_cfg.MIN_MARKET_CAP:
-                        # 기본정보(ka10001)엔 거래대금이 없어 일봉(ka10081)에서 별도 조회
-                        time.sleep(0.3)
-                        tv = self._fetch_trading_value(code)
+                    # 기본정보(ka10001)엔 거래대금이 없어 일봉(ka10081)에서 별도 조회 후
+                    # 거래대금 순위 경로와 같은 최소 품질 필터를 적용한다.
+                    time.sleep(0.3)
+                    tv = self._fetch_trading_value(code)
+                    if self.engine.filter_basic(name, tv, mc):
                         candidates.append(StockCandidate(
                             code=code, name=name, sector=self._find_sector(code),
                             current_price=cp, trading_value=tv,
