@@ -1,10 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import type { EdgeRuleWithDaily } from "@/types";
 import { EdgeSummaryStrip } from "@/components/EdgeSummaryStrip";
 import { EdgeRuleCard } from "@/components/EdgeRuleCard";
-import { EdgeRuleDetail } from "@/components/EdgeRuleDetail";
 
 // 이 화면은 읽기 전용 — 실전 투입/종료 등 관리는 /admin/edge-rules(관리자 인증)에서만 한다.
 const GROUPS: { status: "live" | "candidate" | "retired"; label: string; desc: string }[] = [
@@ -14,8 +12,6 @@ const GROUPS: { status: "live" | "candidate" | "retired"; label: string; desc: s
 ];
 
 export function EdgeBoard({ rules }: { rules: EdgeRuleWithDaily[] }) {
-  const [selected, setSelected] = useState<EdgeRuleWithDaily | null>(null);
-
   if (rules.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-slate-200 py-16 text-center dark:border-slate-800">
@@ -37,7 +33,7 @@ export function EdgeBoard({ rules }: { rules: EdgeRuleWithDaily[] }) {
         const cards = (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {group.map((r) => (
-              <EdgeRuleCard key={r.id} rule={r} onOpen={setSelected} />
+              <EdgeRuleCard key={r.id} rule={r} />
             ))}
           </div>
         );
@@ -68,8 +64,6 @@ export function EdgeBoard({ rules }: { rules: EdgeRuleWithDaily[] }) {
           </section>
         );
       })}
-
-      <EdgeRuleDetail rule={selected} onClose={() => setSelected(null)} />
     </div>
   );
 }

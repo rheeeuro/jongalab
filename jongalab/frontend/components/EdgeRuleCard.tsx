@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { EdgeRuleWithDaily } from "@/types";
 import { Sparkline } from "@/components/Sparkline";
 import {
@@ -15,10 +16,8 @@ import {
 
 export function EdgeRuleCard({
   rule,
-  onOpen,
 }: {
   rule: EdgeRuleWithDaily;
-  onOpen: (rule: EdgeRuleWithDaily) => void;
 }) {
   const s = rule.stats;
   const fam = familyMeta(rule.family);
@@ -34,9 +33,8 @@ export function EdgeRuleCard({
   const progress = s ? Math.min(100, Math.round((s.n / rule.min_sample) * 100)) : 0;
 
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(rule)}
+    <Link
+      href={`/edge/${rule.id}`}
       className={`group flex w-full flex-col gap-2 rounded-2xl border p-4 text-left transition-colors ${
         isLive
           ? "border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/5 dark:hover:bg-emerald-500/10"
@@ -124,6 +122,6 @@ export function EdgeRuleCard({
           </div>
         </div>
       )}
-    </button>
+    </Link>
   );
 }

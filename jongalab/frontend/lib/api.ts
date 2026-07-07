@@ -37,7 +37,7 @@ export async function apiFetch<T>(
 // ── Edge Ledger (가설 스코어보드) 서버 사이드 조회 헬퍼 ──
 // 조회는 공개 엔드포인트라 인증 불필요. 승격/은퇴(admin)는 클라이언트 → 로컬 라우트 핸들러
 // (app/api/edge-rules/[id])가 httpOnly 쿠키를 서버에서 주입한다(weight-tuning 과 동일 패턴).
-import type { EdgeRule, EdgeRuleDaily, EdgeRuleLatestMatched } from '@/types';
+import type { EdgeRule, EdgeRuleDaily, EdgeRuleLatestMatched, EdgeRuleWithDaily } from '@/types';
 
 export async function getEdgeRules(): Promise<EdgeRule[]> {
   return apiFetch<EdgeRule[]>('/api/edge-rules', []);
@@ -54,6 +54,20 @@ export async function getEdgeRuleDaily(
     latest_matched: EdgeRuleLatestMatched | null;
   } | null>(`/api/edge-rules/${id}/daily?days=${days}`, null);
   return { daily: res?.daily ?? [], latest_matched: res?.latest_matched ?? null };
+}
+
+export async function getEdgeRuleWithDaily(id: number, days = 60): Promise<EdgeRuleWithDaily | null> {
+  const res = await apiFetch<{
+    rule: EdgeRule;
+    daily: EdgeRuleDaily[];
+    latest_matched: EdgeRuleLatestMatched | null;
+  } | null>(`/api/edge-rules/${id}/daily?days=${days}`, null);
+  if (!res) return null;
+  return {
+    ...res.rule,
+    daily: res.daily,
+    latest_matched: res.latest_matched,
+  };
 }
 
 export { API_BASE };
