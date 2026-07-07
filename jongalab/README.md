@@ -69,7 +69,7 @@ jongalab/
 | `telegram_listener` | 상시 | Telethon 감시. **일반 채널**(platform=telegram)→ LLM 분석 → `content_analysis`. **뉴스 채널**(platform=news, 고빈도)→ LLM 없이 사전매칭 → `news_mention` |
 | `news_ticker_seed` | 일 07:30 (등록 시 1회) | 키움 ka10099(코스피/코스닥) → `ticker_dictionary` ACTIVE 업서트. 뉴스 사전매칭 커버리지용 |
 | `cleanup_content` | 매일 04:00 | `content_analysis` 3개월 + `news_mention` 14일 이전 행 삭제(테이블 비대화 방지) |
-| `closing_bet` | 평일 08:30~20시(30분) | Phase 1/2 스크리닝 → `daily_stock_report`(Phase 2 통과 **유니버스 전체** 저장) + `trade_signal`(selected만 핸드오프, `rule_names` 태깅) 적재. Phase 2 하드 필터는 **음전 제외**뿐 — 정배열/신고가는 가점으로만 반영(2026-07-03 풀 확대). **선정 레이어**(`edge_selection`, `EDGE_SELECTION_MODE` 기본 `legacy`=점수 top-N)가 `selected`/핸드오프만 정하고 점수·rank_no·저장은 불변 — `hybrid`/`rules` 는 데이터 게이트+승인 후 전환(Phase 4). veto rule 은 전 모드에서 선정 직전 제외 |
+| `closing_bet` | 평일 08:30~20시(30분) | Phase 1/2 스크리닝 → `daily_stock_report`(Phase 2 **유니버스 전체** 저장) + `trade_signal`(selected만 핸드오프, `rule_names` 태깅) 적재. Phase 2는 음전 후보도 정밀분석·저장해 rule_evaluator 연구 표본으로 쓰고, 실제 selected/핸드오프만 선정 레이어에서 음전 제외한다(2026-07-07). 정배열/신고가는 가점으로만 반영(2026-07-03 풀 확대). **선정 레이어**(`edge_selection`, `EDGE_SELECTION_MODE` 기본 `legacy`=음전 제외 후 점수 top-N)가 `selected`/핸드오프만 정하고 점수·rank_no·저장은 불변 — `hybrid`/`rules` 는 데이터 게이트+승인 후 전환(Phase 4). veto rule 은 전 모드에서 선정 직전 제외 |
 | `gap_check` (`--base-krx`/`--base-nxt`/`--check-nxt`/`--label-nxt`/`--check-krx`) | 평일 15:20 / 19:50 / 08:03 / 08:06 / 09:03 | 실매매 청산 창과 동일 기준의 갭 측정. 15:20 KRX(top-10)·19:50 NXT 기준가를 state 로 수집(19:50 NXT 조회되는 종목=NXT 종목) → 익일 08:03 NXT 종목(`gap_nxt_*`), 09:03 KRX 종목(`gap_krx_*`) 확정 — 종목별로 자기 venue 창 하나만 채점. 기준가 미수집 시 리포트가 폴백(알림에 ≈ 표시). 텔레그램 알림은 09:03 확정 후 하루 1회. **19:50(`--base-nxt`)은 확장 관측**: 유니버스 전체에 KRX 확정 종가+NXT 현재가(종목당 2콜)를 붙여 `daily_stock_report` NXT 스냅샷(`krx_close_price`·`nxt_price_1950`·`nxt_gap_pct`·`nxt_after_value`·`nxt_listed`) UPDATE + `market_snapshot` 1행 upsert. **08:06(`--label-nxt`)은 엣지 연구 라벨**: 전일 유니버스 전체 NXT 상장 종목의 08:06 NXT 가격 → `nxt_open_price`·`nxt_open_ret`(앵커=KRX 확정 종가) UPDATE — 실매매 08:03(settle·check-nxt, top-10)과 시각·부하 완전 분리. 관측 확장은 매매 영향 0 |
 | `outcome_backfill` | 평일 09:30 | `daily_stock_report` 유니버스 전체에 **일봉 결과 라벨 4종**(`next_open_ret`·`next_high_ret`·`next_low_ret`·`next_close_ret` = 리포트일 종가→다음 거래일 시가/고가/저가/종가 등락률) 균일 백필 — 같은 일봉 1회 조회에서 파생(추가 API 콜 0). 라벨 4종 중 하나라도 NULL 이면 대상. 수정주가 차트로 분할 상쇄·±35% 초과 아티팩트 스킵. 미완결(당일)분은 다음날 재시도. 신규 3종은 과거 유니버스에 자동 소급 |
 | `rule_evaluator` | 평일 09:40 | **Edge Ledger 일별 채점(2-pass)** — pass1: 활성 rule(status≠retired)을 유니버스 전체 + `market_snapshot` 에 적용(`edge_predicate.evaluate`), `exit_label` 결과 수집 → `mean_net = 평균 − EDGE_COST_PCT` → `edge_rule_daily` upsert(catch-up: 라벨 미도래 날짜는 다음날 재시도, 14일 초과 시 n=0 sentinel 종결 — 실시간 라벨은 소급 불가라 영구 재시도 방지) + registered_at 이후 표본만으로 누적 stats 재계산. pass2: 전 rule stats 가 신선해진 뒤 `edge_policy.check_promotion`(라우터와 동일 게이트)으로 `stats.promo_eligible` 저장 + 텔레그램 알림 — 승격 후보(게이트 전체 충족) / 집행 설계 필요(통계·표본 충족이나 선정 시점 실행 불가 피처) / 강등 검토(live, 최근 30표본 mean_net<0). 전이는 관리자 API 수동, 매매 집행 없음 |
@@ -87,7 +87,7 @@ jongalab/
                                         │
 종가 분석(closing_bet, 평일 13:00~15:00)│
   Phase 1 거래대금(시장별 상위 50) + 관심섹터 보강 · 공통 기본필터(제외키워드·시총·거래대금) ─┘
-  Phase 2 음전 제외(하드 필터) → 수급(기관/외인/개인/프로그램)+정배열/신고가+대장주+테마+콘텐츠+뉴스+등락률 점수
+  Phase 2 음전 포함 정밀분석(연구 표본) → 수급(기관/외인/개인/프로그램)+정배열/신고가+대장주+테마+콘텐츠+뉴스+등락률 점수
   종합점수 = 수급 + 정배열 + 신고가 + 대장주 + 테마(거래대금 상위 50 교집합만) + 콘텐츠 + 뉴스 + 등락률(2~12% 가점 / 15%+ 감점) (가중치 튜닝 대상)
         │  · 뉴스 재료: news_count 집계 + 후보 소수 배치 LLM 요약 → daily_stock_report 표시
         │    (SCORE_NEWS_BONUS 기본 0 → 현재 점수 무영향, 주간 튜너가 성과 따라 상향 가능)
@@ -95,7 +95,7 @@ jongalab/
         │    집계 — news_unique_count(헤드라인 dedup 고유 기사) · news_pm_count(12시 이후 신선도) ·
         │           news_first_today(14일 내 첫 등장) · news_prior_avg(직전 7일 일평균, 서프라이즈 분모)
         │    LLM — news_sentiment(방향 0~100) · news_catalyst(재료 유형) — 기존 배치 요약 호출에 출력 필드만 추가
-        ├─► daily_stock_report — Phase 2 통과 유니버스 전체 저장(selected=1=핸드오프, 0=비선정 후보)
+        ├─► daily_stock_report — Phase 2 유니버스 전체 저장(selected=1=핸드오프, 0=비선정/음전 연구 후보)
         │     · 기본 조회(대시보드·gap_check)는 selected=1 만; 연구는 include_unselected=True 로 전체
         │     · 저장 시점 파생(API 콜 없음, F4의 눈): sector_rel_ret(등락률−동일섹터 평균)·sector_leader_chg(동일섹터 최고 등락률)
         │     · F5 수급 구조·테마 피처(2026-07-05~, 점수 무영향 — 전부 선정 시점 수집이라 live 자격):
@@ -104,7 +104,7 @@ jongalab/
         │                        frgn_exhaust_rate(ka10001 for_exh_rt)
         │       추가 1콜 — vol_ratio(ka10081 당일 거래량÷20일 평균) / DB 파생 — first_seen(직전 14일 유니버스 부재) ·
         │                  frgn_exhaust_chg(직전 리포트 거래일 대비 소진율 %p, repository.get_prev_frgn_exhaust_map)
-        │     · 선정 레이어(edge_selection, EDGE_SELECTION_MODE): legacy=점수 top-N(기본) / hybrid=live rule 우선+점수 채움 / rules=live rule 합집합(매칭0=무거래). veto 는 전 모드 선정 직전 제외. live rule 로드 실패 시 모드 자체를 legacy 로 폴백(로그 명시) — 빈 rule 목록으로 rules 를 돌려 무거래가 되는 사고 방지
+        │     · 선정 레이어(edge_selection, EDGE_SELECTION_MODE): 음전 후보는 연구 표본으로 저장하되 핸드오프에서 제외. legacy=점수 top-N(기본) / hybrid=live rule 우선+점수 채움 / rules=live rule 합집합(매칭0=무거래). veto 는 전 모드 선정 직전 제외. live rule 로드 실패 시 모드 자체를 legacy 로 폴백(로그 명시) — 빈 rule 목록으로 rules 를 돌려 무거래가 되는 사고 방지
         └─► trade_signal (status=pending, selected만, rule_names 귀속)  ─► trading 도메인이 집행(도메인 로직 무변경, rule_names 는 안 읽음)
 당일 15:20 gap_check --base-krx ─► top-10 KRX 기준가(state) · 다음날 08:03/09:03 --check-* ─► daily_stock_report.gap_*(top-10) 갱신(NXT: 19:50→08:03, KRX: 15:20→09:03)
 당일 19:50 gap_check --base-nxt ─► top-10 NXT 기준가(state, 갭 체크용) + 유니버스 전체 NXT 스냅샷(daily_stock_report.krx_close_price·nxt_*) + market_snapshot 1행(지수·선물·VIX·환율)

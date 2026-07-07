@@ -40,8 +40,8 @@ logger = logging.getLogger("ClosingBet")
 NEWS_SUMMARY_MIN_COUNT = 3
 MAX_NEWS_SUMMARIES = 5
 
-# 실제 매매(trade_signal)로 핸드오프하는 상위 종목 수. 이 수 이하 rank_no 만 selected=1.
-# 나머지 후보는 selected=0 으로 '저장만' 한다(엣지 연구용 유니버스). 매매 행위는 불변.
+# 실제 매매(trade_signal)로 핸드오프하는 최대 종목 수.
+# Phase 2 유니버스는 전체 저장하고, 선정 레이어가 음전 후보를 제외한 뒤 selected 를 확정한다.
 TRADED_TOP_N = 10
 
 
@@ -203,10 +203,8 @@ class ClosingBetStrategy:
         filtered = []
         
         for c in candidates:
-            # 음전 종목 제외 — 종가베팅 전제(마감 강세)와 상충 (2026-07-03 실증: 음전 승률 최하)
-            if c.change_pct < 0:
-                logger.debug(f"음전 → 제외: {c.name} ({c.change_pct:+.1f}%)")
-                continue
+            # 음전 종목도 정밀분석·저장한다. rule_evaluator 의 반사실 표본으로 쓰되,
+            # 실제 매매 선정은 _apply_selection 에서 change_pct >= 0 후보로 제한한다.
 
             # 정배열/신고가는 하드 필터에서 점수 가점으로 전환 (2026-07-03) —
             # 필터가 풀을 하루 10개 미만까지 줄여 점수가 '선정'을 못 하던 문제 해소.
@@ -319,8 +317,8 @@ class ClosingBetStrategy:
     def _save_phase2_reports(self, candidates: list[StockCandidate]):
         """Phase 2 분석 결과를 daily_stock_report 테이블에 저장.
 
-        점수순 정렬된 유니버스 전체를 저장한다(엣지 연구용). rank_no<=TRADED_TOP_N 만
-        selected=1 로 표시하고 trade_signal 로 핸드오프한다 — 실제 매매 대상은 불변.
+        점수순 정렬된 유니버스 전체를 저장한다(엣지 연구용). selected 는 선정 레이어가
+        음전 후보를 제외한 뒤 확정하고, selected=1 만 trade_signal 로 핸드오프한다.
         LLM 뉴스 요약도 선정(top-N) 후보에만 부여해 비용을 종전과 동일하게 유지한다.
         """
         # 섹터 상대치 파생 (F4 후발 확산형의 눈) — 유니버스 in-memory 계산, API 콜 없음.
@@ -345,24 +343,15 @@ class ClosingBetStrategy:
             logger.warning(f"외인소진율 직전일 맵 조회 실패: {e}")
 
         reports = []
-        summarized = 0
         for i, c in enumerate(candidates, 1):
             code = c.code.split("_")[0]
-            # LLM 뉴스 요약 예산은 점수 상위 top-N 에만 부여(비용 통제 — 선정 모드와 무관).
-            # 실제 selected(핸드오프) 판정은 아래 선정 레이어(모드 스위치)가 다시 정한다.
             is_top_score = 1 if i <= TRADED_TOP_N else 0
             news_count = getattr(c, "news_count", 0)
-            if is_top_score:
-                news_headlines, news_ai = self._build_news_fields(
-                    c, code, news_count, summarized
-                )
-                if news_ai:
-                    summarized += 1
-            else:
-                # 비선정 후보: 헤드라인만(표시·연구용), LLM 요약은 생략
-                news_headlines, news_ai = self._build_news_fields(
-                    c, code, news_count, MAX_NEWS_SUMMARIES
-                )
+            # 유니버스 전체에 뉴스 헤드라인까지 저장한다.
+            # LLM 요약·방향·재료유형은 selected 확정 후 실제 핸드오프 후보에만 채운다.
+            news_headlines, news_ai = self._build_news_fields(
+                c, code, news_count, MAX_NEWS_SUMMARIES
+            )
             news_stats = self._news_stats.get(code) or {}
             feat = self._feat.get(code) or {}
             fer = feat.get("frgn_exhaust_rate")
@@ -417,8 +406,14 @@ class ClosingBetStrategy:
                 ),
             })
 
+        # 선정 전 매매 후보 풀(음전 제외)에 뉴스 LLM 라벨을 붙여 veto 가 활용할 수 있게 한다.
+        summarized = self._fill_selected_news_ai(reports, selected_only=False)
+
         # 선정 레이어(모드 스위치) — selected/핸드오프 대상만 정한다. 점수·rank_no·저장은 불변.
         rule_names_by_code = self._apply_selection(reports)
+        self._fill_selected_news_ai(
+            reports, budget=max(0, MAX_NEWS_SUMMARIES - summarized)
+        )
 
         try:
             save_stock_reports(reports)
@@ -440,6 +435,45 @@ class ClosingBetStrategy:
             logger.info(f"trade_signal 핸드오프 {len(signals)}건 (영향 {n}행)")
         except Exception as e:
             logger.error(f"trade_signal 핸드오프 실패(trading DB 미설정?): {e}")
+
+    @staticmethod
+    def _fill_selected_news_ai(
+        reports: list[dict], selected_only: bool = True, budget: int = MAX_NEWS_SUMMARIES
+    ) -> int:
+        """매매 후보에 LLM 뉴스 요약·방향·재료유형을 예산만큼 채운다."""
+        if budget <= 0:
+            return 0
+        summarized = 0
+        for r in reports:
+            if summarized >= budget:
+                break
+            if selected_only and not r.get("selected"):
+                continue
+            if not selected_only and (r.get("change_pct") or 0) < 0:
+                continue
+            if r.get("news_summary") or r.get("news_sentiment") is not None:
+                continue
+            if int(r.get("news_count") or 0) < NEWS_SUMMARY_MIN_COUNT:
+                continue
+            headlines = r.get("news_headlines") or []
+            if not headlines:
+                continue
+            try:
+                news_ai = summarize_news(r["stock_name"], r["stock_code"], headlines)
+                if not news_ai:
+                    continue
+                r["news_summary"] = news_ai.get("content")
+                r["news_sentiment"] = news_ai.get("sentiment")
+                r["news_catalyst"] = news_ai.get("catalyst")
+                summarized += 1
+                scope = "selected" if r.get("selected") else "후보"
+                logger.info(
+                    f"[{r['stock_name']}] {scope} 뉴스 재료 요약 생성 "
+                    f"(방향 {news_ai.get('sentiment')}·유형 {news_ai.get('catalyst')})"
+                )
+            except Exception as e:
+                logger.warning(f"뉴스 요약 실패 [{r.get('stock_name')}]: {e}")
+        return summarized
 
     # ── 선정 레이어 (모드 스위치) ──
     def _apply_selection(self, reports: list[dict]) -> dict[str, str]:
@@ -467,8 +501,17 @@ class ClosingBetStrategy:
             else:
                 logger.warning(f"veto rule 로드 실패 — veto 미적용: {e}")
 
+        selection_reports = []
+        trade_rank = 0
+        for r in reports:
+            if (r.get("change_pct") or 0) < 0:
+                continue
+            trade_rank += 1
+            selection_reports.append({**r, "rank_no": trade_rank})
+        excluded_negative = len(reports) - len(selection_reports)
+
         selected_codes, rule_names_by_code, veto_log = select_signals(
-            mode, reports, live_rules, veto_rules, TRADED_TOP_N, market=None,
+            mode, selection_reports, live_rules, veto_rules, TRADED_TOP_N, market=None,
         )
         sel_set = set(selected_codes)
         for r in reports:
@@ -479,7 +522,8 @@ class ClosingBetStrategy:
         logger.info(
             f"선정 레이어(mode={mode}"
             f"{'←' + EDGE_SELECTION_MODE + ' 폴백' if mode != EDGE_SELECTION_MODE else ''}): "
-            f"선정 {len(selected_codes)}건{' — 무거래' if not selected_codes else ''}, veto {len(veto_log)}건"
+            f"선정 {len(selected_codes)}건{' — 무거래' if not selected_codes else ''}, "
+            f"음전 연구표본 {excluded_negative}건 제외, veto {len(veto_log)}건"
         )
         return rule_names_by_code
 
