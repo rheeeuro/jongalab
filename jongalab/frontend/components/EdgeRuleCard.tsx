@@ -34,7 +34,7 @@ export function EdgeRuleCard({
 
   return (
     <Link
-      href={`/edge/${rule.id}`}
+      href={"/lab/" + encodeURIComponent(rule.name)}
       className={`group flex w-full flex-col gap-2 rounded-2xl border p-4 text-left transition-colors ${
         isLive
           ? "border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/5 dark:hover:bg-emerald-500/10"

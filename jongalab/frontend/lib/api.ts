@@ -70,4 +70,17 @@ export async function getEdgeRuleWithDaily(id: number, days = 60): Promise<EdgeR
   };
 }
 
+export async function getEdgeRuleWithDailyByName(name: string, days = 60): Promise<EdgeRuleWithDaily | null> {
+  const decodedName = decodeURIComponent(name);
+  const rules = await getEdgeRules();
+  const rule = rules.find((r) => r.name === decodedName);
+  if (!rule) return null;
+  const { daily, latest_matched } = await getEdgeRuleDaily(rule.id, days);
+  return {
+    ...rule,
+    daily,
+    latest_matched,
+  };
+}
+
 export { API_BASE };

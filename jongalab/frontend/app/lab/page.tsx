@@ -6,7 +6,7 @@ import { EdgeBoard } from "@/components/EdgeBoard";
 
 export const metadata: Metadata = {
   title: "전략 실험실",
-  alternates: { canonical: "/edge" },
+  alternates: { canonical: "/lab" },
 };
 
 export const dynamic = "force-dynamic";
