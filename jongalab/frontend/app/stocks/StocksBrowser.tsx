@@ -99,8 +99,13 @@ export function StocksBrowser({
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((r) => (
-            <StockReportCard key={r.stock_code} report={r} date={date} />
+          {filtered.map((r, index) => (
+            <StockReportCard
+              key={r.stock_code}
+              report={r}
+              date={date}
+              displayRank={index + 1}
+            />
           ))}
         </div>
       )}

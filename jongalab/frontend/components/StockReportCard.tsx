@@ -52,9 +52,11 @@ function pctColor(pct: number): string {
 export function StockReportCard({
   report: r,
   date,
+  displayRank,
 }: {
   report: StockReport;
   date: string;
+  displayRank?: number;
 }) {
   const isUp = r.change_pct > 0;
   const isDown = r.change_pct < 0;
@@ -79,7 +81,7 @@ export function StockReportCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-xs font-black text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
-              {r.rank_no}
+              {displayRank ?? r.rank_no}
             </span>
             <span className="min-w-0 truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400">
               {r.stock_name}
