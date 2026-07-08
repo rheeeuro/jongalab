@@ -17,7 +17,7 @@ import sys
 import time
 import argparse
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from core.config import BUY_PULLBACK_PCT
 from core.logging_setup import setup_logging
@@ -28,6 +28,7 @@ from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
 from core.config import SEED_COMBINED_MIN_MULT
 from core.kiwoom_data_client import to_int
 from core.repository import trade_signal as signal_repo
+from core.repository import order as order_repo
 from core.repository import blocklist as blocklist_repo
 from core.repository import audit_log
 
@@ -35,6 +36,8 @@ setup_logging()
 logger = logging.getLogger("SignalExecutor")
 
 POLL_SEC = 15  # closing_bet 완료 대기 / 눌림 매수 폴링 공통 주기
+NXT_PARTIAL_RETRY_MAX = 2
+NXT_PARTIAL_RETRY_WAIT_SEC = 3
 
 
 def _beat(payload: dict) -> None:
@@ -58,8 +61,131 @@ def _hm(now: datetime) -> tuple[int, int]:
     return (now.hour, now.minute)
 
 
+def _deadline_dt(now: datetime, hm: tuple[int, int]) -> datetime:
+    return now.replace(hour=hm[0], minute=hm[1], second=0, microsecond=0)
+
+
+def _execution_qty_by_order(client, stk_cd: str, ord_nos: list[str], exchange: str) -> tuple[dict[str, int], bool]:
+    """키움 체결내역에서 주문번호별 누적 체결수량을 읽는다.
+
+    조회 실패는 재시도를 막는 쪽으로 처리한다. 잔량 재주문은 실제 체결 수량을 알아야만 안전하다.
+    """
+    wanted = {str(o) for o in ord_nos if o}
+    if not wanted:
+        return {}, True
+    stex_tp = "2" if exchange == "NXT" else "1"
+    try:
+        resp = client.get_executions(qry_tp="1", sell_tp="2", stk_cd=stk_cd, stex_tp=stex_tp)
+    except Exception as e:
+        logger.warning("부분체결 조회 실패 [%s]: %s", stk_cd, e)
+        return {}, False
+
+    qty_by_order: dict[str, int] = {o: 0 for o in wanted}
+    for row in resp.get("cntr", []) or []:
+        ono = str(row.get("ord_no") or "")
+        if ono not in wanted:
+            continue
+        qty_by_order[ono] += to_int(row.get("cntr_qty"))
+    return qty_by_order, True
+
+
+def _retry_nxt_partial_fill(engine: ExecutionEngine, trade_date: str, sig: dict,
+                            target_qty: int, price: int, initial_resp: dict,
+                            deadline_hm: tuple[int, int]) -> dict:
+    """NXT 최유리 IOC 부분체결 잔량을 마감 전 소량 재시도한다.
+
+    execute_buy 의 기본 멱등키는 원주문 1회용이라, 잔량 재시도는 별도 멱등키
+    (:partial:N)로 주문 행을 남긴다. 체결 반영은 기존 fills_sync 가 주문번호 기준으로 처리한다.
+    """
+    result = {"attempts": 0, "filled": None, "remaining": None, "order_nos": []}
+    if getattr(engine.client, "paper", True):
+        return result
+
+    stk_cd = sig["stk_cd"]
+    initial_ord_no = initial_resp.get("ord_no")
+    if not initial_ord_no or target_qty < 1:
+        return result
+
+    deadline = _deadline_dt(datetime.now(), deadline_hm)
+    order_nos = [str(initial_ord_no)]
+    base_key = ExecutionEngine.idempotency_key(trade_date, sig["id"], "buy")
+
+    for attempt in range(1, NXT_PARTIAL_RETRY_MAX + 1):
+        now = datetime.now()
+        if now + timedelta(seconds=NXT_PARTIAL_RETRY_WAIT_SEC + 1) >= deadline:
+            break
+        time.sleep(NXT_PARTIAL_RETRY_WAIT_SEC)
+
+        qty_by_order, ok = _execution_qty_by_order(engine.client, stk_cd, order_nos, "NXT")
+        if not ok:
+            audit_log.append("buy_partial_retry_skip", stk_cd, {
+                "reason": "체결내역 조회 실패", "target_qty": target_qty, "order_nos": order_nos})
+            break
+
+        filled = sum(qty_by_order.values())
+        remaining = max(0, target_qty - filled)
+        result.update({"filled": filled, "remaining": remaining, "order_nos": list(order_nos)})
+        if remaining < 1:
+            break
+
+        # 체결 row 가 하나도 안 보이면 API 지연 가능성이 있어 과매수를 피하려고 재주문하지 않는다.
+        if filled == 0 and all(q == 0 for q in qty_by_order.values()):
+            audit_log.append("buy_partial_retry_skip", stk_cd, {
+                "reason": "체결내역 미확인", "target_qty": target_qty, "order_nos": order_nos})
+            break
+        if len(order_nos) > 1 and qty_by_order.get(order_nos[-1], 0) == 0:
+            audit_log.append("buy_partial_retry_skip", stk_cd, {
+                "reason": "최근 재시도 체결내역 미확인", "target_qty": target_qty,
+                "filled": filled, "order_nos": order_nos})
+            break
+
+        retry_price = engine.data.get_market_price(stk_cd) or price
+        key = f"{base_key}:partial:{attempt}"
+        if order_repo.find_by_idempotency_key(key):
+            logger.info("부분체결 재시도 중복 스킵 [%s] %s", stk_cd, key)
+            continue
+
+        decision = engine.risk.check(trade_date, stk_cd, remaining * retry_price)
+        if not decision.allowed:
+            audit_log.append("buy_partial_retry_blocked", stk_cd, {
+                "key": key, "reason": decision.reason, "remaining": remaining})
+            logger.warning("부분체결 잔량 재시도 차단 [%s]: %s", stk_cd, decision.reason)
+            break
+
+        order_id = order_repo.create_intended(
+            key, sig["id"], stk_cd, "buy", remaining, retry_price, "market", "live"
+        )
+        audit_log.append("buy_partial_retry_intended", stk_cd, {
+            "order_id": order_id, "remaining": remaining, "price": retry_price,
+            "filled": filled, "target_qty": target_qty})
+        resp = engine.client.buy(
+            stk_cd, remaining, 0,
+            trde_tp=ExecutionEngine._now_trde_tp("NXT"),
+            dmst_stex_tp="NXT",
+        )
+        audit_log.append("buy_response", stk_cd, {"order_id": order_id, "resp": resp})
+        if resp.get("return_code") != 0 or not resp.get("ord_no"):
+            order_repo.mark_sent(order_id, None, "rejected")
+            audit_log.append("buy_rejected", stk_cd, {"order_id": order_id, "resp": resp})
+            logger.warning("부분체결 잔량 재시도 거부 [%s] %d주: %s",
+                           stk_cd, remaining, resp.get("return_msg"))
+            break
+
+        order_repo.mark_sent(order_id, resp.get("ord_no"), "sent")
+        engine.risk.record_order(trade_date)
+        order_nos.append(str(resp["ord_no"]))
+        result.update({"attempts": attempt, "order_nos": list(order_nos)})
+        audit_log.append("buy_partial_retry_sent", stk_cd, {
+            "order_id": order_id, "remaining": remaining, "ord_no": resp.get("ord_no"),
+            "attempt": attempt})
+        logger.info("NXT 부분체결 잔량 재시도 [%s] %d주 (시도 %d/%d)",
+                    stk_cd, remaining, attempt, NXT_PARTIAL_RETRY_MAX)
+
+    return result
+
+
 def _buy_candidate(engine: ExecutionEngine, trade_date: str, c: dict,
-                   exchange: str, reason: str) -> None:
+                   exchange: str, reason: str, deadline_hm: tuple[int, int]) -> None:
     """배분 수량으로 1종목 매수 집행 + 시그널 상태 갱신. 한 종목당 1회만 호출한다."""
     sig, stk, price = c["sig"], c["stk_cd"], c["price"]
     sized = {**sig, "_qty": c["shares"], "_price": price}
@@ -67,9 +193,18 @@ def _buy_candidate(engine: ExecutionEngine, trade_date: str, c: dict,
     try:
         signal_repo.update_status(sig["id"], "executing")
         resp = engine.execute_buy(trade_date, sized, dmst_stex_tp=exchange)
-        signal_repo.update_status(sig["id"], "done" if resp else "skipped")
+        partial = {}
+        if resp and exchange == "NXT":
+            partial = _retry_nxt_partial_fill(
+                engine, trade_date, sig, c["shares"], price, resp, deadline_hm
+            )
+        note = None
+        if partial.get("filled") is not None and partial.get("remaining"):
+            note = f"NXT 부분체결 추정 {partial['filled']}/{c['shares']}주, 잔량 재시도 {partial.get('attempts', 0)}회"
+        signal_repo.update_status(sig["id"], "done" if resp else "skipped", note=note)
         audit_log.append("buy_exec", stk, {
-            "shares": c["shares"], "price": price, "reason": reason, "sent": bool(resp)})
+            "shares": c["shares"], "price": price, "reason": reason, "sent": bool(resp),
+            "partial_retry": partial or None})
     except Exception as e:
         logger.error("시그널 %s 집행 실패: %s", sig["id"], e)
         signal_repo.update_status(sig["id"], "rejected", note=str(e))
@@ -231,7 +366,8 @@ def main() -> int:
             if cur <= trigger:
                 c["price"] = cur  # 체결 기록용 참고가(실주문은 시장가/IOC)
                 _buy_candidate(engine, trade_date, c, cfg["exchange"],
-                               f"눌림 매수 현재가 {cur} <= 고점 {c['high']} -{BUY_PULLBACK_PCT}%")
+                               f"눌림 매수 현재가 {cur} <= 고점 {c['high']} -{BUY_PULLBACK_PCT}%",
+                               cfg["deadline"])
         if all(c["bought"] for c in cands):
             logger.info("전 종목 매수 완료 — 데드라인 전 종료")
             break
@@ -249,7 +385,8 @@ def main() -> int:
                 c["price"] = cur
         except Exception as e:
             logger.warning("데드라인 현재가 조회 실패 [%s]: %s", c["stk_cd"], e)
-        _buy_candidate(engine, trade_date, c, cfg["exchange"], "데드라인 시장가 매수(미눌림)")
+        _buy_candidate(engine, trade_date, c, cfg["exchange"], "데드라인 시장가 매수(미눌림)",
+                       cfg["deadline"])
 
     # 6) 관리자 알림은 체결 직후 fills_sync 워커가 실체결가로 전송한다
     #    (KRX 15:31 / NXT 19:55) — 종가 단일가/IOC 체결가는 이 시점엔 아직 미확정이라 여기서 보내지 않는다.
