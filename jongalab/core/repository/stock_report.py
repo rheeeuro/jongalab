@@ -515,3 +515,69 @@ def save_nxt_open_labels(report_date: str, rows: list[dict]) -> int:
             n += cursor.rowcount
         conn.commit()
     return n
+
+
+# ── 엣지 연구용 실집행 레그 라벨 (outcome_backfill 워커) ──
+# exec_leg_ret 은 종목별 실제 청산 venue 창을 하나로 접은 라벨이다.
+#   NXT: 전일 19:50 NXT → 익일 08:03 NXT
+#   KRX: 전일 15:20 KRX → 익일 09:03 KRX
+
+
+def get_dates_missing_exec_leg(min_date: str | None = None) -> list[str]:
+    """exec_leg_ret 이 비어있는 행이 있는 report_date 목록(오래된→최신).
+
+    오늘 날짜는 익일 청산 시각이 아직 없으므로 제외한다.
+    """
+    with get_db() as (conn, cursor):
+        params: list = []
+        cond = "exec_leg_ret IS NULL AND report_date < CURDATE()"
+        if min_date:
+            cond += " AND report_date >= %s"
+            params.append(min_date)
+        cursor.execute(
+            f"""SELECT DISTINCT report_date FROM daily_stock_report
+                 WHERE {cond} ORDER BY report_date ASC""",
+            tuple(params),
+        )
+        rows = cursor.fetchall()
+    return [
+        r["report_date"].isoformat() if isinstance(r["report_date"], (date, datetime))
+        else str(r["report_date"])
+        for r in rows
+    ]
+
+
+def get_rows_missing_exec_leg(report_date: str) -> list[dict]:
+    """특정 report_date 에서 실집행 레그 라벨이 비어있는 행 목록."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT stock_code, stock_name, nxt_listed, exec_leg_ret, exec_leg_venue
+                 FROM daily_stock_report
+                WHERE report_date = %s AND exec_leg_ret IS NULL
+                ORDER BY rank_no ASC""",
+            (report_date,),
+        )
+        return cursor.fetchall()
+
+
+def save_exec_leg_labels(report_date: str, results: list[dict]) -> int:
+    """실집행 레그 라벨 백필. results: [{stock_code, exec_leg_ret, exec_leg_venue}].
+
+    None 값은 COALESCE 로 기존 값 보존(멱등). 갱신 행 수 반환.
+    """
+    if not results:
+        return 0
+    n = 0
+    with get_db() as (conn, cursor):
+        for r in results:
+            cursor.execute(
+                """UPDATE daily_stock_report
+                   SET exec_leg_ret = COALESCE(%s, exec_leg_ret),
+                       exec_leg_venue = COALESCE(%s, exec_leg_venue)
+                 WHERE report_date = %s AND stock_code = %s""",
+                (r.get("exec_leg_ret"), r.get("exec_leg_venue"), report_date, r["stock_code"]),
+            )
+            n += cursor.rowcount
+        conn.commit()
+    return n
+

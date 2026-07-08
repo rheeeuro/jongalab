@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS edge_rule (
     family        VARCHAR(20) NOT NULL,              -- f1_news / f2_global / f3_nxt / f4_laggard / control / veto
     description   VARCHAR(500) NOT NULL,             -- 인과 근거 필수: "누가 왜 내일 아침 사는가"
     predicate     JSON NOT NULL,                     -- 조건 목록(AND 결합, core/edge_predicate.py DSL)
-    exit_label    VARCHAR(30) NOT NULL DEFAULT 'next_open_ret',  -- 채점에 쓸 결과 라벨 컬럼
+    exit_label    VARCHAR(30) NOT NULL DEFAULT 'exec_leg_ret',  -- 채점에 쓸 결과 라벨 컬럼
     status        VARCHAR(10) NOT NULL DEFAULT 'candidate',      -- candidate / live / retired
     min_sample    INT NOT NULL DEFAULT 40,           -- 승격 심사 최소 표본(매칭 종목-일)
     registered_at DATE NOT NULL,                     -- ★ 사전 등록일 — 이 날짜 이후 표본만 승격 판정에 사용

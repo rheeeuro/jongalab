@@ -35,7 +35,7 @@ class RuleCreate(BaseModel):
     family: str
     description: str
     predicate: list
-    exit_label: str = "next_open_ret"
+    exit_label: str = "exec_leg_ret"
     min_sample: int = 40
     registered_at: str | None = None  # 미지정 시 오늘(사전 등록일)
 

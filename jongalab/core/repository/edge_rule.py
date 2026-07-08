@@ -13,7 +13,7 @@ from core.db import get_db
 # 준비 안 되는(readiness=False) rule 을 만드는 걸 막는다. 라벨 추가 시 여기 등록.
 ALLOWED_EXIT_LABELS = (
     "next_open_ret", "next_high_ret", "next_low_ret", "next_close_ret",
-    "nxt_open_ret", "gap_nxt_pct", "gap_krx_pct",
+    "nxt_open_ret", "gap_nxt_pct", "gap_krx_pct", "exec_leg_ret",
 )
 
 
@@ -41,7 +41,7 @@ def create_rule(
     family: str,
     description: str,
     predicate: list,
-    exit_label: str = "next_open_ret",
+    exit_label: str = "exec_leg_ret",
     min_sample: int = 40,
     registered_at: str | None = None,
     status: str = "candidate",

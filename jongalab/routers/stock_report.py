@@ -67,6 +67,8 @@ class StockReport(BaseModel):
     gap_krx_price: Optional[int] = None
     gap_krx_pct: Optional[float] = None
     gap_checked_at: Optional[str] = None
+    exec_leg_ret: Optional[float] = None
+    exec_leg_venue: Optional[str] = None
     created_at: Optional[str] = None
 
 

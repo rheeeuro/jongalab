@@ -147,6 +147,8 @@ export interface StockReport {
   gap_krx_price?: number | null;
   gap_krx_pct?: number | null;
   gap_checked_at?: string | null;
+  exec_leg_ret?: number | null;
+  exec_leg_venue?: 'NXT' | 'KRX' | null;
   created_at?: string;
 }
 

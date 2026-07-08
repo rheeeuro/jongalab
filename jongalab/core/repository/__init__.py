@@ -45,6 +45,9 @@ from core.repository.stock_report import (
     get_report_dates_before_today,
     save_gap_check_results,
     save_nxt_snapshot,
+    get_dates_missing_exec_leg,
+    get_rows_missing_exec_leg,
+    save_exec_leg_labels,
     get_gap_stats_by_dates,
     get_top_picks_by_dates,
 )

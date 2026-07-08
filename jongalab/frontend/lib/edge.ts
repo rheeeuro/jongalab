@@ -57,6 +57,7 @@ export const EXIT_LABEL_TEXT: Record<string, string> = {
   nxt_open_ret: '다음날 아침 8시(NXT 프리마켓)에 판다고 가정',
   gap_nxt_pct: '실매매 NXT 청산창 기준',
   gap_krx_pct: '실매매 KRX 청산창 기준',
+  exec_leg_ret: '실제 매도 시간 기준(NXT 19:50→08:03 / KRX 15:20→09:03)',
 };
 
 export function exitLabelText(label: string): string {

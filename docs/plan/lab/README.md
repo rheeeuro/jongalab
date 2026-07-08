@@ -105,6 +105,7 @@
 | **Phase 3.5** | [04-rule-families.md](04-rule-families.md) | 초기 가설 카탈로그 등록 (F1~F4 + control + veto) | Phase 3 완료 | 시드 데이터 (코드 아님) |
 | **Phase 4** | [05-selection-swap.md](05-selection-swap.md) | 선정 레이어 전환 — live rule 합집합 선정 + rule_id 관통 | **데이터 게이트**: rule n≥40 & 신뢰구간 하한>0 & 대조군 우위 & 사용자 승인 | closing_bet 수정 + trade_signal 컬럼 1 |
 | **Phase 5** | [06-frontend-scoreboard.md](06-frontend-scoreboard.md) | 가설 스코어보드 — 대시보드 중심 화면 전환 | Phase 3 완료 후 병행 | 페이지 1 + 카드 3 + API 2 |
+| **검증 노트** | [07-exec-leg-ret-verification.md](07-exec-leg-ret-verification.md) | `exec_leg_ret` 실집행 레그 라벨 전환·DB 적용·재채점 검증 기록 | 적용 완료 후 감사 | 문서 |
 
 ### 일정 감각 (표본 축적이 임계 경로)
 

@@ -126,6 +126,8 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     gap_krx_price INT DEFAULT NULL COMMENT '갭 체크 KRX 가격(09:03)',
     gap_krx_pct FLOAT DEFAULT NULL COMMENT '전일 15:20 KRX → 09:03 KRX 등락률(%)',
     gap_checked_at TIMESTAMP NULL DEFAULT NULL,
+    exec_leg_ret FLOAT DEFAULT NULL COMMENT '실집행 청산창 등락률(%): NXT 19:50→08:03 / KRX 15:20→09:03',
+    exec_leg_venue VARCHAR(3) DEFAULT NULL COMMENT 'exec_leg_ret 산출 venue: NXT 또는 KRX',
 
     -- 엣지 연구용: 상위 후보만이 아니라 Phase 2 통과 유니버스 전체를 저장한다.
     --   selected=1 은 실제 매매 핸드오프된 상위 종목(rank_no<=TRADED_TOP_N), 0 은 비선정 후보.
@@ -282,7 +284,7 @@ CREATE TABLE IF NOT EXISTS edge_rule (
     family        VARCHAR(20) NOT NULL,              -- f1_news / f2_global / f3_nxt / f4_laggard / control / veto
     description   VARCHAR(500) NOT NULL,             -- 인과 근거 필수: "누가 왜 내일 아침 사는가"
     predicate     JSON NOT NULL,                     -- 조건 목록(AND 결합, edge_predicate DSL)
-    exit_label    VARCHAR(30) NOT NULL DEFAULT 'next_open_ret',  -- 채점에 쓸 결과 라벨 컬럼
+    exit_label    VARCHAR(30) NOT NULL DEFAULT 'exec_leg_ret',  -- 채점에 쓸 결과 라벨 컬럼
     status        VARCHAR(10) NOT NULL DEFAULT 'candidate',      -- candidate / live / retired
     min_sample    INT NOT NULL DEFAULT 40,           -- 승격 심사 최소 표본(매칭 종목-일)
     registered_at DATE NOT NULL,                     -- ★ 사전 등록일 — 이 날짜 이후 표본만 승격 판정
