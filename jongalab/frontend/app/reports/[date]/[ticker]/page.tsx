@@ -187,7 +187,7 @@ export default async function StockReportPage({
 
   return (
     <main className="min-h-screen">
-      <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6 sm:py-10">
+      <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-10">
         {/* 네비게이션 */}
         <div className="flex items-center gap-3">
           <Link

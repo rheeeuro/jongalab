@@ -127,7 +127,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   return (
     <div>
       <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
-        <div className="mx-auto max-w-6xl flex items-center gap-1 px-4 sm:px-8 pt-2">
+        <div className="mx-auto max-w-7xl flex items-center gap-1 px-4 sm:px-6 pt-2">
           {ADMIN_TABS.map(({ href, label, icon: Icon }) => {
             const isActive = pathname.startsWith(href);
             return (

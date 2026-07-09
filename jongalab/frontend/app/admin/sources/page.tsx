@@ -196,8 +196,8 @@ export default function SourceManagementPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 sm:p-8">
-      <div className="mx-auto max-w-5xl space-y-6">
+    <main className="min-h-screen bg-slate-50 dark:bg-slate-950">
+      <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
         {/* 헤더 */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">

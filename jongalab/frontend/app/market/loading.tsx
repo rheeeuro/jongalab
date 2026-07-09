@@ -40,8 +40,8 @@ function IndexCardSkeleton() {
 
 export default function DashboardLoading() {
   return (
-    <main className="min-h-screen bg-slate-50 p-4 sm:p-8 dark:bg-slate-950">
-      <div className="mx-auto max-w-6xl space-y-8">
+    <main className="min-h-screen bg-slate-50 dark:bg-slate-950">
+      <div className="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6 sm:py-10">
         {/* 헤더 */}
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">

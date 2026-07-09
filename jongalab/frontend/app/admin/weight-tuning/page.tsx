@@ -96,7 +96,7 @@ export default function WeightTuningPage() {
 
   return (
     <main className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <div className="mx-auto max-w-3xl px-4 py-6 space-y-5">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 space-y-5">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">
             가중치 튜닝 제안

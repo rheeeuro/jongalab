@@ -28,7 +28,7 @@ export default async function EdgeRulePage({ params }: Props) {
 
   return (
     <main className="min-h-screen bg-slate-100/70 dark:bg-[#101014]">
-      <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6 sm:py-10">
+      <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-10">
         <Link
           href="/lab"
           className="inline-flex items-center gap-1 text-sm font-bold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"

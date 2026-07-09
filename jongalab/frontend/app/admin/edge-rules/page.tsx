@@ -90,7 +90,7 @@ export default function EdgeRulesAdminPage() {
   const retired = rules.filter((r) => r.status === "retired");
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-8">
+    <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
       <header className="space-y-1">
         <h1 className="text-lg font-extrabold text-slate-900 sm:text-xl dark:text-slate-100">전략 관리</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">
