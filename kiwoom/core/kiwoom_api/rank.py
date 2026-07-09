@@ -1,4 +1,4 @@
-"""순위정보 (/api/dostk/rkinfo) — ka10032, ka90009, ka10037, ka10035."""
+"""순위정보 (/api/dostk/rkinfo) — ka10032, ka90009, ka10037, ka10035, ka10098."""
 from datetime import datetime
 
 
@@ -42,6 +42,27 @@ class RankMixin:
             "stk_cnd": "1",
             "crd_cnd": "0",
             "stex_tp": "3",
+        })
+
+    def get_after_hours_flu_rank(
+        self, mrkt_tp: str = "000", sort_base: str = "1", stk_cnd: str = "16"
+    ) -> dict:
+        """
+        ka10098 — 시간외단일가등락율순위요청
+        16:00~18:00 시간외 단일가 등락률 순위 (시장 전체 스캔).
+        mrkt_tp: 000=전체, 001=코스피, 101=코스닥
+        sort_base: 1=상승률, 2=상승폭, 3=하락률, 4=하락폭, 5=보합
+        stk_cnd: 0=전체, 16=ETF+ETN제외 (스펙상 단일 선택)
+        응답: ovt_sigpric_flu_rt_rank (LIST) — flu_rt(시간외 등락률),
+              tdy_close_pric_flu_rt(당일종가 등락률) 비교로 시간외 반응 측정
+        """
+        return self._post(self.cfg.URL_RKINFO, "ka10098", {
+            "mrkt_tp": mrkt_tp,
+            "sort_base": sort_base,
+            "stk_cnd": stk_cnd,
+            "trde_qty_cnd": "0",
+            "crd_cnd": "0",
+            "trde_prica": "0",
         })
 
     def get_foreign_consecutive_buy(self, mrkt_tp: str = "001") -> dict:

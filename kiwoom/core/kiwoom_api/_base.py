@@ -44,7 +44,9 @@ class KiwoomConfig:
     URL_THME    = "/api/dostk/thme"    # 테마 (ka90001, ka90002)
     URL_FRINST  = "/api/dostk/frgnistt"  # 기관/외국인 (ka10008, ka10009, ka10131)
     URL_CHART   = "/api/dostk/chart"    # 차트 (ka10081 등)
-    URL_MRKCOND = "/api/dostk/mrkcond"  # 시장조건 (ka90013 등)
+    URL_MRKCOND = "/api/dostk/mrkcond"  # 시장조건 (ka90013, ka10087 등)
+    URL_SHSA    = "/api/dostk/shsa"     # 공매도 (ka10014)
+    URL_SLB     = "/api/dostk/slb"      # 대차거래 (ka20068)
 
 
 # ============================================================

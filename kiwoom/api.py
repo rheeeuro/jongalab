@@ -48,6 +48,18 @@ class MinuteChartPages(BaseModel):
     max_pages: int = 5
 
 
+class ShortSaleTrend(BaseModel):
+    stk_cd: str
+    strt_dt: str = ""   # YYYYMMDD, 빈값=최근 30일
+    end_dt: str = ""    # YYYYMMDD, 빈값=오늘
+
+
+class CreditTrend(BaseModel):
+    stk_cd: str
+    dt: str = ""        # YYYYMMDD, 빈값=오늘
+    qry_tp: str = "1"   # 1:융자, 2:대주
+
+
 class MarketTp(BaseModel):
     mrkt_tp: str = "001"
 
@@ -58,6 +70,20 @@ class StockList(BaseModel):
 
 class ProgramTrade(BaseModel):
     mrkt_tp: str = "P00101"
+
+
+class AfterCloseInvestor(BaseModel):
+    mrkt_tp: str = "000"     # 000:전체, 001:코스피, 101:코스닥
+    amt_qty_tp: str = "1"    # 1:금액(백만원), 2:수량
+    trde_tp: str = "0"       # 0:순매수, 1:매수, 2:매도
+    stex_tp: str = "3"       # 1:KRX, 2:NXT, 3:통합
+    max_pages: int = 5
+
+
+class AfterHoursFluRank(BaseModel):
+    mrkt_tp: str = "000"    # 000:전체, 001:코스피, 101:코스닥
+    sort_base: str = "1"    # 1:상승률, 3:하락률
+    stk_cnd: str = "16"     # 16:ETF+ETN제외
 
 
 class ThemeGroups(BaseModel):
@@ -118,6 +144,36 @@ def intraday_investor(b: StkCd):
     return api().get_intraday_investor(b.stk_cd)
 
 
+@app.post("/stock/short-sale-trend")
+def short_sale_trend(b: ShortSaleTrend):
+    return api().get_short_sale_trend(b.stk_cd, strt_dt=b.strt_dt, end_dt=b.end_dt)
+
+
+@app.post("/stock/lending-trend")
+def lending_trend(b: ShortSaleTrend):
+    return api().get_stock_lending_trend(b.stk_cd, strt_dt=b.strt_dt, end_dt=b.end_dt)
+
+
+@app.post("/stock/credit-trend")
+def credit_trend(b: CreditTrend):
+    return api().get_credit_trade_trend(b.stk_cd, dt=b.dt, qry_tp=b.qry_tp)
+
+
+@app.post("/stock/execution-strength-hourly")
+def execution_strength_hourly(b: StkCd):
+    return api().get_execution_strength_hourly(b.stk_cd)
+
+
+@app.post("/stock/execution-strength-daily")
+def execution_strength_daily(b: StkCd):
+    return api().get_execution_strength_daily(b.stk_cd)
+
+
+@app.post("/stock/after-hours-price")
+def after_hours_price(b: StkCd):
+    return api().get_after_hours_single_price(b.stk_cd)
+
+
 @app.post("/chart/daily")
 def daily_chart(b: DailyChart):
     return api().get_daily_chart(b.stk_cd, dt=b.dt, upd_stk_prc=b.upd_stk_prc)
@@ -133,6 +189,21 @@ def minute_chart_pages(b: MinuteChartPages):
 @app.post("/rank/trading-value")
 def trading_value_rank(b: MarketTp):
     return api().get_trading_value_rank(mrkt_tp=b.mrkt_tp)
+
+
+@app.post("/market/after-close-investor")
+def after_close_investor(b: AfterCloseInvestor):
+    return api().get_after_close_investor(
+        mrkt_tp=b.mrkt_tp, amt_qty_tp=b.amt_qty_tp,
+        trde_tp=b.trde_tp, stex_tp=b.stex_tp, max_pages=b.max_pages,
+    )
+
+
+@app.post("/rank/after-hours-flu")
+def after_hours_flu_rank(b: AfterHoursFluRank):
+    return api().get_after_hours_flu_rank(
+        mrkt_tp=b.mrkt_tp, sort_base=b.sort_base, stk_cnd=b.stk_cnd
+    )
 
 
 @app.post("/program-trade/by-stock")

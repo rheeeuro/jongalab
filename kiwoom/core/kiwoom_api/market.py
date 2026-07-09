@@ -1,4 +1,4 @@
-"""시세 (/api/dostk/mrktpr) — ka10063(대체: ka10059), ka90008."""
+"""시세 (/api/dostk/mrktpr, /api/dostk/mrkcond) — ka10063(대체: ka10059), ka90008, ka90013, ka10087, ka10066, ka10046, ka10047."""
 from datetime import datetime
 
 
@@ -20,6 +20,65 @@ class MarketMixin:
             "amt_qty_tp": "1",      # 1:금액, 2:수량
             "stk_cd": stk_cd,
             "date": datetime.now().strftime("%Y%m%d"),
+        })
+
+    def get_after_hours_single_price(self, stk_cd: str) -> dict:
+        """
+        ka10087 — 시간외단일가요청
+        16:00~18:00 시간외 단일가 시세·호가 스냅샷 (익일 갭 선행지표).
+        핵심 필드: ovt_sigpric_cur_prc(현재가), ovt_sigpric_flu_rt(등락률),
+        ovt_sigpric_pred_pre(전일대비), ovt_sigpric_acc_trde_qty(누적거래량),
+        ovt_sigpric_{sel,buy}_bid_tot_req(호가 총잔량)
+        """
+        return self._post(self.cfg.URL_MRKCOND, "ka10087", {
+            "stk_cd": stk_cd,
+        })
+
+    def get_after_close_investor(
+        self, mrkt_tp: str = "000", amt_qty_tp: str = "1",
+        trde_tp: str = "0", stex_tp: str = "3", max_pages: int = 5,
+    ) -> dict:
+        """
+        ka10066 — 장마감후투자자별매매요청
+        장 마감 후 확정 투자자별 순매수 (시장 전체, 종목별 리스트).
+        장중 잠정치(ka10059)와 달리 마감 후 확정치 — 수급 점수 사후 검증용.
+        mrkt_tp: 000=전체, 001=코스피, 101=코스닥 / amt_qty_tp: 1=금액(백만원), 2=수량
+        trde_tp: 0=순매수 / stex_tp: 3=통합
+        응답: opaf_invsr_trde (LIST) — stk_cd, ind_invsr, frgnr_invsr, orgn,
+              penfnd_etc(연기금) 등 투자자별 (연속조회 max_pages 까지 병합)
+        """
+        items = self.fetch_all_pages(
+            self.cfg.URL_MRKCOND, "ka10066",
+            {
+                "mrkt_tp": mrkt_tp,
+                "amt_qty_tp": amt_qty_tp,
+                "trde_tp": trde_tp,
+                "stex_tp": stex_tp,
+            },
+            list_key="opaf_invsr_trde", max_pages=max_pages,
+        )
+        return {"opaf_invsr_trde": items}
+
+    def get_execution_strength_hourly(self, stk_cd: str) -> dict:
+        """
+        ka10046 — 체결강도추이시간별요청
+        종목별 당일 시간별 체결강도 (15시 시점 진입 강도 팩터용).
+        응답: cntr_str_tm (LIST) — cntr_tm(HHmmss), cntr_str(당시점),
+              cntr_str_5min/20min/60min(분 단위 평균), stex_tp
+        """
+        return self._post(self.cfg.URL_MRKCOND, "ka10046", {
+            "stk_cd": stk_cd,
+        })
+
+    def get_execution_strength_daily(self, stk_cd: str) -> dict:
+        """
+        ka10047 — 체결강도추이일별요청
+        종목별 일별 체결강도(매수세/매도세 비율, 100 초과=매수 우위).
+        응답: cntr_str_daly (LIST) — dt, cntr_str(당일), cntr_str_5min/20min/60min
+              (필드명은 min 이지만 일별 TR 이므로 5/20/60일 평균)
+        """
+        return self._post(self.cfg.URL_MRKCOND, "ka10047", {
+            "stk_cd": stk_cd,
         })
 
     def get_program_daily_trend(self, stk_cd: str) -> dict:

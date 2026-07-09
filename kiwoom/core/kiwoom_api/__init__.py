@@ -20,11 +20,19 @@ trading 도메인(core.kiwoom_order_client)이 키움 REST 를 직접 호출해 
   ka10002  주식거래원요청          POST /api/dostk/stkinfo
   ka10059  종목별투자자기관별요청  POST /api/dostk/stkinfo
   ka90004  종목별프로그램매매현황  POST /api/dostk/stkinfo
+  ka10013  신용매매동향요청        POST /api/dostk/stkinfo
+  ka10014  공매도추이요청          POST /api/dostk/shsa
+  ka20068  대차거래추이(종목별)    POST /api/dostk/slb
   ka90008  종목시간별프로그램매매  POST /api/dostk/mrktpr
+  ka10087  시간외단일가요청        POST /api/dostk/mrkcond
+  ka10066  장마감후투자자별매매    POST /api/dostk/mrkcond
+  ka10046  체결강도추이시간별요청  POST /api/dostk/mrkcond
+  ka10047  체결강도추이일별요청    POST /api/dostk/mrkcond
   ka10032  거래대금상위요청        POST /api/dostk/rkinfo
   ka90009  외국인기관매매상위요청  POST /api/dostk/rkinfo
   ka10037  외국계창구매매상위요청  POST /api/dostk/rkinfo
   ka10035  외인연속순매매상위요청  POST /api/dostk/rkinfo
+  ka10098  시간외단일가등락율순위  POST /api/dostk/rkinfo
   ka90001  테마그룹별요청          POST /api/dostk/thme
   ka90002  테마구성종목요청        POST /api/dostk/thme
   ka10131  기관외국인연속매매현황  POST /api/dostk/frgnistt
@@ -40,6 +48,7 @@ from core.kiwoom_api.rank import RankMixin
 from core.kiwoom_api.theme import ThemeMixin
 from core.kiwoom_api.frgn_inst import FrgnInstMixin
 from core.kiwoom_api.chart import ChartMixin
+from core.kiwoom_api.short_sale import ShortSaleMixin
 
 
 class KiwoomRestAPI(
@@ -49,6 +58,7 @@ class KiwoomRestAPI(
     ThemeMixin,
     FrgnInstMixin,
     ChartMixin,
+    ShortSaleMixin,
     _BaseClient,
 ):
     """키움증권 REST API 래퍼 — 카테고리 Mixin 조립 (데이터 조회 전용)."""

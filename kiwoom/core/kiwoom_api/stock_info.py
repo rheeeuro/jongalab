@@ -1,4 +1,4 @@
-"""종목정보 (/api/dostk/stkinfo) — ka10001, ka10100, ka10002, ka10059, ka90004."""
+"""종목정보 (/api/dostk/stkinfo) — ka10001, ka10100, ka10002, ka10059, ka90004, ka10013."""
 from datetime import datetime
 
 
@@ -56,6 +56,21 @@ class StockInfoMixin:
         """
         return self._post(self.cfg.URL_STKINFO, "ka10099", {
             "mrkt_tp": mrkt_tp,
+        })
+
+    def get_credit_trade_trend(self, stk_cd: str, dt: str = "", qry_tp: str = "1") -> dict:
+        """
+        ka10013 — 신용매매동향요청
+        종목별 신용융자/대주 일별 추이 (반대매매 리스크 필터용).
+        dt: 기준일자 YYYYMMDD (빈값이면 오늘)
+        qry_tp: 1=융자, 2=대주
+        응답: crd_trde_trend (LIST) — dt, new(신규), rpya(상환), remn(잔고),
+              shr_rt(공여율%), remn_rt(잔고율%) ※ 융자는 백만원, 대주는 백만주 단위
+        """
+        return self._post(self.cfg.URL_STKINFO, "ka10013", {
+            "stk_cd": stk_cd,
+            "dt": dt or datetime.now().strftime("%Y%m%d"),
+            "qry_tp": qry_tp,
         })
 
     def get_program_trade_by_stock(self, mrkt_tp: str = "P00101") -> dict:

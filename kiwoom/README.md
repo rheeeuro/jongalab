@@ -16,19 +16,20 @@
 
 ```
 kiwoom/
-├── api.py                       # FastAPI — 데이터 조회 엔드포인트 12종 + /, /health
+├── api.py                       # FastAPI — 데이터 조회 엔드포인트 20종 + /, /health
 ├── core/
 │   ├── config.py                # .env 로딩, kiwoom DB 설정 (DB키만 최소 복제)
 │   ├── db.py                    # 컨텍스트 매니저 get_db()
 │   ├── logging_setup.py         # 로그 설정 (httpx 로그 억제)
 │   ├── kiwoom_api/              # 키움 REST 클라이언트 (TR별 Mixin 조립)
 │   │   ├── _base.py             # KiwoomConfig, _BaseClient: 인증·_post·연속조회
-│   │   ├── stock_info.py        # ka10001/ka10100/ka10002/ka10059/ka90004/ka10099
-│   │   ├── market.py            # ka10063/ka90008/ka90013 (시세·프로그램)
-│   │   ├── rank.py              # ka10032/ka90009/ka10037/ka10035 (순위)
+│   │   ├── stock_info.py        # ka10001/ka10100/ka10002/ka10059/ka90004/ka10099/ka10013
+│   │   ├── market.py            # ka10063/ka90008/ka90013/ka10087/ka10066/ka10046/ka10047 (시세·프로그램·시간외)
+│   │   ├── rank.py              # ka10032/ka90009/ka10037/ka10035/ka10098 (순위)
 │   │   ├── theme.py             # ka90001/ka90002 (테마)
 │   │   ├── frgn_inst.py         # ka10131/ka10008/ka10009 (기관·외국인)
-│   │   └── chart.py             # ka10080/ka10081 (분봉·일봉)
+│   │   ├── chart.py             # ka10080/ka10081 (분봉·일봉)
+│   │   └── short_sale.py        # ka10014/ka20068 (공매도·대차거래)
 │   └── repository/
 │       └── kiwoom_token.py      # kiwoom_token 테이블 CRUD (get/save/clear, id=1)
 ├── workers/
@@ -41,7 +42,7 @@ kiwoom/
 ## 핵심 로직
 
 ### `core/kiwoom_api/` — 키움 REST 클라이언트
-키움 TR 을 도메인별 Mixin 6개로 나눠 `KiwoomRestAPI` 클래스로 조립한다.
+키움 TR 을 도메인별 Mixin 7개로 나눠 `KiwoomRestAPI` 클래스로 조립한다.
 - `_base.py` 의 `_BaseClient` 가 공통 인프라를 담당: 토큰 발급/폐기(au10001/au10002),
   `ensure_token()`(DB 토큰 로드 또는 신규 발급, 만료 5분 마진), `_post()`(429 자동 재시도),
   `fetch_all_pages()`(cont-yn/next-key 연속조회).
@@ -63,9 +64,17 @@ kiwoom/
 | `/stock/broker` | ka10002 | 거래원 상위 5 매도/매수 |
 | `/stock/list` | ka10099 | 시장별 상장종목 리스트(코스피/코스닥 code·name) |
 | `/stock/intraday-investor` | ka10063 | 종목별 투자자(개인/기관/외국인) |
+| `/stock/after-hours-price` | ka10087 | 시간외 단일가 시세·호가 스냅샷(익일 갭 선행지표) |
+| `/stock/credit-trend` | ka10013 | 신용융자/대주 일별 추이(잔고율 — 반대매매 리스크) |
+| `/stock/short-sale-trend` | ka10014 | 공매도량/비중 일별 추이(기본 최근 30일) |
+| `/stock/lending-trend` | ka20068 | 대차잔고 증감 일별 추이(기본 최근 30일) |
+| `/stock/execution-strength-daily` | ka10047 | 체결강도 일별 추이(당일·5/20/60일 평균) |
+| `/stock/execution-strength-hourly` | ka10046 | 체결강도 당일 시간별 추이(5/20/60분 평균) |
 | `/chart/daily` | ka10081 | 일봉 차트 |
 | `/chart/minute-pages` | ka10080 | 분봉 차트(연속조회 다건 수집) |
 | `/rank/trading-value` | ka10032 | 거래대금 상위 |
+| `/rank/after-hours-flu` | ka10098 | 시간외 단일가 등락률 순위(시장 전체 스캔) |
+| `/market/after-close-investor` | ka10066 | 장마감후 확정 투자자별 순매수(연속조회 병합) |
 | `/program-trade/by-stock` | ka90004 | 종목별 프로그램 매매 현황 |
 | `/program-trade/daily-trend` | ka90013 | 종목 일별 프로그램 매매 추이 |
 | `/inst-foreign/consecutive` | ka10131 | 기관·외국인 연속 매매 현황 |
