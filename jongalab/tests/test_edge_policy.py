@@ -34,11 +34,12 @@ GOOD_STATS = {"n": 50, "n_days": 12, "ci_low": 0.1, "mean_net": 0.5}
 def test_family_roles_cover_all_known_families():
     assert family_role("f3_nxt") == "selector"
     assert family_role("f5_supply") == "selector"
+    assert family_role("f6_ah") == "selector"
     assert family_role("veto") == "veto"
     assert family_role("control") == "benchmark"
     assert family_role("unknown") is None
-    # selector 5 + veto 1 + benchmark 1 — family 추가 시 이 레지스트리부터 갱신
-    assert len(FAMILY_ROLES) == 7
+    # selector 6 + veto 1 + benchmark 1 — family 추가 시 이 레지스트리부터 갱신
+    assert len(FAMILY_ROLES) == 8
 
 
 # ── 선정 시점 실행 가능성 ──

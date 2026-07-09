@@ -32,6 +32,24 @@ def save_market_snapshot(row: dict) -> None:
         conn.commit()
 
 
+def save_after_hours_breadth(snapshot_date: str, up3_cnt: int | None, dn3_cnt: int | None) -> None:
+    """시간외단일가 ±3% 이상 종목 수 upsert (after_hours_labels 워커, 18:05).
+
+    ah_* 두 컬럼만 갱신한다 — save_market_snapshot(_FIELDS 전체 upsert)를 쓰면
+    19:50 gap_check 가 채운 지수 필드를 NULL 로 덮으므로 전용 함수로 분리.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """INSERT INTO market_snapshot (snapshot_date, ah_up3_cnt, ah_dn3_cnt)
+               VALUES (%s, %s, %s)
+               ON DUPLICATE KEY UPDATE
+                   ah_up3_cnt = COALESCE(VALUES(ah_up3_cnt), ah_up3_cnt),
+                   ah_dn3_cnt = COALESCE(VALUES(ah_dn3_cnt), ah_dn3_cnt)""",
+            (snapshot_date, up3_cnt, dn3_cnt),
+        )
+        conn.commit()
+
+
 def get_market_snapshots(dates: list[str]) -> dict[str, dict]:
     """여러 날짜의 시장 스냅샷을 {date: row} 로 조회. 없는 날짜는 키 없음."""
     if not dates:

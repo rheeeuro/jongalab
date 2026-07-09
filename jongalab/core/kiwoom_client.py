@@ -80,9 +80,54 @@ class KiwoomRestClient:
             },
         )
 
+    # ── 시간외·리스크 라벨 (after_hours_labels 워커) ──
+    def get_after_hours_single_price(self, stk_cd: str) -> dict:
+        return self._post("/stock/after-hours-price", {"stk_cd": stk_cd})
+
+    def get_credit_trade_trend(self, stk_cd: str, dt: str = "", qry_tp: str = "1") -> dict:
+        return self._post(
+            "/stock/credit-trend", {"stk_cd": stk_cd, "dt": dt, "qry_tp": qry_tp}
+        )
+
+    def get_short_sale_trend(self, stk_cd: str, strt_dt: str = "", end_dt: str = "") -> dict:
+        return self._post(
+            "/stock/short-sale-trend",
+            {"stk_cd": stk_cd, "strt_dt": strt_dt, "end_dt": end_dt},
+        )
+
+    def get_stock_lending_trend(self, stk_cd: str, strt_dt: str = "", end_dt: str = "") -> dict:
+        return self._post(
+            "/stock/lending-trend",
+            {"stk_cd": stk_cd, "strt_dt": strt_dt, "end_dt": end_dt},
+        )
+
+    def get_execution_strength_daily(self, stk_cd: str) -> dict:
+        return self._post("/stock/execution-strength-daily", {"stk_cd": stk_cd})
+
+    def get_execution_strength_hourly(self, stk_cd: str) -> dict:
+        return self._post("/stock/execution-strength-hourly", {"stk_cd": stk_cd})
+
+    def get_after_close_investor(
+        self, mrkt_tp: str = "000", amt_qty_tp: str = "1",
+        trde_tp: str = "0", stex_tp: str = "3", max_pages: int = 5,
+    ) -> dict:
+        return self._post(
+            "/market/after-close-investor",
+            {"mrkt_tp": mrkt_tp, "amt_qty_tp": amt_qty_tp,
+             "trde_tp": trde_tp, "stex_tp": stex_tp, "max_pages": max_pages},
+        )
+
     # ── 순위 ──
     def get_trading_value_rank(self, mrkt_tp: str = "001") -> dict:
         return self._post("/rank/trading-value", {"mrkt_tp": mrkt_tp})
+
+    def get_after_hours_flu_rank(
+        self, mrkt_tp: str = "000", sort_base: str = "1", stk_cnd: str = "16"
+    ) -> dict:
+        return self._post(
+            "/rank/after-hours-flu",
+            {"mrkt_tp": mrkt_tp, "sort_base": sort_base, "stk_cnd": stk_cnd},
+        )
 
     # ── 테마 ──
     def get_theme_groups(

@@ -18,6 +18,7 @@ FAMILY_ROLES: dict[str, str] = {
     "f3_nxt": "selector",
     "f4_laggard": "selector",
     "f5_supply": "selector",
+    "f6_ah": "selector",  # 시간외단일가 반응형 (17:50 수집 — 선정 시점 실행 불가, 페이퍼 전용)
     "control": "benchmark",
     "veto": "veto",
 }

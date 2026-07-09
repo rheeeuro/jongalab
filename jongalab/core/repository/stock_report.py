@@ -558,6 +558,46 @@ def save_nxt_open_labels(report_date: str, rows: list[dict]) -> int:
     return n
 
 
+# ── 시간외 반응 + 리스크 라벨 (after_hours_labels 워커, 18:05) ──
+_AFTER_HOURS_COLS = (
+    "ah_price", "ah_flu_rt", "ah_volume", "ah_react",
+    "credit_remn_rt", "short_wght", "short_wght_5d",
+    "lend_remn", "lend_irds_5d", "exec_str", "exec_str_5d",
+)
+
+
+def get_report_codes(report_date: str) -> list[str]:
+    """특정 report_date 유니버스의 종목코드 목록(rank 순) — 시간외/리스크 라벨 수집 대상."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT stock_code FROM daily_stock_report
+                WHERE report_date = %s ORDER BY rank_no ASC""",
+            (report_date,),
+        )
+        return [r["stock_code"] for r in cursor.fetchall()]
+
+
+def save_after_hours_labels(report_date: str, rows: list[dict]) -> int:
+    """시간외단일가·리스크 라벨 UPDATE (관측 컬럼 — closing_bet upsert 와 분리, 멱등).
+
+    rows: [{stock_code, <_AFTER_HOURS_COLS...>}]. None 은 COALESCE 로 기존 값 보존.
+    """
+    if not rows:
+        return 0
+    sets = ", ".join(f"{c} = COALESCE(%s, {c})" for c in _AFTER_HOURS_COLS)
+    n = 0
+    with get_db() as (conn, cursor):
+        for r in rows:
+            cursor.execute(
+                f"""UPDATE daily_stock_report SET {sets}
+                    WHERE report_date = %s AND stock_code = %s""",
+                (*(r.get(c) for c in _AFTER_HOURS_COLS), report_date, r["stock_code"]),
+            )
+            n += cursor.rowcount
+        conn.commit()
+    return n
+
+
 # ── 엣지 연구용 실집행 레그 라벨 (outcome_backfill 워커) ──
 # exec_leg_ret 은 종목별 실제 청산 venue 창을 하나로 접은 라벨이다.
 #   NXT: 전일 19:50 NXT → 익일 08:03 NXT
