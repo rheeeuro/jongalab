@@ -91,7 +91,7 @@ def _recompute_stats(daily_rows: list[dict]) -> dict:
 
     n = len(nets)
     if n == 0:
-        return {"n": 0, "mean_net": None, "win_rate": None, "std": None,
+        return {"n": 0, "n_days": 0, "mean_net": None, "win_rate": None, "std": None,
                 "ci_low": None, "worst_low_ret": None, "updated_through": updated_through}
 
     mean_net = sum(nets) / n
@@ -106,6 +106,9 @@ def _recompute_stats(daily_rows: list[dict]) -> dict:
 
     return {
         "n": n,
+        # 라벨 표본이 있는 서로 다른 거래일 수 — 같은 날 표본은 시장 무브로 상관되어
+        # 실효 표본은 n 이 아니라 이 값에 가깝다(승격 게이트 PROMO_MIN_DAYS 가 사용).
+        "n_days": len({d for d, _ in dated}),
         "mean_net": round(mean_net, 3),
         "win_rate": round(win_rate, 3),
         "std": round(std, 3),
@@ -115,6 +118,38 @@ def _recompute_stats(daily_rows: list[dict]) -> dict:
         "recent_n": len(recent),
         "recent_mean_net": round(recent_mean, 3) if recent_mean is not None else None,
     }
+
+
+def _refresh_missing_lows(rule_id: int, daily_rows: list[dict], universe) -> int:
+    """채점 당시 미도래였던 next_low_ret 를 matched 스냅샷에 소급 반영. 반환: 갱신 날짜 수.
+
+    exec_leg_ret(분봉)는 D+1 아침에 채워져 그날 채점되지만, next_low_ret(일봉)는 D+1 캔들이
+    완결된 D+2 에야 백필된다. 스냅샷의 low=None 을 그대로 두면 worst_low_ret(꼬리 리스크
+    지표)가 모든 rule 에서 영원히 비므로, 재시도 마감 전 날짜에 한해 현재 값으로 채운다.
+    daily_rows 의 matched 를 in-place 갱신하므로 직후 _recompute_stats 에 바로 반영된다.
+    """
+    refreshed = 0
+    for dr in daily_rows:
+        d = str(dr["report_date"])
+        matched = dr.get("matched") or []
+        holes = [m for m in matched if m.get("low") is None]
+        if not holes or _past_deadline(d):
+            continue
+        low_map = {
+            r["stock_code"]: r["next_low_ret"]
+            for r in universe(d)
+            if r.get("next_low_ret") is not None
+        }
+        changed = False
+        for m in holes:
+            low = low_map.get(m.get("code"))
+            if low is not None:
+                m["low"] = round(float(low), 3)
+                changed = True
+        if changed:
+            upsert_rule_daily(rule_id, d, dr["n_matched"], dr.get("mean_net_ret"), matched)
+            refreshed += 1
+    return refreshed
 
 
 def _past_deadline(d: str) -> bool:
@@ -177,8 +212,11 @@ def run():
                 f"{_LABEL_RETRY_DEADLINE_DAYS}일 마감 초과로 sentinel 종결"
             )
 
-        # 누적 통계 재계산(사전 등록일 이후 표본만)
+        # 누적 통계 재계산(사전 등록일 이후 표본만) — 그 전에 미도래였던 low 스냅샷을 소급 갱신
         daily_rows = get_rule_daily_since(rule["id"], str(rule["registered_at"]))
+        low_refreshed = _refresh_missing_lows(rule["id"], daily_rows, _universe)
+        if low_refreshed:
+            logger.info(f"{rule['name']}: next_low_ret 소급 반영 {low_refreshed}일")
         rule["stats"] = _recompute_stats(daily_rows)
         rule["_new_scored"] = new_scored
 

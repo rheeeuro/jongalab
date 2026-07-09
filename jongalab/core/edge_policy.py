@@ -63,6 +63,13 @@ def selection_executable(predicate: list) -> tuple[bool, list[str]]:
 
 # ── 승격 게이트 (candidate → live) ──
 
+# 최소 거래일 수 — 같은 날 종목들의 오버나이트 수익률은 시장 무브로 강하게 상관되어,
+# 종목-일 표본수(n)만으로는 광역 rule 이 갭업 며칠만에 min_sample 을 채우고 CI 를 과신한다
+# (f5_supply_band_d 사례: 2거래일 n=70, 하루가 평균을 통째로 뒤집음). 실효 표본은 거래일 수에
+# 가까우므로 서로 다른 거래일이 이만큼 쌓여야 승격 검토 대상이 된다.
+PROMO_MIN_DAYS = 10
+
+
 def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
     """승격 자격 판정 — 라우터(409 사유)·평가기(알림·stats.promo_eligible)가 공유하는 단일 게이트.
 
@@ -86,6 +93,12 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
         min_sample = rule.get("min_sample") or 0
         if n < min_sample:
             stat_reasons.append(f"표본 부족: n={n} < min_sample={min_sample}")
+        n_days = stats.get("n_days") or 0
+        if n_days < PROMO_MIN_DAYS:
+            stat_reasons.append(
+                f"거래일 부족: n_days={n_days} < {PROMO_MIN_DAYS} — 같은 날 표본은 "
+                "시장 무브로 상관되어 종목-일 n 만으로는 과신"
+            )
         if ci_low is None or ci_low <= 0:
             stat_reasons.append(f"신뢰구간 하한 미충족: ci_low={ci_low}(>0 필요)")
         # 대조군 우위 — live benchmark 의 mean_net 최대값 이상. 대조군이 없거나 미평가면

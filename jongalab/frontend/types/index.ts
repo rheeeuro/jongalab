@@ -277,6 +277,7 @@ export interface WeightTuningProposal {
 // ── Edge Ledger (가설 스코어보드) — 백엔드 edge_rule / edge_rule_daily 응답 shape 과 1:1 ──
 export interface EdgeRuleStats {
   n: number;
+  n_days?: number;              // 라벨 표본이 있는 거래일 수 — 승격 게이트(PROMO_MIN_DAYS)
   mean_net: number | null;      // 비용(EDGE_COST_PCT) 차감 후 평균 순수익(%)
   win_rate: number | null;
   std: number | null;

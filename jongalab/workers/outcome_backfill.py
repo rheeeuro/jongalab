@@ -125,6 +125,9 @@ def _exec_leg_label(
             )
         return minute_cache[key]
 
+    # 창 시각(19:50/08:03/15:20/09:03)은 trading 의 실집행 스케줄 미러다
+    # (signal_executor 매수 데드라인 15:20/19:50, settle 청산 08:03/09:03).
+    # trading 쪽 시각을 바꾸면 이 라벨도 함께 바꿔야 비교가 유효하다.
     def _leg(venue: str, nxt: bool, base_hm: str, exit_hm: str) -> dict | None:
         base = first_price_at_or_after(_prices(nxt, report_dt), report_dt + base_hm)
         exit_ = first_price_at_or_after(_prices(nxt, next_dt), next_dt + exit_hm)
@@ -143,6 +146,8 @@ def _exec_leg_label(
         nxt = _leg("NXT", True, "1950", "0803")
         if nxt is not None:
             return nxt
+        # NXT 미상장일 수도, 일시적 분봉 결측일 수도 있다 — 폴백이 라벨에 고착되므로 흔적을 남긴다.
+        logger.info(f"[{code}] NXT 레그 결측 → KRX 폴백 ({report_dt}→{next_dt})")
     return _leg("KRX", False, "1520", "0903")
 
 
@@ -214,7 +219,13 @@ def _run_exec_leg(
 def run(min_date: str | None = None):
     outcome_dates = get_dates_missing_outcome(min_date)
     exec_min_date = min_date or _earliest_exec_label_registered_at()
-    exec_dates = get_dates_missing_exec_leg(exec_min_date)
+    if exec_min_date:
+        exec_dates = get_dates_missing_exec_leg(exec_min_date)
+    else:
+        # exec_leg_ret 를 쓰는 활성 rule 이 없으면 스킵 — min_date 게이트 없이 진행하면
+        # 라벨이 빈 과거 전체가 분봉 백필 대상이 되는 폭주로 이어진다.
+        exec_dates = []
+        logger.info("exec_leg_ret 활성 rule 없음 — 실집행 레그 백필 건너뜀")
     if not outcome_dates and not exec_dates:
         logger.info("백필 대상 없음 — 종료")
         return

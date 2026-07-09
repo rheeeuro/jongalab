@@ -6,62 +6,103 @@ from decimal import Decimal
 from core.db import get_db
 
 
+# closing_bet 이 매 실행 재계산하는 분석 컬럼 — save_stock_reports 의 upsert 대상.
+# 다른 워커가 같은 날 행에 쓰는 관측 컬럼(krx_close_price·nxt_price_1950·nxt_gap_pct·
+# nxt_after_value·nxt_listed 등)은 여기 없으므로 재실행에도 보존된다.
+_ANALYSIS_COLS = (
+    "stock_code", "stock_name", "sector", "current_price", "change_pct",
+    "trading_value", "market_cap", "supply_score",
+    "inst_net_buy", "frgn_net_buy",
+    "indv_net_buy", "prog_net_buy", "supply_days", "supply_history",
+    "ma_aligned", "near_high", "hourly_candles",
+    "is_leader", "is_theme_stock", "content_score",
+    "news_count", "news_unique_count", "news_pm_count", "news_first_today", "news_prior_avg",
+    "news_summary", "news_sentiment", "news_catalyst", "news_headlines",
+    "score", "rank_no", "selected", "sector_rel_ret", "sector_leader_chg",
+    "foreign_brokers_buying", "afternoon_ret", "vol_ratio", "prog_buy_days",
+    "first_seen", "theme_strength", "frgn_exhaust_rate", "frgn_exhaust_chg",
+)
+
+
 def save_stock_reports(candidates: list[dict]):
-    """Phase 2 결과를 일괄 저장 (오늘 날짜 기존 데이터 삭제 후 INSERT)"""
+    """Phase 2 결과를 upsert 저장 — 분석 컬럼만 갱신, 관측 컬럼은 보존.
+
+    closing_bet 은 08:00~20:30 매 30분 재실행된다. 예전 DELETE+INSERT 방식은 19:50 NXT
+    스냅샷(gap_check --base-nxt 가 쓴 nxt_listed 등)을 20:00 이후 실행이 매일 지웠다.
+    이번 배치에서 빠진 종목(후보 탈락)은 삭제해 '당일 행 = 최신 배치 유니버스' 의미는 유지한다.
+    """
     if not candidates:
         return
 
-    with get_db() as (conn, cursor):
-        cursor.execute("DELETE FROM daily_stock_report WHERE report_date = CURDATE()")
+    cols = ", ".join(_ANALYSIS_COLS)
+    placeholders = ", ".join(["%s"] * len(_ANALYSIS_COLS))
+    updates = ", ".join(f"{c} = VALUES({c})" for c in _ANALYSIS_COLS)
+    query = f"""
+        INSERT INTO daily_stock_report (report_date, {cols})
+        VALUES (CURDATE(), {placeholders})
+        ON DUPLICATE KEY UPDATE {updates}
+    """
 
-        query = """
-            INSERT INTO daily_stock_report
-            (report_date, stock_code, stock_name, sector, current_price, change_pct,
-             trading_value, market_cap, supply_score,
-             inst_net_buy, frgn_net_buy,
-             indv_net_buy, prog_net_buy, supply_days, supply_history,
-             ma_aligned, near_high, hourly_candles,
-             is_leader, is_theme_stock, content_score,
-             news_count, news_unique_count, news_pm_count, news_first_today, news_prior_avg,
-             news_summary, news_sentiment, news_catalyst, news_headlines,
-             score, rank_no, selected, sector_rel_ret, sector_leader_chg,
-             foreign_brokers_buying, afternoon_ret, vol_ratio, prog_buy_days,
-             first_seen, theme_strength, frgn_exhaust_rate, frgn_exhaust_chg)
-            VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """
+    with get_db() as (conn, cursor):
+        code_ph = ", ".join(["%s"] * len(candidates))
+        cursor.execute(
+            f"""DELETE FROM daily_stock_report
+                 WHERE report_date = CURDATE() AND stock_code NOT IN ({code_ph})""",
+            tuple(c["stock_code"] for c in candidates),
+        )
+
         for c in candidates:
-            supply_history_json = json.dumps(
-                c.get("supply_history", []), ensure_ascii=False
-            ) if c.get("supply_history") else None
-            hourly_candles_json = json.dumps(
-                c.get("hourly_candles", []), ensure_ascii=False
-            ) if c.get("hourly_candles") else None
-            news_headlines_json = json.dumps(
-                c.get("news_headlines") or [], ensure_ascii=False
-            ) if c.get("news_headlines") else None
-            cursor.execute(query, (
-                c["stock_code"], c["stock_name"], c["sector"],
-                c["current_price"], c["change_pct"],
-                c["trading_value"], c["market_cap"],
-                c.get("supply_score", 0.0),
-                c["inst_net_buy"], c["frgn_net_buy"],
-                c["indv_net_buy"], c["prog_net_buy"], c["supply_days"],
-                supply_history_json,
-                c["ma_aligned"], c["near_high"], hourly_candles_json,
-                c["is_leader"], c.get("is_theme_stock", False),
-                c.get("content_score", 0),
-                c.get("news_count", 0), c.get("news_unique_count", 0),
-                c.get("news_pm_count", 0), c.get("news_first_today", 0),
-                c.get("news_prior_avg"),
-                c.get("news_summary"), c.get("news_sentiment"), c.get("news_catalyst"),
-                news_headlines_json,
-                c["score"], c["rank_no"], c.get("selected", 1),
-                c.get("sector_rel_ret"), c.get("sector_leader_chg"),
-                c.get("foreign_brokers_buying"), c.get("afternoon_ret"),
-                c.get("vol_ratio"), c.get("prog_buy_days"),
-                c.get("first_seen"), c.get("theme_strength"),
-                c.get("frgn_exhaust_rate"), c.get("frgn_exhaust_chg"),
-            ))
+            row = {
+                "stock_code": c["stock_code"],
+                "stock_name": c["stock_name"],
+                "sector": c["sector"],
+                "current_price": c["current_price"],
+                "change_pct": c["change_pct"],
+                "trading_value": c["trading_value"],
+                "market_cap": c["market_cap"],
+                "supply_score": c.get("supply_score", 0.0),
+                "inst_net_buy": c["inst_net_buy"],
+                "frgn_net_buy": c["frgn_net_buy"],
+                "indv_net_buy": c["indv_net_buy"],
+                "prog_net_buy": c["prog_net_buy"],
+                "supply_days": c["supply_days"],
+                "supply_history": json.dumps(
+                    c.get("supply_history", []), ensure_ascii=False
+                ) if c.get("supply_history") else None,
+                "ma_aligned": c["ma_aligned"],
+                "near_high": c["near_high"],
+                "hourly_candles": json.dumps(
+                    c.get("hourly_candles", []), ensure_ascii=False
+                ) if c.get("hourly_candles") else None,
+                "is_leader": c["is_leader"],
+                "is_theme_stock": c.get("is_theme_stock", False),
+                "content_score": c.get("content_score", 0),
+                "news_count": c.get("news_count", 0),
+                "news_unique_count": c.get("news_unique_count", 0),
+                "news_pm_count": c.get("news_pm_count", 0),
+                "news_first_today": c.get("news_first_today", 0),
+                "news_prior_avg": c.get("news_prior_avg"),
+                "news_summary": c.get("news_summary"),
+                "news_sentiment": c.get("news_sentiment"),
+                "news_catalyst": c.get("news_catalyst"),
+                "news_headlines": json.dumps(
+                    c.get("news_headlines") or [], ensure_ascii=False
+                ) if c.get("news_headlines") else None,
+                "score": c["score"],
+                "rank_no": c["rank_no"],
+                "selected": c.get("selected", 1),
+                "sector_rel_ret": c.get("sector_rel_ret"),
+                "sector_leader_chg": c.get("sector_leader_chg"),
+                "foreign_brokers_buying": c.get("foreign_brokers_buying"),
+                "afternoon_ret": c.get("afternoon_ret"),
+                "vol_ratio": c.get("vol_ratio"),
+                "prog_buy_days": c.get("prog_buy_days"),
+                "first_seen": c.get("first_seen"),
+                "theme_strength": c.get("theme_strength"),
+                "frgn_exhaust_rate": c.get("frgn_exhaust_rate"),
+                "frgn_exhaust_chg": c.get("frgn_exhaust_chg"),
+            }
+            cursor.execute(query, tuple(row[col] for col in _ANALYSIS_COLS))
         conn.commit()
 
 

@@ -26,7 +26,7 @@ def _control(mean_net):
             "stats": {"mean_net": mean_net}}
 
 
-GOOD_STATS = {"n": 50, "ci_low": 0.1, "mean_net": 0.5}
+GOOD_STATS = {"n": 50, "n_days": 12, "ci_low": 0.1, "mean_net": 0.5}
 
 
 # ── family 역할 ──
@@ -70,9 +70,25 @@ def test_selector_eligible_when_all_gates_pass():
 
 
 def test_selector_blocked_on_small_sample_and_ci():
-    gate = check_promotion(_rule(stats={"n": 10, "ci_low": -0.1, "mean_net": 0.5}), [_control(0.2)])
+    gate = check_promotion(
+        _rule(stats={"n": 10, "n_days": 12, "ci_low": -0.1, "mean_net": 0.5}), [_control(0.2)]
+    )
     assert not gate["eligible"]
     assert len(gate["stat_reasons"]) == 2  # 표본 부족 + CI 하한
+
+
+def test_selector_blocked_on_few_trading_days():
+    # f5_supply_band_d 사례: 광역 rule 은 2거래일 만에 n=70 을 채우지만 같은 날 표본은
+    # 시장 무브로 상관 — 종목-일 n 이 아니라 거래일 수(n_days)가 실효 표본이다.
+    few_days = {"n": 70, "n_days": 2, "ci_low": 0.46, "mean_net": 1.25}
+    gate = check_promotion(_rule(stats=few_days), [_control(0.2)])
+    assert not gate["eligible"]
+    assert any("거래일 부족" in r for r in gate["stat_reasons"])
+
+    # n_days 미기록(구 stats) 도 fail-closed — evaluator 다음 실행이 채우면 자연 해소.
+    gate2 = check_promotion(_rule(stats={"n": 50, "ci_low": 0.1, "mean_net": 0.5}), [_control(0.2)])
+    assert not gate2["eligible"]
+    assert any("거래일 부족" in r for r in gate2["stat_reasons"])
 
 
 def test_selector_blocked_when_control_missing_fail_closed():

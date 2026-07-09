@@ -195,3 +195,24 @@ uv run --directory jongalab python workers/rule_evaluator.py
 2. `edge_rule_daily`가 2026-07-07 하루치만 `exec_leg_ret` 기준으로 재생성됐는가?
 
 위 6.2 쿼리가 두 질문을 모두 검증한다.
+
+## 10. 2026-07-09 재검증 결과 (부록)
+
+6.1/6.2 전 항목 통과. 핵심 질문 2개 모두 충족(prefilled=0, 7/7 40건 NXT33/KRX7).
+`edge_rule_daily` 에 7/8(23 rule, n_matched 합 40)이 추가된 것은 문서 작성 이후의
+정상 cron 사이클(7/9 09:30 백필 36/36 → 09:40 채점)이다.
+
+재검증 중 발견·수정한 사항(코드는 같은 날 반영):
+
+1. **`nxt_listed` 가 유니버스 전체에서 NULL이었다** — 원인은 exec_leg 가 아니라
+   `save_stock_reports` 의 DELETE+INSERT: closing_bet 20:00/20:30 재실행이 19:50 NXT
+   스냅샷(`krx_close_price`·`nxt_price_1950`·`nxt_gap_pct`·`nxt_after_value`·`nxt_listed`)을
+   매일 지웠다. → 분석 컬럼만 upsert(탈락 종목만 삭제)로 전환. 2026-07-09 19:50 스냅샷부터 보존된다.
+   따라서 §8 의 "nxt_listed=0 → KRX" 분기는 7/9 이전 데이터에서는 항상 NULL(=NXT 먼저 시도)로 동작했다.
+2. **백필 폭주 가드** — `run()` 에서 min_date 도 없고 `exec_leg_ret` 활성 rule 도 없으면
+   `get_dates_missing_exec_leg(None)` 이 과거 전체를 대상화하는 헛점이 있었다. → 이 경우 실집행
+   레그 백필을 건너뛰도록 수정.
+3. **KRX 폴백 관측성** — NXT 시도 후 결측으로 KRX 폴백 시 로그를 남긴다(일시 결측이 라벨에
+   고착되는 사례를 로그로 구분 가능).
+4. 창 시각(19:50/08:03/15:20/09:03)이 trading(signal_executor·settle)과 이중 정의라는 점을
+   `_exec_leg_label` 주석에 미러 관계로 명시했다.
