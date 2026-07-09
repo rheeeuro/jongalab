@@ -602,13 +602,15 @@ class AnalysisEngine:
 
         # (e) 5일 수급 점수 산정 + 등급 판정
         #     supply_history 기반 정밀 점수(0~100)로 S/A/B/C/D 5단계 분류.
-        #     외국계 거래원 매수 우위(foreign_brokers_buying)·프로그램 순매수는
-        #     5일 점수에 직접 반영되지 않으므로, 점수가 임계값 직전(35~40, 50~55,
-        #     65~70, 80~85)일 때 한 단계 격상해 외국계 자금 시그널을 보정한다.
+        #     외국계 거래원 매수 우위(foreign_brokers_buying)는 5일 점수에 직접
+        #     반영되지 않으므로, 점수가 임계값 직전(35~40, 50~55, 65~70, 80~85)일 때
+        #     한 단계 격상해 외국계 자금 시그널을 보정한다.
+        #     (프로그램 순매수 트리거는 2026-07-03 실증 역효과(갭 승률 9.1%, n=33)로
+        #      SCORE_PROGRAM_BUY_BONUS=0 과 함께 2026-07-09 제거)
         score = self.calculate_supply_score(result["supply_history"])
         result["supply_score"] = score
 
-        foreign_signal = result["foreign_brokers_buying"] or result["prog_net_buy"] > 0
+        foreign_signal = result["foreign_brokers_buying"]
         if foreign_signal:
             thresholds = list(SUPPLY_GRADE_THRESHOLDS.values())
             for high in sorted(thresholds, reverse=True):
