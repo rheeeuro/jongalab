@@ -43,7 +43,7 @@ jongalab/
 | `backtest.py` | 가중치 제안 백테스트 — `score_candidate` 공식을 미러링(`recompute_score`)해 저장된 표본에 제안 가중치를 재적용, 승자/패자 판별력 비교. ⚠️엔진 공식 변경 시 미러도 갱신(테스트가 드리프트 감지) |
 | `edge_predicate.py` | **Edge Ledger predicate 평가기**(순수 함수, DB 무의존). `evaluate(predicate, row, market)` — 조건 목록 AND 결합(op 9종: == != > >= < <= between in not_null, `market.` 접두사로 market_snapshot 참조, NULL=매칭실패). `validate_predicate` 로 저장 전 검증. 단위 테스트 `tests/test_edge_predicate.py` 가 계약 고정 |
 | `edge_selection.py` | **선정 레이어**(순수 함수). `select_signals(mode, candidates, live_rules, veto_rules, top_n, market)` — `EDGE_SELECTION_MODE`(legacy/hybrid/rules)별 selected 판정 + veto(reduce-only, 전 모드) + rule_names 귀속. 점수·rank_no·저장은 불변. 단위 테스트 `tests/test_edge_selection.py` |
-| `edge_policy.py` | **Edge Ledger 정책 단일 소스**(순수 함수). ① family 역할 레지스트리(`FAMILY_ROLES`: selector/veto/benchmark — closing_bet 선정·라우터 검증이 공유) ② 선정 시점 실행 가능성(`selection_executable` — 19:50/익일 수집 피처를 쓰는 rule 은 선정 때 NULL→무음 no-op 라 live 부적격) ③ 승격 게이트(`check_promotion`: n·거래일 수(`n_days`≥`PROMO_MIN_DAYS`=10, 종목-일 클러스터링 과신 방지)·ci_low·**live 대조군 우위**(부재 시 fail-closed)·실행 가능성 — 라우터 409 사유·평가기 알림·`stats.promo_eligible` 이 전부 이 함수에서 파생). 단위 테스트 `tests/test_edge_policy.py` |
+| `edge_policy.py` | **Edge Ledger 정책 단일 소스**(순수 함수). ① rule 역할 판정(`rule_role`: 명시 `role` 컬럼(selector/veto/benchmark) 우선, 구 스키마는 family 겸용 매핑 폴백 — closing_bet 선정·라우터 검증이 공유. `ROLES`/`FAMILIES`(도메인 7종) 레지스트리. 2026-07-09 sql/15 로 role·family 분리: 수급 밴드 4종은 role=benchmark(측정 도구가 실탄 승격되는 경로 차단), veto 는 도메인 family+role=veto) ② 선정 시점 실행 가능성(`selection_executable` — 19:50/익일 수집 피처를 쓰는 rule 은 선정 때 NULL→무음 no-op 라 live 부적격) ③ 승격 게이트(`check_promotion`: n·거래일 수(`n_days`≥`PROMO_MIN_DAYS`=10, 종목-일 클러스터링 과신 방지)·ci_low·**live 대조군 우위**(부재 시 fail-closed)·실행 가능성 — 라우터 409 사유·평가기 알림·`stats.promo_eligible` 이 전부 이 함수에서 파생). 단위 테스트 `tests/test_edge_policy.py` |
 | `edge_features.py` | **F5 수급 구조 피처 파생**(순수 함수, DB 무의존). `afternoon_ret`(당일 13시 시간봉 시가→현재가 %)·`prog_buy_days`(최근 5일 중 프로그램 순매수일)·`vol_ratio`(당일 거래량÷20일 평균) — closing_bet 이 이미 수집한 응답에서 스칼라를 굽는다. 결측=None(predicate 의 NULL=매칭실패 계약과 맞물림). 단위 테스트 `tests/test_edge_features.py` |
 | `daily_ohlc.py` | 수정주가 일봉(ka10081)·분봉(ka10080) 파싱 + 결과 라벨 아티팩트 가드(`SANE_RET_PCT`=±35%) **공유 모듈** — outcome_backfill(일봉·실집행 레그)·gap_check --label-nxt 가 함께 사용(라벨 간 유효성 기준이 어긋나면 청산창 비교가 오염되므로 라벨 경로는 반드시 이 모듈만) |
 | `notifications.py` | 텔레그램 알림(재시도 포함) |
@@ -59,7 +59,7 @@ jongalab/
 ### `routers/` — 엔드포인트
 `admin`(인증) · `contents`(콘텐츠) · `news`(뉴스 재료 히트 `/api/news/heat`) · `market`(주가/지수) · `stock_report`(리포트·갭) ·
 `source`·`strategy_config`·`weight_tuning`·`telegram_user`(admin 전용) · `ticker`(조회 공개/수정 admin) ·
-`edge_rule`(가설 원장 — GET 스코어보드 공개(daily 는 matched 제외 스칼라만+최신 매칭 1일치 별도), POST 등록/승격/강등만 admin. 등록 시 `title`(한글 카드 제목)·`description`(인과 근거) 필수 — 같은 family 가설이 늘며 카드 구분이 안 되던 문제로 2026-07-06 title 컬럼 추가(NULL 이면 프론트가 name 슬러그 폴백). 승격 게이트는 `core/edge_policy.check_promotion` 단일 소스 — 미충족 시 409+사유, force 없음, 대조군 부재 시 fail-closed. 라우터는 월 승격 상한(2개)만 추가 검사).
+`edge_rule`(가설 원장 — GET 스코어보드 공개(daily 는 matched 제외 스칼라만+최신 매칭 1일치 별도, `/{id}/matched?days=`(≤90)로 날짜별 매칭 종목 이력을 별도 제공 — 종목별 change_pct·selected 를 리포트에서 조인해 복기 맥락 포함), POST 등록/승격/강등만 admin. 등록 시 `title`(한글 카드 제목)·`description`(인과 근거) 필수, `family`(도메인)·`role`(selector/veto/benchmark, 기본 selector)은 edge_policy 레지스트리로 검증 — 같은 family 가설이 늘며 카드 구분이 안 되던 문제로 2026-07-06 title 컬럼 추가(NULL 이면 프론트가 name 슬러그 폴백). 승격 게이트는 `core/edge_policy.check_promotion` 단일 소스 — 미충족 시 409+사유, force 없음, 대조군 부재 시 fail-closed. 라우터는 월 승격 상한(2개)만 추가 검사).
 새 라우터는 `routers/` 에 만들고 `api.py` 의 `include_router` 로 등록한다.
 
 ### `workers/` — PM2 cron (스케줄은 루트 `ecosystem.config.js`)
@@ -117,8 +117,8 @@ jongalab/
 평일 09:40 rule_evaluator ─► 활성 가설(edge_rule)을 유니버스+market_snapshot 에 매일 적용 → `exit_label`(기본 `exec_leg_ret`)로 edge_rule_daily(페이퍼 성적) 누적 → 누적 stats·승격/강등 알림
   └► 학습 루프의 심장. candidate 로 등록→매일 자동 채점→표본·신뢰구간 충족 시 관리자 API 로만 live 승격(자동 승격 없음). 집행 연결은 Phase 4
   └► 초기 카탈로그는 sql/8. seed_edge_rules.sql 로 시드(control_legacy_top10=live 기준선 · F1~F4 candidate · veto_bad_news live · veto_overheat_gap candidate — 19:50 피처(nxt_gap_pct)라 선정 시점 실행 불가, edge_policy 게이트가 승격 차단). 인과 근거·registered_at(표본 시작일) 포함, INSERT IGNORE 라 재실행해도 등록일 보존
-  └► 시간외·리스크 가설은 sql/14. seed_after_hours_rules.sql 로 시드(2026-07-09, id 27~31: f6_ah_react_up·veto_ah_react_down·veto_short_surge·veto_credit_high·f5_exec_str_strong — 전부 candidate, 17:50 수집 컬럼이라 선정 시점 실행 불가=페이퍼 전용, 임계값은 7/9 유니버스 p90 실측으로 사전 등록). family `f6_ah`(selector) 는 edge_policy FAMILY_ROLES 에 등록
-  └► live 승격 규율(edge_policy 단일 소스): selector 는 n≥min_sample·CI하한>0·live 대조군 우위(부재 시 fail-closed)·선정 시점 실행 가능성 전부 충족 + 월 2개 상한 + 관리자 승인. veto 는 통계 면제(reduce-only)·실행 가능성만. 19:50/익일 피처 rule 은 페이퍼 검증 전용 — 집행 설계(선정 시점 이동) 변경 후 재검토
+  └► 시간외·리스크 가설은 sql/14. seed_after_hours_rules.sql 로 시드(2026-07-09, id 27~31: f6_ah_react_up·veto_ah_react_down·veto_short_surge·veto_credit_high·f5_exec_str_strong — 전부 candidate, 17:50 수집 컬럼이라 선정 시점 실행 불가=페이퍼 전용, 임계값은 7/9 유니버스 p90 실측으로 사전 등록). family `f6_ah` 는 edge_policy FAMILIES 에 등록
+  └► live 승격 규율(edge_policy 단일 소스): selector 는 n≥min_sample·CI하한>0·live 대조군 우위(부재 시 fail-closed)·선정 시점 실행 가능성 전부 충족 + 월 2개 상한 + 관리자 승인. veto 는 통계 면제(reduce-only)·실행 가능성만. benchmark(대조군·수급 밴드) 는 전 게이트 면제지만 실전 투입 알림/화면 대상에서 제외(기준선 교체는 API 로 수동). 19:50/익일 피처 rule 은 페이퍼 검증 전용 — 집행 설계(선정 시점 이동) 변경 후 재검토
 주말 weight_tuner ─► 실현손익 + 지표(콘텐츠·뉴스 포함) 피드백 ─► 가중치 제안
   └► 0 근처 가중치는 절대스텝 부트스트랩 클램프로 성장 가능(±15% 곱셈식이 0을 0에 고정하는 문제 해소)
   └► backtest(core/backtest.py)로 판별력 검증 → IMPROVES=status 'pending'(승인 대상) /

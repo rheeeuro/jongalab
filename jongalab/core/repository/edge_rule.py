@@ -46,16 +46,18 @@ def create_rule(
     registered_at: str | None = None,
     status: str = "candidate",
     title: str | None = None,
+    role: str = "selector",
 ) -> int:
     """신규 rule 등록. registered_at 미지정 시 오늘(사전 등록일). 반환: rule id.
-    title 은 카드 제목(한글) — NULL 이면 프론트가 name 슬러그로 폴백."""
+    title 은 카드 제목(한글) — NULL 이면 프론트가 name 슬러그로 폴백.
+    role 은 selector/veto/benchmark (검증은 라우터가 edge_policy.ROLES 로 수행)."""
     pred = json.dumps(predicate, ensure_ascii=False)
     with get_db() as (conn, cursor):
         cursor.execute(
             """INSERT INTO edge_rule
-               (name, title, family, description, predicate, exit_label, status, min_sample, registered_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURDATE()))""",
-            (name, title, family, description, pred, exit_label, status, int(min_sample), registered_at),
+               (name, title, family, role, description, predicate, exit_label, status, min_sample, registered_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURDATE()))""",
+            (name, title, family, role, description, pred, exit_label, status, int(min_sample), registered_at),
         )
         conn.commit()
         return int(cursor.lastrowid)
@@ -188,6 +190,46 @@ def get_latest_matched(rule_id: int) -> dict | None:
         )
         row = cursor.fetchone()
         return _serialize(row) if row else None
+
+
+def get_rule_matched_history(rule_id: int, days: int = 30) -> list[dict]:
+    """매칭이 있었던 최근 days 일의 {report_date, n_matched, mean_net_ret, matched} (최신→과거).
+
+    상세 페이지 '날짜별 매칭 기록'용 — daily 시계열에서 페이로드 때문에 뺀 matched 를
+    날짜 역순으로 제한해 내려준다. 저장 JSON(code/name/ret/low)에 당일 리포트의
+    등락률(change_pct)·현행 점수 선정 여부(selected)를 조인해 복기 맥락을 붙인다.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT report_date, n_matched, mean_net_ret, matched
+                 FROM edge_rule_daily
+                WHERE rule_id = %s AND n_matched > 0
+                ORDER BY report_date DESC LIMIT %s""",
+            (rule_id, int(days)),
+        )
+        rows = [_serialize(r) for r in cursor.fetchall()]
+        if not rows:
+            return rows
+        placeholders = ", ".join(["%s"] * len(rows))
+        cursor.execute(
+            f"""SELECT report_date, stock_code, change_pct, selected
+                  FROM daily_stock_report
+                 WHERE report_date IN ({placeholders})""",
+            tuple(r["report_date"] for r in rows),
+        )
+        report_by_date_code = {}
+        for r in cursor.fetchall():
+            d = r["report_date"].isoformat() if isinstance(r["report_date"], (date, datetime)) else str(r["report_date"])
+            report_by_date_code[(d, r["stock_code"])] = r
+        for row in rows:
+            for m in row.get("matched") or []:
+                extra = report_by_date_code.get((row["report_date"], m.get("code")))
+                m["change_pct"] = (
+                    round(float(extra["change_pct"]), 2)
+                    if extra and extra.get("change_pct") is not None else None
+                )
+                m["selected"] = int(extra["selected"]) if extra and extra.get("selected") is not None else None
+        return rows
 
 
 def get_rule_daily_since(rule_id: int, since: str) -> list[dict]:

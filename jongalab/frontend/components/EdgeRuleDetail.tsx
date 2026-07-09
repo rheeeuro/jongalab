@@ -15,6 +15,7 @@ import {
 import type { EdgeRuleWithDaily } from "@/types";
 import {
   familyMeta,
+  roleMeta,
   fmtPct,
   retTone,
   TONE_TEXT,
@@ -70,6 +71,7 @@ export function EdgeRuleDetail({
 
   const s = rule.stats;
   const fam = familyMeta(rule.family);
+  const role = roleMeta(rule.role);
   const chartData = rule.daily.map((d) => ({
     date: d.report_date.slice(5),
     mean: d.mean_net_ret,
@@ -102,6 +104,9 @@ export function EdgeRuleDetail({
                 {STATUS_LABEL[rule.status]}
               </span>
               <span className="text-[11px] font-semibold text-slate-400">{fam.label}</span>
+              <span className={`rounded-full px-1.5 py-px text-[10px] font-bold ${role.badge}`} title={role.hint}>
+                {role.label}
+              </span>
             </div>
             <h2 className="mt-1 break-keep text-base font-bold text-slate-900 dark:text-slate-100">
               {rule.title ?? rule.name}

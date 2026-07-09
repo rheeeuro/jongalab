@@ -30,7 +30,7 @@ from core.repository.news import get_today_news_stats_by_stock, get_today_news_b
 from core.repository.trade_signal import push_trade_signals
 from core.repository.edge_rule import list_rules
 from core.edge_selection import select_signals
-from core.edge_policy import family_role
+from core.edge_policy import rule_role
 from core.news_summary import summarize_news
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -484,16 +484,16 @@ class ClosingBetStrategy:
         점수·rank_no·저장은 이 함수가 건드리지 않는다(대조군 평가·프론트 표시 불변).
         선정 시점(13~15시)엔 NXT 스냅샷·당일 market_snapshot 이 없어 그 피처 기반 rule 은
         매칭될 수 없다 — 그런 rule 의 live 승격 자체를 edge_policy 실행 가능성 게이트가 막는다.
-        family 역할(selector/veto/benchmark) 판정은 core.edge_policy.FAMILY_ROLES 단일 소스.
+        역할(selector/veto/benchmark) 판정은 core.edge_policy.rule_role 단일 소스.
         """
         mode = EDGE_SELECTION_MODE
         live_rules, veto_rules = [], []
         try:
             live = list_rules(status="live")
-            veto_rules = [r for r in live if family_role(r["family"]) == "veto"]
-            # benchmark(control)는 선정에 쓰지 않는다 — selector 로 넣으면 predicate(selected==1)가
-            # 늘 top-N 을 매칭해 rules 모드의 '무거래' 의미가 깨진다(페이퍼 기준선으로만 채점).
-            live_rules = [r for r in live if family_role(r["family"]) == "selector"]
+            veto_rules = [r for r in live if rule_role(r) == "veto"]
+            # benchmark(control·측정 밴드)는 선정에 쓰지 않는다 — selector 로 넣으면 광역
+            # predicate(selected==1 등)가 늘 top-N 을 매칭해 rules 모드의 '무거래' 의미가 깨진다.
+            live_rules = [r for r in live if rule_role(r) == "selector"]
         except Exception as e:
             if mode != "legacy":
                 mode = "legacy"

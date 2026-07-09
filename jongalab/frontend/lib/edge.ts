@@ -24,19 +24,43 @@ export const STATUS_HELP: Record<string, string> = {
   retired: '검증에 실패했거나 수명이 다해 더는 쓰지 않는 전략입니다.',
 };
 
-// ── 전략 유형(family) ──
+// ── 전략 유형(family = 도메인: 어떤 데이터를 보는가) ──
 export const FAMILY_META: Record<string, { label: string; hint: string }> = {
   f1_news: { label: '뉴스 전략', hint: '새 뉴스가 아직 주가에 덜 반영된 종목을 노립니다' },
   f2_global: { label: '해외 연동 전략', hint: '밤사이 미국 시장 움직임을 아직 못 따라간 종목을 노립니다' },
   f3_nxt: { label: '야간시장 전략', hint: '저녁 NXT 거래에서 생긴 가격 차이를 노립니다' },
   f4_laggard: { label: '후발주 전략', hint: '섹터 1등이 급등한 뒤 아직 덜 오른 동종 종목을 노립니다' },
   f5_supply: { label: '수급 전략', hint: '기관·외국인 매수 흐름과 차트 구조에서 익일 연속성을 노립니다' },
+  f6_ah: { label: '시간외 전략', hint: '장 마감 후 시간외단일가 반응에서 익일 연속성을 노립니다' },
   control: { label: '기준선', hint: '현행 점수 방식 — 새 전략이 이겨야 할 비교 기준입니다' },
-  veto: { label: '위험 회피', hint: '수익용이 아니라 위험한 종목을 매수에서 빼는 용도입니다' },
+  veto: { label: '위험 회피', hint: '수익용이 아니라 위험한 종목을 매수에서 빼는 용도입니다' }, // 구 데이터 폴백
 };
 
 export function familyMeta(family: string) {
   return FAMILY_META[family] ?? { label: family, hint: '' };
+}
+
+// ── 역할(role: 매매에서 어떻게 쓰이는가) — family(도메인)와 별개 축 ──
+export const ROLE_META: Record<string, { label: string; badge: string; hint: string }> = {
+  selector: {
+    label: '매수',
+    badge: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300',
+    hint: '조건에 걸린 종목을 매수 후보로 고르는 수익 가설입니다',
+  },
+  veto: {
+    label: '위험 회피',
+    badge: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
+    hint: '수익용이 아니라 위험한 종목을 매수에서 빼는 용도입니다',
+  },
+  benchmark: {
+    label: '측정용',
+    badge: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300',
+    hint: '매매에 쓰지 않고 성적 비교·측정에만 쓰는 기준선입니다',
+  },
+};
+
+export function roleMeta(role: string) {
+  return ROLE_META[role] ?? ROLE_META.selector;
 }
 
 // ── 성적 지표: 쉬운 라벨 + 도움말 ──
@@ -159,5 +183,7 @@ export const TONE_FILL: Record<Tone, string> = {
 // 검증 통과 신호: 서버(core/edge_policy 게이트)가 계산해 stats.promo_eligible 에 저장한 값을
 // 렌더링만 한다. 조건을 프론트에서 재계산하지 않는다(단일 소스).
 export function isPromotionCandidate(rule: EdgeRule): boolean {
-  return rule.status === 'candidate' && rule.stats?.promo_eligible === true;
+  // benchmark(측정용)는 게이트 전면 면제라 promo_eligible 이 늘 true — 실전 투입 대상이
+  // 아니므로 '검증 통과' 배지·투입 대기 목록에서 제외한다(기준선 교체는 API 로 수동 수행).
+  return rule.status === 'candidate' && rule.stats?.promo_eligible === true && rule.role !== 'benchmark';
 }

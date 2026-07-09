@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from routers.admin import require_admin
 from core.edge_predicate import validate_predicate, PredicateError
-from core.edge_policy import FAMILY_ROLES, family_role, check_promotion
+from core.edge_policy import ROLES, FAMILIES, rule_role, check_promotion
 from core.repository.edge_rule import (
     create_rule,
     list_rules,
@@ -21,6 +21,7 @@ from core.repository.edge_rule import (
     count_promoted_in_month,
     get_rule_daily,
     get_latest_matched,
+    get_rule_matched_history,
     ALLOWED_EXIT_LABELS,
 )
 
@@ -32,7 +33,8 @@ _MONTHLY_PROMOTE_CAP = 2  # 다중 가설 보정: live 승격 월 상한(README 
 class RuleCreate(BaseModel):
     name: str
     title: str  # 카드 제목(한글) — 화면에서 가설을 구분하는 이름, 필수
-    family: str
+    family: str  # 도메인(f1_news 등) — 역할은 role 로 분리(2026-07-09)
+    role: str = "selector"  # selector / veto / benchmark
     description: str
     predicate: list
     exit_label: str = "exec_leg_ret"
@@ -70,11 +72,30 @@ def get_edge_rule_daily(rule_id: int, days: int = Query(60, ge=1, le=365)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{rule_id}/matched")
+def get_edge_rule_matched(rule_id: int, days: int = Query(30, ge=1, le=90)):
+    """날짜별 매칭 종목 이력 (상세 페이지 '날짜별 매칭 기록').
+
+    daily 응답이 페이로드 때문에 의도적으로 빼는 matched(일별 매칭 종목 JSON)를
+    최근 days 일(매칭 있던 날만, 최신→과거)로 제한해 별도로 내려준다.
+    종목별 change_pct(당일 등락률)·selected(현행 점수 톱10 여부)를 리포트에서 조인해 붙인다.
+    """
+    rule = get_rule(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="rule 을 찾을 수 없습니다.")
+    try:
+        return get_rule_matched_history(rule_id, days)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("", dependencies=[Depends(require_admin)])
 def post_edge_rule(body: RuleCreate):
-    """신규 rule 등록 (predicate·family·exit_label 검증 포함). 인과 근거(description) 필수."""
-    if body.family not in FAMILY_ROLES:
-        raise HTTPException(status_code=400, detail=f"family 는 {sorted(FAMILY_ROLES)} 중 하나여야 합니다.")
+    """신규 rule 등록 (predicate·family·role·exit_label 검증 포함). 인과 근거(description) 필수."""
+    if body.family not in FAMILIES:
+        raise HTTPException(status_code=400, detail=f"family 는 {sorted(FAMILIES)} 중 하나여야 합니다.")
+    if body.role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"role 은 {list(ROLES)} 중 하나여야 합니다.")
     if body.exit_label not in ALLOWED_EXIT_LABELS:
         raise HTTPException(status_code=400, detail=f"exit_label 은 {list(ALLOWED_EXIT_LABELS)} 중 하나여야 합니다.")
     if not body.description.strip():
@@ -90,7 +111,7 @@ def post_edge_rule(body: RuleCreate):
     try:
         rule_id = create_rule(
             name=body.name, title=body.title.strip(), family=body.family,
-            description=body.description, predicate=body.predicate,
+            role=body.role, description=body.description, predicate=body.predicate,
             exit_label=body.exit_label, min_sample=body.min_sample,
             registered_at=body.registered_at,
         )
@@ -104,7 +125,7 @@ def promote_edge_rule(rule_id: int):
     """candidate → live 승격. 정량 게이트 미충족 시 409(force 불가).
 
     게이트 판정은 core.edge_policy.check_promotion **단일 소스**(라우터·평가기·프론트 공유):
-    (selector) n≥min_sample · ci_low>0 · live 대조군(family role=benchmark) 우위 —
+    (selector) n≥min_sample · ci_low>0 · live 대조군(role=benchmark) 우위 —
     대조군 부재/미평가면 fail-closed(승격 불가). (selector·veto) 선정 시점 실행 가능성.
     여기에 라우터만 시점 의존 운영 제약(상태=candidate, 월 승격 상한)을 더한다.
     """
@@ -121,7 +142,7 @@ def promote_edge_rule(rule_id: int):
             detail=f"이번 달 승격 상한({_MONTHLY_PROMOTE_CAP}개)에 도달했습니다(다중 가설 보정 규율).",
         )
 
-    controls = [r for r in list_rules(status="live") if family_role(r["family"]) == "benchmark"]
+    controls = [r for r in list_rules(status="live") if rule_role(r) == "benchmark"]
     gate = check_promotion(rule, controls)
     if not gate["eligible"]:
         raise HTTPException(status_code=409, detail=" / ".join(gate["stat_reasons"] + gate["exec_reasons"]))

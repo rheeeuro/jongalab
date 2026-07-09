@@ -5,6 +5,7 @@ import type { EdgeRuleWithDaily } from "@/types";
 import { Sparkline } from "@/components/Sparkline";
 import {
   familyMeta,
+  roleMeta,
   fmtPct,
   retTone,
   TONE_TEXT,
@@ -21,6 +22,7 @@ export function EdgeRuleCard({
 }) {
   const s = rule.stats;
   const fam = familyMeta(rule.family);
+  const role = roleMeta(rule.role);
   const isLive = rule.status === "live";
   const isRetired = rule.status === "retired";
   const promo = isPromotionCandidate(rule);
@@ -49,8 +51,11 @@ export function EdgeRuleCard({
           <p className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
             {rule.title ?? rule.name}
           </p>
-          <span className="mt-0.5 inline-block text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+          <span className="mt-0.5 inline-flex flex-wrap items-center gap-1 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
             {fam.label}
+            <span className={`rounded-full px-1.5 py-px font-bold ${role.badge}`} title={role.hint}>
+              {role.label}
+            </span>
           </span>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">

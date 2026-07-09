@@ -53,7 +53,7 @@ def select_signals(
     """모드별 selected 판정.
 
     candidates: 점수순(rank_no 오름차순) 정렬된 리포트 행 dict 목록.
-    live_rules: veto 아닌 live rule dict 목록(name·predicate·stats). veto_rules: veto family live rule.
+    live_rules: role=selector 인 live rule dict 목록(name·predicate·stats). veto_rules: role=veto live rule.
     반환: (selected_codes, rule_names_by_code, veto_log)
       - selected_codes: 핸드오프 대상 종목코드(입력 순서 보존)
       - rule_names_by_code: {code: "ruleA,ruleB"} — 선정된 종목의 매칭 rule(legacy 는 빈 dict)

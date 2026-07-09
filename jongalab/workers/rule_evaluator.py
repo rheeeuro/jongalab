@@ -23,7 +23,7 @@ from datetime import date
 from core.config import EDGE_COST_PCT
 from core.logging_setup import setup_logging
 from core.edge_predicate import evaluate
-from core.edge_policy import check_promotion, family_role
+from core.edge_policy import check_promotion, rule_role
 from core.notifications import send_edge_rule_alert
 from core.repository import (
     list_rules,
@@ -221,7 +221,7 @@ def run():
         rule["_new_scored"] = new_scored
 
     # ── pass 2: 승격/강등 게이트 (모든 rule 의 stats 가 신선해진 뒤 — 대조군 비교 정합) ──
-    controls = [r for r in rules if family_role(r["family"]) == "benchmark" and r["status"] == "live"]
+    controls = [r for r in rules if rule_role(r) == "benchmark" and r["status"] == "live"]
     promotions, exec_pending, demotions = [], [], []
     for rule in rules:
         stats = rule["stats"]
@@ -232,7 +232,9 @@ def run():
                 "name": rule["name"], "family": rule["family"],
                 "n": stats["n"], "mean_net": stats["mean_net"], "ci_low": stats["ci_low"],
             }
-            if gate["eligible"]:
+            # benchmark(측정용) 후보는 게이트 전면 면제라 항상 eligible 이지만, '실전 투입'
+            # 알림 대상이 아니다(기준선 교체는 필요 시 관리자가 API 로 의도적으로 수행).
+            if gate["eligible"] and rule_role(rule) != "benchmark":
                 promotions.append(row)
             elif (
                 not gate["stat_reasons"] and gate["exec_reasons"]

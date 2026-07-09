@@ -301,7 +301,8 @@ export interface EdgeRule {
   id: number;
   name: string;
   title: string | null;        // 카드 제목(한글) — NULL 이면 name 슬러그 폴백
-  family: string;              // f1_news / f2_global / f3_nxt / f4_laggard / f5_supply / control / veto
+  family: string;              // 도메인: f1_news / f2_global / f3_nxt / f4_laggard / f5_supply / f6_ah / control
+  role: 'selector' | 'veto' | 'benchmark';  // 역할: 선정 / 위험 회피(제외 전용) / 측정·기준선
   description: string;
   predicate: PredicateCond[];
   exit_label: string;
@@ -319,6 +320,16 @@ export interface EdgeRuleMatched {
   name: string;
   ret: number | null;   // exit_label 값(비용 미차감 원본)
   low: number | null;   // next_low_ret(꼬리)
+  change_pct?: number | null;  // 당일 등락률 — matched 이력 API 만 조인 제공
+  selected?: number | null;    // 현행 점수 톱10 선정 여부(1/0) — matched 이력 API 만 조인 제공
+}
+
+// GET /api/edge-rules/{id}/matched — 날짜별 매칭 기록(매칭 있던 날만, 최신→과거)
+export interface EdgeRuleMatchedDay {
+  report_date: string;
+  n_matched: number;
+  mean_net_ret: number | null;  // 비용 차감 후 평균(개별 ret 는 원본)
+  matched: EdgeRuleMatched[];
 }
 
 // daily 시계열은 matched(일별 매칭 종목 전체)를 싣지 않는다 — 페이로드 비대화 방지.

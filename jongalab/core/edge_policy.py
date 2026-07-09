@@ -1,4 +1,4 @@
-"""Edge Ledger 정책 — family 역할·선정 시점 실행 가능성·승격 게이트의 **단일 소스**.
+"""Edge Ledger 정책 — rule 역할·선정 시점 실행 가능성·승격 게이트의 **단일 소스**.
 
 라우터(routers/edge_rule)·평가기(workers/rule_evaluator)·선정(workers/closing_bet)·
 프론트(stats.promo_eligible 렌더링)가 전부 여기서 파생한다. 조건을 바꿀 땐 이 파일만 고친다
@@ -7,25 +7,33 @@
 순수 로직(DB·네트워크 무의존) → tests/test_edge_policy.py 가 계약을 고정한다.
 """
 
-# ── family 역할 레지스트리 ──
+# ── rule 역할(role) — family(도메인)와 직교하는 명시 속성 (2026-07-09 분리) ──
 # selector  : live 시 hybrid/rules 모드에서 매수 후보를 '선정'한다
 # veto      : live 시 전 모드에서 선정 직전 '제외'만 한다(reduce-only)
-# benchmark : 선정에 쓰지 않는 페이퍼 기준선(대조군) — selector 로 넣으면 rules 모드의
-#             '무거래' 의미가 깨진다(예: selected==1 predicate 이 늘 top-N 을 매칭)
-FAMILY_ROLES: dict[str, str] = {
-    "f1_news": "selector",
-    "f2_global": "selector",
-    "f3_nxt": "selector",
-    "f4_laggard": "selector",
-    "f5_supply": "selector",
-    "f6_ah": "selector",  # 시간외단일가 반응형 (17:50 수집 — 선정 시점 실행 불가, 페이퍼 전용)
-    "control": "benchmark",
-    "veto": "veto",
+# benchmark : 선정에 쓰지 않는 페이퍼 기준선·측정 도구(대조군, 수급 밴드 등) — selector 로
+#             넣으면 rules 모드의 '무거래' 의미가 깨진다(예: selected==1 이 늘 top-N 을 매칭)
+ROLES: tuple[str, ...] = ("selector", "veto", "benchmark")
+
+# 도메인(family) — 가설이 어떤 데이터 축을 보는가. 역할과 독립(예: 수급 도메인의 veto).
+FAMILIES: tuple[str, ...] = (
+    "f1_news", "f2_global", "f3_nxt", "f4_laggard", "f5_supply", "f6_ah", "control",
+)
+
+# 구 체계 폴백 — role 컬럼 도입(sql/15) 전에는 family 가 역할을 겸했다. 마이그레이션 전
+# 배포·구 dict 에서도 안전하게 동작하도록 rule_role() 이 이 매핑으로 폴백한다.
+_LEGACY_FAMILY_ROLES: dict[str, str] = {
+    "f1_news": "selector", "f2_global": "selector", "f3_nxt": "selector",
+    "f4_laggard": "selector", "f5_supply": "selector", "f6_ah": "selector",
+    "control": "benchmark", "veto": "veto",
 }
 
 
-def family_role(family: str) -> str | None:
-    return FAMILY_ROLES.get(family)
+def rule_role(rule: dict) -> str | None:
+    """rule 의 역할. 명시 role 컬럼 우선, 없으면(구 스키마) family 겸용 매핑으로 폴백."""
+    role = rule.get("role")
+    if role in ROLES:
+        return role
+    return _LEGACY_FAMILY_ROLES.get(rule.get("family", ""))
 
 
 # ── 선정 시점(closing_bet 13~15시) 실행 가능성 ──
@@ -80,7 +88,7 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
       - exec_reasons: 선정 시점 실행 불가 사유(benchmark 는 면제 — 선정에 안 쓰므로)
     월 승격 상한은 시점 의존 운영 제약이라 여기 넣지 않고 라우터가 별도 검사한다.
     """
-    role = family_role(rule.get("family", ""))
+    role = rule_role(rule)
     stats = rule.get("stats") or {}
     stat_reasons: list[str] = []
     exec_reasons: list[str] = []

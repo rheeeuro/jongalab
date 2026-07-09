@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Activity, BarChart3, ListChecks, Target } from "lucide-react";
+import { Activity, BarChart3, CalendarDays, ListChecks, Target } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -12,9 +12,10 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
-import type { EdgeRuleWithDaily } from "@/types";
+import type { EdgeRuleMatchedDay, EdgeRuleWithDaily } from "@/types";
 import {
   familyMeta,
+  roleMeta,
   fmtPct,
   retTone,
   TONE_TEXT,
@@ -74,12 +75,15 @@ function Panel({
 export function EdgeRuleDetailContent({
   rule,
   action,
+  matchedHistory,
 }: {
   rule: EdgeRuleWithDaily;
   action?: ReactNode;
+  matchedHistory?: EdgeRuleMatchedDay[];
 }) {
   const s = rule.stats;
   const fam = familyMeta(rule.family);
+  const role = roleMeta(rule.role);
   const chartData = rule.daily.map((d) => ({
     date: d.report_date.slice(5),
     mean: d.mean_net_ret,
@@ -98,6 +102,9 @@ export function EdgeRuleDetailContent({
               </span>
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                 {fam.label}
+              </span>
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${role.badge}`} title={role.hint}>
+                {role.label}
               </span>
             </div>
             <h1 className="mt-3 break-keep text-2xl font-black tracking-tight text-slate-950 sm:text-3xl dark:text-slate-50">
@@ -160,6 +167,68 @@ export function EdgeRuleDetailContent({
               성적 계산 방식: {exitLabelText(rule.exit_label)}
             </p>
           </Panel>
+
+          {matchedHistory && matchedHistory.length > 0 && (
+            <Panel title="날짜별 매칭 기록" icon={<CalendarDays className="h-4 w-4" />}>
+              <p className="mb-3 text-xs leading-relaxed text-slate-400 dark:text-slate-500">
+                조건에 걸린 종목과 결과를 날짜별로 보여줍니다(최근 {matchedHistory.length}일).
+                종목별 수익률은 거래비용 차감 전 원본이고, 날짜 평균만 비용을 뺀 값입니다.
+              </p>
+              <div className="space-y-2">
+                {matchedHistory.map((day, idx) => (
+                  <details
+                    key={day.report_date}
+                    open={idx === 0}
+                    className="group rounded-xl border border-slate-200 dark:border-slate-700"
+                  >
+                    <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-xl px-3 py-2.5 text-xs hover:bg-slate-50 dark:hover:bg-[#202027]">
+                      <span className="font-bold text-slate-700 dark:text-slate-200">{day.report_date}</span>
+                      <span className="text-slate-400">{day.n_matched}종목</span>
+                      <span className="text-slate-400">
+                        평균{" "}
+                        <span className={`font-bold tabular-nums ${TONE_TEXT[retTone(day.mean_net_ret)]}`}>
+                          {fmtPct(day.mean_net_ret)}
+                        </span>
+                      </span>
+                      <span className="ml-auto text-[10px] text-slate-300 transition-transform group-open:rotate-180 dark:text-slate-600">▼</span>
+                    </summary>
+                    <div className="border-t border-slate-100 px-3 pb-3 pt-2 dark:border-slate-800">
+                      <div className="grid grid-cols-[minmax(0,1fr)_3.2rem_3.2rem_3.2rem] gap-x-2 gap-y-1.5 text-[11px]">
+                        <span className="text-[10px] font-bold text-slate-400">종목</span>
+                        <span className="text-right text-[10px] font-bold text-slate-400">당일</span>
+                        <span className="text-right text-[10px] font-bold text-slate-400">수익</span>
+                        <span className="text-right text-[10px] font-bold text-slate-400">익일최저</span>
+                        {day.matched.map((m) => (
+                          <div key={m.code} className="contents">
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <span className="truncate font-semibold text-slate-700 dark:text-slate-200">{m.name}</span>
+                              {m.selected === 1 && (
+                                <span className="shrink-0 rounded bg-rose-100 px-1 text-[9px] font-bold text-rose-600 dark:bg-rose-500/15 dark:text-rose-300" title="현행 점수 상위 10 선정 종목">
+                                  톱10
+                                </span>
+                              )}
+                            </span>
+                            <span className={`text-right font-semibold tabular-nums ${TONE_TEXT[retTone(m.change_pct ?? null)]}`}>
+                              {fmtPct(m.change_pct ?? null)}
+                            </span>
+                            <span className={`text-right font-bold tabular-nums ${TONE_TEXT[retTone(m.ret)]}`}>
+                              {fmtPct(m.ret)}
+                            </span>
+                            <span className={`text-right tabular-nums ${TONE_TEXT[retTone(m.low)]}`}>
+                              {fmtPct(m.low)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-2.5 text-[10px] leading-relaxed text-slate-400 dark:text-slate-500">
+                        당일 = 매칭 당일 등락률 · 수익 = {exitLabelText(rule.exit_label)} · 익일최저 = 다음날 장중 최저가 기준(꼬리 리스크)
+                      </p>
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </Panel>
+          )}
         </div>
 
         <aside className="space-y-5">
@@ -204,7 +273,8 @@ export function EdgeRuleDetailContent({
             </dl>
           </Panel>
 
-          {latestMatched && (
+          {/* 날짜별 매칭 기록(본문)이 있으면 요약 패널은 중복이라 숨긴다 */}
+          {!matchedHistory?.length && latestMatched && (
             <Panel title={`최근 매칭 ${latestMatched.report_date}`} icon={<Target className="h-4 w-4" />}>
               <div className="flex flex-wrap gap-1.5">
                 {latestMatched.matched!.slice(0, 12).map((m) => (

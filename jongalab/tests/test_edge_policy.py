@@ -1,45 +1,64 @@
 """Edge Ledger 정책(core/edge_policy.py) 단위 테스트.
 
-family 역할 레지스트리 · 선정 시점 실행 가능성 · 승격 게이트(check_promotion)의 계약 고정.
+rule 역할(role·구 family 폴백) · 선정 시점 실행 가능성 · 승격 게이트(check_promotion)의 계약 고정.
 게이트는 라우터(409 사유)·평가기(알림·promo_eligible)·프론트(배지)가 공유하는 단일 소스라
 여기가 깨지면 세 곳이 동시에 어긋난다. 순수 로직이라 DB 무의존.
 """
 from core.edge_policy import (
-    FAMILY_ROLES,
-    family_role,
+    ROLES,
+    FAMILIES,
+    rule_role,
     selection_executable,
     check_promotion,
 )
 
 
-def _rule(family="f1_news", predicate=None, stats=None, min_sample=40):
-    return {
+def _rule(family="f1_news", role=None, predicate=None, stats=None, min_sample=40):
+    r = {
         "name": "r", "family": family, "min_sample": min_sample,
         "predicate": predicate if predicate is not None
         else [{"col": "change_pct", "op": ">=", "value": 2}],
         "stats": stats,
     }
+    if role is not None:
+        r["role"] = role
+    return r
 
 
 def _control(mean_net):
-    return {"name": "control", "family": "control", "status": "live",
+    return {"name": "control", "family": "control", "role": "benchmark", "status": "live",
             "stats": {"mean_net": mean_net}}
 
 
 GOOD_STATS = {"n": 50, "n_days": 12, "ci_low": 0.1, "mean_net": 0.5}
 
 
-# ── family 역할 ──
+# ── rule 역할 ──
 
-def test_family_roles_cover_all_known_families():
-    assert family_role("f3_nxt") == "selector"
-    assert family_role("f5_supply") == "selector"
-    assert family_role("f6_ah") == "selector"
-    assert family_role("veto") == "veto"
-    assert family_role("control") == "benchmark"
-    assert family_role("unknown") is None
-    # selector 6 + veto 1 + benchmark 1 — family 추가 시 이 레지스트리부터 갱신
-    assert len(FAMILY_ROLES) == 8
+def test_rule_role_prefers_explicit_role_column():
+    # role 명시 시 family 와 무관하게 role 이 이긴다 — 수급 밴드(f5_supply + benchmark) 사례.
+    assert rule_role({"family": "f5_supply", "role": "benchmark"}) == "benchmark"
+    assert rule_role({"family": "f5_supply", "role": "veto"}) == "veto"
+    assert rule_role({"family": "f6_ah", "role": "selector"}) == "selector"
+
+
+def test_rule_role_falls_back_to_legacy_family_mapping():
+    # role 컬럼 도입(sql/15) 전 스키마/구 dict — family 겸용 매핑으로 폴백.
+    assert rule_role({"family": "f3_nxt"}) == "selector"
+    assert rule_role({"family": "veto"}) == "veto"
+    assert rule_role({"family": "control"}) == "benchmark"
+    assert rule_role({"family": "unknown"}) is None
+    # 알 수 없는 role 값도 폴백(오타가 무음 selector 가 되는 걸 방지)
+    assert rule_role({"family": "control", "role": "banchmark"}) == "benchmark"
+
+
+def test_role_and_family_registries():
+    assert set(ROLES) == {"selector", "veto", "benchmark"}
+    # 도메인 7종 — family 추가 시 이 레지스트리부터 갱신(라우터 등록 검증이 참조)
+    assert set(FAMILIES) == {
+        "f1_news", "f2_global", "f3_nxt", "f4_laggard", "f5_supply", "f6_ah", "control",
+    }
+    assert "veto" not in FAMILIES  # 역할은 family 가 아니다(2026-07-09 분리)
 
 
 # ── 선정 시점 실행 가능성 ──
@@ -123,11 +142,12 @@ def test_selector_blocked_on_non_executable_predicate():
 
 def test_veto_skips_stat_gates_but_requires_executable():
     # veto 는 reduce-only 라 통계 게이트 면제 — 단 선정 시점 실행은 가능해야 한다.
-    ok_rule = _rule(family="veto", stats=None,
+    # role 분리 후 veto 는 도메인 family(f1_news 등) + role='veto' 로 표현된다.
+    ok_rule = _rule(family="f1_news", role="veto", stats=None,
                     predicate=[{"col": "news_sentiment", "op": "<=", "value": 30}])
     assert check_promotion(ok_rule, [])["eligible"]
 
-    dead_rule = _rule(family="veto", stats=None,
+    dead_rule = _rule(family="f3_nxt", role="veto", stats=None,
                       predicate=[{"col": "nxt_gap_pct", "op": ">=", "value": 5}])
     gate = check_promotion(dead_rule, [])
     assert not gate["eligible"] and gate["exec_reasons"]
@@ -135,6 +155,15 @@ def test_veto_skips_stat_gates_but_requires_executable():
 
 def test_benchmark_exempt_from_all_gates():
     # 대조군 교체는 실탄 배정이 아니라 기준선 교체 — 통계·실행 게이트 모두 면제.
-    rule = _rule(family="control", stats=None,
+    rule = _rule(family="control", role="benchmark", stats=None,
                  predicate=[{"col": "selected", "op": "==", "value": 1}])
     assert check_promotion(rule, [])["eligible"]
+
+
+def test_supply_band_as_benchmark_skips_selector_gates():
+    # 수급 밴드(f5_supply + role=benchmark): 광역 매칭 측정 도구가 selector 통계 게이트를
+    # 우연히 통과해 실탄 선정에 승격되는 경로를 role 분리가 차단한다.
+    band = _rule(family="f5_supply", role="benchmark", stats=GOOD_STATS,
+                 predicate=[{"col": "supply_score", "op": "between", "value": [0, 40]}])
+    gate = check_promotion(band, [])
+    assert gate["eligible"] and gate["stat_reasons"] == [] and gate["exec_reasons"] == []

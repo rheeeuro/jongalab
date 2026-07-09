@@ -281,7 +281,8 @@ CREATE TABLE IF NOT EXISTS edge_rule (
     id            INT AUTO_INCREMENT PRIMARY KEY,
     name          VARCHAR(50) NOT NULL UNIQUE,       -- 예: f3_nxt_gap_quality
     title         VARCHAR(80) DEFAULT NULL,          -- 카드 제목(한글) — NULL 이면 프론트가 name 폴백
-    family        VARCHAR(20) NOT NULL,              -- f1_news / f2_global / f3_nxt / f4_laggard / control / veto
+    family        VARCHAR(20) NOT NULL,              -- 도메인: f1_news / f2_global / f3_nxt / f4_laggard / f5_supply / f6_ah / control
+    role          VARCHAR(10) NOT NULL DEFAULT 'selector',  -- 역할: selector(선정) / veto(제외 전용) / benchmark(측정·기준선)
     description   VARCHAR(500) NOT NULL,             -- 인과 근거 필수: "누가 왜 내일 아침 사는가"
     predicate     JSON NOT NULL,                     -- 조건 목록(AND 결합, edge_predicate DSL)
     exit_label    VARCHAR(30) NOT NULL DEFAULT 'exec_leg_ret',  -- 채점에 쓸 결과 라벨 컬럼

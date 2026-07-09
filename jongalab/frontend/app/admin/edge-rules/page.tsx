@@ -5,6 +5,7 @@ import { Loader2, Rocket, Archive, ShieldCheck, Info } from "lucide-react";
 import type { EdgeRule } from "@/types";
 import {
   familyMeta,
+  roleMeta,
   fmtPct,
   retTone,
   TONE_TEXT,
@@ -225,6 +226,7 @@ function Section({
 function RuleRow({ rule, action }: { rule: EdgeRule; action?: React.ReactNode }) {
   const s = rule.stats;
   const fam = familyMeta(rule.family);
+  const role = roleMeta(rule.role);
   return (
     <div className="flex flex-col gap-2.5 rounded-2xl border border-slate-100 bg-white p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-[#1c1c22]">
       <div className="min-w-0">
@@ -234,6 +236,9 @@ function RuleRow({ rule, action }: { rule: EdgeRule; action?: React.ReactNode })
             {STATUS_LABEL[rule.status]}
           </span>
           <span className="text-[10px] font-semibold text-slate-400">{fam.label}</span>
+          <span className={`rounded-full px-1.5 py-px text-[10px] font-bold ${role.badge}`} title={role.hint}>
+            {role.label}
+          </span>
           <span className="font-mono text-[10px] text-slate-400">{rule.name}</span>
         </div>
         <p className="mt-1 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{rule.description}</p>

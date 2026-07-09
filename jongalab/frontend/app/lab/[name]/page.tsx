@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { getEdgeRuleWithDailyByName } from "@/lib/api";
+import { getEdgeRuleWithDailyByName, getEdgeRuleMatched } from "@/lib/api";
 import { EdgeRuleDetailContent } from "@/components/EdgeRuleDetailContent";
 
 type Props = {
@@ -24,6 +24,7 @@ export default async function EdgeRulePage({ params }: Props) {
   const { name } = await params;
   const rule = await getEdgeRuleWithDailyByName(name, 60);
   if (!rule) notFound();
+  const matchedHistory = await getEdgeRuleMatched(rule.id, 30);
 
   return (
     <main className="min-h-screen bg-slate-100/70 dark:bg-[#101014]">
@@ -36,7 +37,7 @@ export default async function EdgeRulePage({ params }: Props) {
           실험실
         </Link>
 
-        <EdgeRuleDetailContent rule={rule} />
+        <EdgeRuleDetailContent rule={rule} matchedHistory={matchedHistory} />
       </div>
     </main>
   );
