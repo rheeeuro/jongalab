@@ -20,6 +20,41 @@ function hhmm(iso: string): string {
   return iso.slice(11, 16);
 }
 
+/** 표시 전용 병합 행 — 같은 날 반복된 거부/취소 주문을 한 줄로 묶는다. */
+interface Row {
+  o: Order; // 대표 주문(가장 최근 시도) — 사유·수량·가격은 이 행 기준
+  count: number;
+  firstAt: string; // 묶음 중 가장 이른 시도 시각
+}
+
+/**
+ * 하루치 주문(최신순)에서 거부/취소 반복을 (종목·방향·상태) 단위로 한 행에 병합한다.
+ * 하한가 매도 거부·IOC 소멸 취소가 15초 폴링마다 수백 행 쌓이는 표시 스팸 방지
+ * (2026-07-10 HLB 거부 238건, 07-07 한화오션 취소 55건). 체결/전송/스킵 행은 묶지 않는다.
+ * 행 위치는 가장 최근 시도 자리, 시간은 "첫~끝" 범위로 표시한다.
+ */
+function collapseRepeats(list: Order[]): Row[] {
+  const rows: Row[] = [];
+  const merged = new Map<string, Row>(); // stk_cd:side:status → 병합 행
+  for (const o of list) {
+    if (o.status !== "rejected" && o.status !== "canceled") {
+      rows.push({ o, count: 1, firstAt: o.created_at });
+      continue;
+    }
+    const key = `${o.stk_cd}:${o.side}:${o.status}`;
+    const row = merged.get(key);
+    if (row) {
+      row.count += 1;
+      row.firstAt = o.created_at; // 최신순 순회라 뒤에 온 것이 더 이른 시각
+    } else {
+      const fresh = { o, count: 1, firstAt: o.created_at };
+      merged.set(key, fresh);
+      rows.push(fresh);
+    }
+  }
+  return rows;
+}
+
 function nowMonth(): string {
   const n = new Date();
   return `${n.getFullYear()}${String(n.getMonth() + 1).padStart(2, "0")}`;
@@ -125,10 +160,16 @@ export default async function HistoryPage({
             <p className="mb-2 px-1 text-sm font-semibold text-slate-500">{fmtDate(date)}</p>
             <div className="rounded-2xl bg-white shadow-sm dark:bg-slate-900">
               <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-                {list.map((o) => {
+                {collapseRepeats(list).map(({ o, count, firstAt }) => {
                   const buy = o.side === "buy";
                   const filled = o.status === "filled";
                   const skip = o.status === "skipped"; // 주문 행 없는 매수 스킵/차단 → 수량/가격 없음
+                  const label = STATUS_LABEL[o.status] ?? o.status;
+                  // 병합 행: 시간은 "첫~끝" 범위, 상태는 "거부 ×238" 형태
+                  const time =
+                    count > 1 && hhmm(firstAt) !== hhmm(o.created_at)
+                      ? `${hhmm(firstAt)}~${hhmm(o.created_at)}`
+                      : hhmm(o.created_at);
                   return (
                     <li key={`${skip ? "skip" : "order"}-${o.id}`} className="px-5 py-3.5">
                       {/* 주문 본문 — 미체결은 흐리게(기존 디자인). 사유는 상태 텍스트의 hover/탭 툴팁(ReasonTip). */}
@@ -150,12 +191,15 @@ export default async function HistoryPage({
                           <div className="min-w-0">
                             <p className="truncate font-semibold">{nm(o.stk_cd)}</p>
                             <p className="text-xs text-slate-400 tabular-nums">
-                              {hhmm(o.created_at)} ·{" "}
+                              {time} ·{" "}
                               {/* 미체결이면 상태 텍스트에 hover(데스크탑)/탭(모바일) 시 사유 툴팁 */}
                               {!filled && o.reason ? (
-                                <ReasonTip label={STATUS_LABEL[o.status] ?? o.status} reason={o.reason} />
+                                <ReasonTip label={label} reason={o.reason} />
                               ) : (
-                                (STATUS_LABEL[o.status] ?? o.status)
+                                label
+                              )}
+                              {count > 1 && (
+                                <span className="font-semibold text-slate-500 dark:text-slate-300"> ×{count}</span>
                               )}
                               {o.mode === "paper" ? " · 모의" : ""}
                             </p>

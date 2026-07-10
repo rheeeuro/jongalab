@@ -137,6 +137,11 @@ reconcile (20:00) · kt00018 잔고 vs 로컬 position 대조 → 드리프트 �
 홈(당일 손익·매수·보유·매수 프리뷰) · 모니터(워커 하트비트·활성 플랜) · 히스토리(월/일 주문) ·
 캘린더(월간 손익) · 설정(킬스위치·리스크 한도·블록리스트). 관리자 비밀번호 로그인(httpOnly 쿠키).
 
+**반복 거부/취소 표시 병합**: 히스토리 탭은 같은 날 (종목·방향·상태)가 같은 rejected/canceled 행을
+한 줄로 묶어 "거부 ×238 · 08:17~09:30"(횟수·시간범위)로 보여준다(`collapseRepeats`, 표시 전용 —
+API/DB·재시도 동작 무변경). 하한가 매도 거부(HLB 238건)·IOC 소멸 취소(한화오션 55건)가 15초 폴링마다
+수백 행 쌓이던 표시 스팸 대응. 15초 재시도 자체는 하한가 풀림 포착을 위해 의도적으로 유지한다.
+
 **미체결 사유**: 히스토리 탭은 `GET /orders` 응답의 `reason` 으로 체결 안 된 항목의 이유를 표시한다.
 - 거부(rejected)는 키움 거부 메시지(`audit_log.reject_reasons_by_order_ids` — buy/sell_rejected payload 의
   order_id↔resp.return_msg 매칭, 코드 래퍼 제거), 그 외(canceled/sent/intended)는 상태 기반 일반 사유.
