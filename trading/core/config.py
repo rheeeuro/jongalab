@@ -82,7 +82,10 @@ HARD_STOP_LOSS_PCT = float(os.getenv('HARD_STOP_LOSS_PCT', '2.0'))
 
 # ── 시드 배분기 튜닝 (core.seed_allocator) ──
 # 종목당 최대 투입 비율 — 시드 대비(고정금액 아님). 1.0 이상이면 사실상 무제한.
-SEED_MAX_NAME_PCT = float(os.getenv('SEED_MAX_NAME_PCT', '0.5'))
+# 2026-07-10 0.5→0.25: HLB 하한가 사건 — 그리디 재투입이 저가주 한 종목에 시드 35%를
+# 몰아줘 하한가 1방이 포트 -8%로 직결됐다. 하한가에선 손절이 불가하므로 노출 크기로만
+# 봉쇄 가능. 최악 단일 종목 하한가 손실을 시드의 -7.5%(0.25×-30%) 수준으로 제한한다.
+SEED_MAX_NAME_PCT = float(os.getenv('SEED_MAX_NAME_PCT', '0.25'))
 
 # ── 롤링 엣지 게이트 (core.regime_gate) — 최근 선정 종목의 점수 판별력으로 총 시드 축소 ──
 # 근거: 엣지가 레짐 의존적이라(봄엔 고점수 우세, 6월엔 역전) 역전 구간엔 자본을 덜 싣는다.

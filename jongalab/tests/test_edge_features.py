@@ -4,7 +4,7 @@
 """
 import pytest
 
-from core.edge_features import afternoon_ret, prog_buy_days, vol_ratio
+from core.edge_features import afternoon_ret, is_bio, prog_buy_days, vol_ratio
 
 TODAY = "2026-07-03"
 
@@ -93,3 +93,32 @@ def test_vol_ratio_insufficient_prior_returns_none():
 
 def test_vol_ratio_zero_today_returns_none():
     assert vol_ratio(_vols(0, 100, 100, 100, 100, 100), TODAY_YMD) is None
+
+
+# ── is_bio (veto_bio 용 바이오/제약 분류, 2026-07-10) ──
+
+def test_is_bio_by_sector():
+    # 키움 업종명 '제약' — HLB(코스닥)·셀트리온(코스피 의약품) 실측 케이스
+    assert is_bio("028300", "HLB", "제약") == 1
+    assert is_bio("068270", "셀트리온", "제약") == 1
+
+
+def test_is_bio_by_name_keyword():
+    # 코스닥 바이오벤처는 업종명이 '일반서비스'로 뭉뚱그려진다(실측) — 사명 키워드로 보완
+    assert is_bio("141080", "리가켐바이오", "일반서비스") == 1
+    assert is_bio("347850", "디앤디파마텍", "일반서비스") == 1
+    assert is_bio("207940", "삼성바이오로직스", "기타") == 1
+    assert is_bio("237690", "에스티팜", "일반서비스") == 1      # 접미 '팜'
+
+
+def test_is_bio_by_known_code():
+    # 업종명·키워드 둘 다 놓치는 알려진 신약개발주 — 코드 목록으로 보정
+    assert is_bio("196170", "알테오젠", "일반서비스") == 1
+    assert is_bio("196170_NX", "알테오젠", None) == 1           # NX 접미 정규화
+
+
+def test_is_bio_negative():
+    assert is_bio("005930", "삼성전자", "전기/전자") == 0
+    assert is_bio("105560", "KB금융", "금융") == 0
+    assert is_bio("041830", "인바디", "의료/정밀기기") == 0     # 의료기기는 veto 대상 아님
+    assert is_bio(None, None, None) == 0

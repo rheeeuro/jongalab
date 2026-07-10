@@ -163,6 +163,8 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     theme_strength FLOAT DEFAULT NULL COMMENT '소속 테마 당일 등락률 최대(%) — 비테마 NULL',
     frgn_exhaust_rate FLOAT DEFAULT NULL COMMENT '외인소진율(%) — ka10001 for_exh_rt',
     frgn_exhaust_chg FLOAT DEFAULT NULL COMMENT '직전 리포트 거래일 대비 외인소진율 변화(%p)',
+    is_bio TINYINT DEFAULT NULL COMMENT '바이오/제약 여부(선정 시점 파생 — core.edge_features.is_bio)',
+    market VARCHAR(10) DEFAULT NULL COMMENT '시장 구분(코스피/코스닥 — ka10100 marketName, 거래소→코스피 정규화)',
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 

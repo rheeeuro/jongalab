@@ -32,6 +32,44 @@ def prog_buy_days(supply_history: list) -> int | None:
     return sum(1 for d in supply_history if (d.get("prog_net_buy") or 0) > 0)
 
 
+# ── 바이오/제약 분류 (veto_bio rule 용, 2026-07-10 HLB 하한가 사건 대응) ──
+# 키움 업종명(upName)은 코스피 의약품·일부만 '제약'으로 주고, 코스닥 바이오벤처 상당수를
+# '일반서비스'로 뭉뚱그린다(알테오젠·디앤디파마텍 실측). 업종명 + 사명 키워드 + 알려진 예외
+# 코드의 3단 판별로 커버리지를 메운다. 오탐(비바이오→바이오)의 비용은 매수 1건 스킵이라
+# 작으므로 재현율(신약주를 놓치지 않기)을 우선한다.
+_BIO_SECTORS = frozenset({"제약"})
+_BIO_NAME_KEYWORDS = (
+    "바이오", "제약", "약품", "파마", "테라퓨틱스", "세라퓨틱스", "생명과학", "메디",
+)
+_BIO_NAME_SUFFIXES = ("팜",)  # 에스티팜 등. 접두는 오탐(팜스토리 등)이라 접미만 본다.
+# 업종명·키워드 둘 다 놓치는 알려진 신약개발주 — 발견되는 대로 여기에 추가한다.
+_BIO_CODES = frozenset({
+    "196170",  # 알테오젠
+    "039200",  # 오스코텍
+    "087010",  # 펩트론
+    "310210",  # 보로노이
+})
+
+
+def is_bio(code: str | None, name: str | None, sector: str | None) -> int:
+    """바이오/제약(임상·허가 등 오버나이트 바이너리 이벤트 리스크) 종목이면 1, 아니면 0.
+
+    종가베팅은 오버나이트 보유 전략인데 하한가에선 손절이 물리적으로 불가하므로,
+    이벤트 밀도가 높은 바이오를 제외하는 veto_bio 계열 rule(전면/코스닥만)이 이 컬럼을 참조한다.
+    """
+    base = (code or "").split("_")[0].split(".")[0]
+    if base in _BIO_CODES:
+        return 1
+    if (sector or "").strip() in _BIO_SECTORS:
+        return 1
+    nm = (name or "").strip()
+    if any(k in nm for k in _BIO_NAME_KEYWORDS):
+        return 1
+    if nm.endswith(_BIO_NAME_SUFFIXES):
+        return 1
+    return 0
+
+
 def vol_ratio(daily_volumes: list[tuple[str, int]], today: str, window: int = 20) -> float | None:
     """당일 거래량 ÷ 직전 window 일 평균 거래량.
 

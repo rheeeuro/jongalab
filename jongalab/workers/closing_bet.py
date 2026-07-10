@@ -18,7 +18,7 @@ from core.trading_engine import (
     AnalysisEngine,
 )
 from core.config import EDGE_SELECTION_MODE
-from core.edge_features import afternoon_ret, prog_buy_days, vol_ratio
+from core.edge_features import afternoon_ret, is_bio, prog_buy_days, vol_ratio
 from core.repository.stock_report import (
     save_stock_reports,
     get_recent_report_codes,
@@ -59,6 +59,9 @@ class ClosingBetStrategy:
         self._feat: dict[str, dict] = {}
         # 종목코드 → 소속 테마 당일 등락률 최대값(_fetch_watchlist_sectors 에서 구축)
         self._theme_strength: dict[str, float] = {}
+        # 종목코드 → 시장 구분(코스피/코스닥) — _find_sector 의 ka10100 응답에서 함께 캡처
+        # (추가 API 콜 없음). veto_bio_kosdaq rule 이 daily_stock_report.market 으로 참조한다.
+        self._market: dict[str, str] = {}
         # 거래대금 순위 API에서 시장별 TOP_N_BY_VALUE 안에 들어온 종목.
         # 테마 보너스는 이 유동성 상위권과 교차할 때만 부여한다.
         self._top_value_codes: set[str] = set()
@@ -404,6 +407,9 @@ class ClosingBetStrategy:
                     round(fer - prev_fer, 2)
                     if fer is not None and prev_fer is not None else None
                 ),
+                # F7 종목 리스크 속성 — veto_bio 계열 rule 이 선정 직전 이 컬럼들로 제외한다.
+                "is_bio": is_bio(code, c.name, c.sector),
+                "market": self._market.get(code),  # 코스피/코스닥 (미확인 시 NULL=veto 미적용)
             })
 
         # 선정 전 매매 후보 풀(음전 제외)에 뉴스 LLM 라벨을 붙여 veto 가 활용할 수 있게 한다.
@@ -652,6 +658,10 @@ class ClosingBetStrategy:
         code_base = code.split("_")[0]
         try:
             info = self.api.get_stock_detail_info(code_base)
+            # 같은 응답에서 시장 구분도 캡처(키움은 코스피를 '거래소'로 준다 → 정규화)
+            market = (info.get("marketName") or "").strip()
+            if market:
+                self._market[code_base] = "코스피" if market == "거래소" else market
             up_name = info.get("upName", "").strip()
             if up_name:
                 return up_name

@@ -16,7 +16,8 @@ ROLES: tuple[str, ...] = ("selector", "veto", "benchmark")
 
 # 도메인(family) — 가설이 어떤 데이터 축을 보는가. 역할과 독립(예: 수급 도메인의 veto).
 FAMILIES: tuple[str, ...] = (
-    "f1_news", "f2_global", "f3_nxt", "f4_laggard", "f5_supply", "f6_ah", "control",
+    "f1_news", "f2_global", "f3_nxt", "f4_laggard", "f5_supply", "f6_ah", "f7_risk",
+    "control",
 )
 
 # 구 체계 폴백 — role 컬럼 도입(sql/15) 전에는 family 가 역할을 겸했다. 마이그레이션 전
@@ -55,6 +56,8 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     # F5 수급 구조·테마 피처 (2026-07-05) — closing_bet 선정 시점 수집
     "foreign_brokers_buying", "afternoon_ret", "vol_ratio", "prog_buy_days",
     "first_seen", "theme_strength", "frgn_exhaust_rate", "frgn_exhaust_chg",
+    # F7 종목 리스크 속성 (2026-07-10) — 선정 시점 파생(edge_features.is_bio)·ka10100 캡처
+    "is_bio", "market",
 })
 
 _MARKET_PREFIX = "market."

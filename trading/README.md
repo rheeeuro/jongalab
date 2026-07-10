@@ -39,7 +39,7 @@ trading/
 │   ├── db.py                   # get_db(trading) / get_kiwoom_db / get_jongalab_db
 │   ├── risk_engine.py          # ⚠️ 게이트키핑: 킬스위치·일일한도·서킷브레이커
 │   ├── execution_engine.py     # ⚠️ 주문 사이징·집행·멱등키
-│   ├── seed_allocator.py       # 시드 배분(거래소별): 상위10 선정(점수순)·등가중 배분·최소투입 우선 그리디·종목당 시드50% 캡
+│   ├── seed_allocator.py       # 시드 배분(거래소별): 상위10 선정(점수순)·등가중 배분·최소투입 우선 그리디·종목당 시드 25% 캡(고가주 첫 1주만 캡×2 이내 예외 — 2026-07-10 HLB 하한가 사건으로 50%→25%, .env SEED_MAX_NAME_PCT)
 │   ├── regime_gate.py          # 롤링 엣지 게이트: 최근 선정종목 점수판별력(익일시가 상위½−하위½)이 역전이면 총 시드 축소
 │   ├── futures_gate.py         # 선물 환경 게이트(KRX·NXT): 매수시점 NQ+코스피선물(KRX=주간/NXT=야간) 하락 시 섹터별 차등 감액(반도체·IT 더, 방어주 덜)
 │   ├── kiwoom_order_client.py  # 키움 REST 직접 호출(kt10000~3 주문, kt00018 잔고, ka10074~6)
@@ -128,7 +128,8 @@ reconcile (20:00) · kt00018 잔고 vs 로컬 position 대조 → 드리프트 �
 | 미실행 감시(dead-man's switch) | `watchdog.py` + `audit_log` worker_done 마커 | 핵심 워커가 완료 시 마커를 남기고, watchdog(평일 09:35)가 마커 누락 시 텔레그램 경보 |
 
 튜닝 파라미터(`config.py`): `BUY_PULLBACK_PCT`(되돌림 매수), `STOP_BUFFER_PCT`(갭다운 버퍼),
-`TRAIL_PCT`(트레일링), `HARD_STOP_LOSS_PCT`(하드 손절).
+`TRAIL_PCT`(트레일링), `HARD_STOP_LOSS_PCT`(하드 손절), `SEED_MAX_NAME_PCT`(종목당 시드 캡,
+기본 0.25 — 하한가에선 손절이 물리적으로 불가하므로 단일 종목 최악 손실은 이 캡으로만 봉쇄된다).
 
 ---
 
