@@ -59,6 +59,15 @@ class StockReport(BaseModel):
     is_leader: bool = False
     is_theme_stock: bool = False
     content_score: float = 0.0
+    news_count: int = 0
+    news_unique_count: int = 0
+    news_pm_count: int = 0
+    news_first_today: bool = False
+    news_prior_avg: Optional[float] = None
+    news_summary: Optional[str] = None
+    news_sentiment: Optional[int] = None
+    news_catalyst: Optional[str] = None
+    news_headlines: List[str] = []
     score: float = 0.0
     reason: str = ""
     rank_no: int = 0

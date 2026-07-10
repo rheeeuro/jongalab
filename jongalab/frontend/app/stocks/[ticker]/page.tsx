@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import { ContentAnalysis, StockReport } from "@/types";
+import { ContentAnalysis, NewsMentionItem, StockReport } from "@/types";
 import { ContentCard } from "@/components/ContentCard";
 import { StockPriceBadge } from "@/components/StockPriceBadge";
 import { SentimentChart } from "@/components/SentimentChart";
 import { StockReportHistory } from "@/components/StockReportHistory";
+import { TodayNews } from "@/components/TodayNews";
 import { apiFetch } from "@/lib/api";
 import Link from "next/link";
 import { ArrowLeft, Sparkles } from "lucide-react";
@@ -47,6 +48,14 @@ async function getStockReports(ticker: string): Promise<StockReport[]> {
   return apiFetch(`/api/stock-report/history/${ticker}?limit=5`, []);
 }
 
+async function getTodayNews(ticker: string): Promise<NewsMentionItem[]> {
+  const res = await apiFetch<{ success: boolean; data: NewsMentionItem[] }>(
+    `/api/news/${ticker}`,
+    { success: false, data: [] },
+  );
+  return res.data ?? [];
+}
+
 export default async function StockDetailPage({
   params,
 }: {
@@ -54,12 +63,14 @@ export default async function StockDetailPage({
 }) {
   const resolvedParams = await Promise.resolve(params);
   const decodedTicker = decodeURIComponent(resolvedParams.ticker).toUpperCase();
-  const [stockName, contents, history, stockReports] = await Promise.all([
-    getStockName(decodedTicker),
-    getTickerContents(decodedTicker),
-    getStockHistory(decodedTicker),
-    getStockReports(decodedTicker),
-  ]);
+  const [stockName, contents, history, stockReports, todayNews] =
+    await Promise.all([
+      getStockName(decodedTicker),
+      getTickerContents(decodedTicker),
+      getStockHistory(decodedTicker),
+      getStockReports(decodedTicker),
+      getTodayNews(decodedTicker),
+    ]);
 
   const hasName = stockName !== decodedTicker;
 
@@ -97,41 +108,45 @@ export default async function StockDetailPage({
           </p>
         </header>
 
-        {contents.length > 0 ? (
-          <div className="space-y-8">
-            <section className="rounded-3xl bg-white p-5 dark:bg-slate-900/60 sm:p-6">
-              <h2 className="mb-4 text-lg font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-                감성 · 주가 흐름
-              </h2>
-              <SentimentChart
-                data={contents}
-                history={history}
-                displayName={stockName}
-              />
-            </section>
+        <div className="space-y-8">
+          <TodayNews items={todayNews} />
 
-            <StockReportHistory reports={stockReports} />
+          {contents.length > 0 ? (
+            <>
+              <section className="rounded-3xl bg-white p-5 dark:bg-slate-900/60 sm:p-6">
+                <h2 className="mb-4 text-lg font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+                  감성 · 주가 흐름
+                </h2>
+                <SentimentChart
+                  data={contents}
+                  history={history}
+                  displayName={stockName}
+                />
+              </section>
 
-            <section>
-              <h2 className="mb-4 text-lg font-extrabold tracking-tight text-slate-900 dark:text-slate-100 sm:text-xl">
-                관련 콘텐츠
-              </h2>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-                {contents.map((item) => (
-                  <ContentCard key={item.id} item={item} />
-                ))}
-              </div>
-            </section>
-          </div>
-        ) : (
-          <div className="rounded-3xl bg-white p-12 text-center dark:bg-slate-900/60">
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              아직 <strong className="text-slate-900 dark:text-slate-100">{decodedTicker}</strong>에 대해
-              <br />
-              AI가 수집한 데이터가 없습니다.
-            </p>
-          </div>
-        )}
+              <StockReportHistory reports={stockReports} />
+
+              <section>
+                <h2 className="mb-4 text-lg font-extrabold tracking-tight text-slate-900 dark:text-slate-100 sm:text-xl">
+                  관련 콘텐츠
+                </h2>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+                  {contents.map((item) => (
+                    <ContentCard key={item.id} item={item} />
+                  ))}
+                </div>
+              </section>
+            </>
+          ) : (
+            <div className="rounded-3xl bg-white p-12 text-center dark:bg-slate-900/60">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                아직 <strong className="text-slate-900 dark:text-slate-100">{decodedTicker}</strong>에 대해
+                <br />
+                AI가 수집한 데이터가 없습니다.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </main>
   );

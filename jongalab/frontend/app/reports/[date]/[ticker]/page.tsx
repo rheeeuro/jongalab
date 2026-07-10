@@ -2,6 +2,7 @@ import { StockReportDetail, SupplyHistoryItem } from "@/types";
 import { StockPriceBadge } from "@/components/StockPriceBadge";
 import { CandlestickChart } from "@/components/CandlestickChart";
 import { apiFetch } from "@/lib/api";
+import { splitHeadlineUrl } from "@/lib/news";
 import { Metadata } from "next";
 import Link from "next/link";
 import {
@@ -644,15 +645,29 @@ export default async function StockReportPage({
               )}
               {r.news_headlines && r.news_headlines.length > 0 && (
                 <ul className="space-y-2">
-                  {r.news_headlines.map((h, i) => (
-                    <li
-                      key={i}
-                      className="flex gap-2 text-sm text-slate-600 dark:text-slate-400"
-                    >
-                      <span className="text-emerald-500 shrink-0">•</span>
-                      <span className="min-w-0">{h}</span>
-                    </li>
-                  ))}
+                  {r.news_headlines.map((h, i) => {
+                    const { text, url } = splitHeadlineUrl(h);
+                    return (
+                      <li
+                        key={i}
+                        className="flex gap-2 text-sm text-slate-600 dark:text-slate-400"
+                      >
+                        <span className="text-emerald-500 shrink-0">•</span>
+                        {url ? (
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="min-w-0 break-words hover:text-emerald-600 hover:underline dark:hover:text-emerald-400"
+                          >
+                            {text}
+                          </a>
+                        ) : (
+                          <span className="min-w-0 break-words">{text}</span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

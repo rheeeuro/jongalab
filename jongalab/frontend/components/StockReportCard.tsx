@@ -126,13 +126,20 @@ export function StockReportCard({
       </div>
 
       <div className="mt-3 flex items-center justify-between">
-        <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
-            GRADE_TONE[r.supply_grade] || GRADE_TONE.D
-          }`}
-        >
-          수급{r.supply_grade}
-        </span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span
+            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+              GRADE_TONE[r.supply_grade] || GRADE_TONE.D
+            }`}
+          >
+            수급{r.supply_grade}
+          </span>
+          {(r.news_count ?? 0) > 0 && (
+            <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+              뉴스 {r.news_count}
+            </span>
+          )}
+        </div>
         <div className="text-right tabular-nums">
           <span className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">
             {r.score.toFixed(0)}

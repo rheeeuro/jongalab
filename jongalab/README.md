@@ -57,7 +57,7 @@ jongalab/
 `weight_tuning`(주간 GPT 제안) · `edge_rule`(가설 원장 CRUD·stats·일별 채점 edge_rule_daily) · `kis_token` · `kis_night_future` · `telegram_user`.
 
 ### `routers/` — 엔드포인트
-`admin`(인증) · `contents`(콘텐츠) · `news`(뉴스 재료 히트 `/api/news/heat`) · `market`(주가/지수) · `stock_report`(리포트·갭) ·
+`admin`(인증) · `contents`(콘텐츠) · `news`(뉴스 재료 히트 `/api/news/heat` + 종목별 당일 헤드라인 `/api/news/{ticker}` — 종목 상세 페이지용) · `market`(주가/지수) · `stock_report`(리포트·갭) ·
 `source`·`strategy_config`·`weight_tuning`·`telegram_user`(admin 전용) · `ticker`(조회 공개/수정 admin) ·
 `edge_rule`(가설 원장 — GET 스코어보드 공개(daily 는 matched 제외 스칼라만+최신 매칭 1일치 별도, `/{id}/matched?days=`(≤90)로 날짜별 매칭 종목 이력을 별도 제공 — 종목별 change_pct·selected 를 리포트에서 조인해 복기 맥락 포함), POST 등록/승격/강등만 admin. 등록 시 `title`(한글 카드 제목)·`description`(인과 근거) 필수, `family`(도메인)·`role`(selector/veto/benchmark, 기본 selector)은 edge_policy 레지스트리로 검증 — 같은 family 가설이 늘며 카드 구분이 안 되던 문제로 2026-07-06 title 컬럼 추가(NULL 이면 프론트가 name 슬러그 폴백). 승격 게이트는 `core/edge_policy.check_promotion` 단일 소스 — 미충족 시 409+사유, force 없음, 대조군 부재 시 fail-closed. 라우터는 월 승격 상한(2개)만 추가 검사).
 새 라우터는 `routers/` 에 만들고 `api.py` 의 `include_router` 로 등록한다.

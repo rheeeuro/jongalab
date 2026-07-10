@@ -170,6 +170,14 @@ export interface NewsHeatItem {
   last_at: string | null;
 }
 
+// 종목별 당일 뉴스 헤드라인 (/api/news/{ticker}, news_mention 원천)
+export interface NewsMentionItem {
+  headline: string;
+  source_url: string | null;
+  channel_name: string | null;
+  created_at: string | null;
+}
+
 export interface StockReportDetail {
   report: StockReport;
   content_analyses?: ContentAnalysisItem[];
