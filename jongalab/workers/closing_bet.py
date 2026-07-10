@@ -65,6 +65,9 @@ class ClosingBetStrategy:
         # 거래대금 순위 API에서 시장별 TOP_N_BY_VALUE 안에 들어온 종목.
         # 테마 보너스는 이 유동성 상위권과 교차할 때만 부여한다.
         self._top_value_codes: set[str] = set()
+        # ETF/ETN 상장 코드 셋(_load_excluded_codes 에서 구축) — 이름 키워드(EXCLUDE_KEYWORDS)는
+        # 운용사 리브랜딩(예: ARIRANG→PLUS)에 뚫리므로 코드 기반 제외가 1차, 키워드는 백업.
+        self._excluded_codes: set[str] = set()
 
     def run(self):
         logger.info("=" * 60)
@@ -76,6 +79,9 @@ class ClosingBetStrategy:
 
         # 0-1. 관심 섹터 동적 로드 (ka90001 + ka90002)
         self._fetch_watchlist_sectors()
+
+        # 0-2. ETF/ETN 상장 코드 셋 로드 (ka10099) — 유니버스 제외용
+        self._load_excluded_codes()
 
         # 1. Phase 1 — 사전 스크리닝 (13:00~)
         candidates = self._phase1_screening()
@@ -91,6 +97,26 @@ class ClosingBetStrategy:
         # 2. Phase 2 — 수급 정밀 분석 (14:30~)
         candidates = self._phase2_supply_analysis(candidates)
         logger.info(f"Phase 2 완료: {len(candidates)}개 후보")
+
+    # ── ETF/ETN 제외 코드 셋 ──
+    def _load_excluded_codes(self):
+        """ka10099 종목정보 리스트로 ETF/ETN 계열 상장 코드 전체를 수집한다.
+
+        mrkt_tp — 8: ETF, 60: ETN, 70: 손실제한 ETN, 90: 변동성 ETN.
+        조회 실패 시 경고만 남기고 계속한다(filter_basic 의 이름 키워드가 백업으로 동작).
+        """
+        for mrkt_tp, label in (("8", "ETF"), ("60", "ETN"),
+                               ("70", "손실제한 ETN"), ("90", "변동성 ETN")):
+            try:
+                data = self.api.get_stock_list(mrkt_tp=mrkt_tp)
+                codes = {item.get("code", "").split("_")[0]
+                         for item in data.get("list", [])} - {""}
+                self._excluded_codes |= codes
+                logger.info(f"제외 코드 로드: {label} {len(codes)}개")
+            except Exception as e:
+                logger.warning(f"제외 코드 로드 실패 ({label}, mrkt_tp={mrkt_tp}): {e}")
+            time.sleep(0.3)
+        logger.info(f"ETF/ETN 제외 코드 셋: 총 {len(self._excluded_codes)}개")
 
     # ── Phase 1: 스크리닝 ──
     def _phase1_screening(self) -> list[StockCandidate]:
@@ -111,6 +137,8 @@ class ClosingBetStrategy:
                     chg = self.engine.parse_float(item.get("flu_rt", "0"))
 
                     if code in seen_codes:
+                        continue
+                    if code in self._excluded_codes:  # ETF/ETN — 개별 시총 조회 전에 제외
                         continue
 
                     # 시가총액은 거래대금순위 API에 없으므로 개별 조회
@@ -141,7 +169,7 @@ class ClosingBetStrategy:
         for _, codes in self.strategy_cfg.WATCHLIST_SECTORS.items():
             for raw_code in codes:
                 code = raw_code.split("_")[0]
-                if code in seen_codes:
+                if code in seen_codes or code in self._excluded_codes:
                     continue
                 try:
                     info = self.api.get_stock_basic_info(code)
