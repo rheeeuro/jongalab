@@ -8,8 +8,8 @@ import { ROLE_META } from "@/lib/edge";
 
 // 이 화면은 읽기 전용 — 실전 투입/종료 등 관리는 /admin/edge-rules(관리자 인증)에서만 한다.
 const GROUPS: { status: "live" | "candidate" | "retired"; label: string; desc: string }[] = [
-  { status: "live", label: "실전 적용 중", desc: "실제 매매에 반영되는 전략" },
-  { status: "candidate", label: "검증 중", desc: "모의 채점만 — 실제 돈은 쓰지 않음" },
+  { status: "live", label: "적용 중", desc: "검증을 통과해 종목 선정에 반영되는 전략" },
+  { status: "candidate", label: "검증 중", desc: "모의 채점으로 성적을 쌓는 중" },
   { status: "retired", label: "종료", desc: "" },
 ];
 

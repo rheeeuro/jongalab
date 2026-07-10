@@ -9,7 +9,7 @@ export function EdgeSummaryStrip({ rules }: { rules: EdgeRule[] }) {
   const promo = rules.filter(isPromotionCandidate).length;
 
   const tiles: { label: string; value: number; accent: string }[] = [
-    { label: "실전 적용", value: live, accent: "text-emerald-600 dark:text-emerald-400" },
+    { label: "적용 중", value: live, accent: "text-emerald-600 dark:text-emerald-400" },
     { label: "검증 중", value: candidate, accent: "text-slate-700 dark:text-slate-200" },
     { label: "검증 통과", value: promo, accent: "text-rose-600 dark:text-rose-400" },
     { label: "종료", value: retired, accent: "text-slate-400 dark:text-slate-500" },

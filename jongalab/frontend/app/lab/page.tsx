@@ -30,7 +30,7 @@ export default async function EdgePage() {
             전략 실험실
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            매매 아이디어를 실제 시장 데이터로 검증하고, 검증을 통과한 전략만 실전에 씁니다.
+            매매 아이디어를 실제 시장 데이터로 검증하고, 검증을 통과한 전략만 종목 선정에 씁니다.
           </p>
         </header>
 
@@ -47,11 +47,11 @@ export default async function EdgePage() {
               각 전략의 조건을 적용해 &ldquo;정말 수익이 났는지&rdquo;를 자동으로 채점해 쌓습니다.
             </p>
             <p>
-              <b>검증 중</b>(회색)은 모의 채점만 하는 단계 — 실제 돈은 전혀 쓰지 않습니다.{" "}
-              <b className="text-emerald-600 dark:text-emerald-400">실전 적용</b>(초록)만 실제 매매에
+              <b>검증 중</b>(회색)은 모의 채점만 하는 단계입니다.{" "}
+              <b className="text-emerald-600 dark:text-emerald-400">적용 중</b>(초록)만 종목 선정에
               반영됩니다. 검증 중 전략이 충분한 횟수(40회 이상)를 쌓고 성적이 우연이라 보기 어려운
               수준이 되면 <b className="text-rose-600 dark:text-rose-400">검증 통과</b> 배지가 붙고,
-              관리자가 확인 후 실전에 투입합니다.
+              관리자가 확인 후 적용합니다.
             </p>
             <p>
               카드의 <b>평균 수익</b>은 세금·수수료를 뺀 회당 평균 수익률이고, <b>보수적 수익</b>은
@@ -59,7 +59,7 @@ export default async function EdgePage() {
               성적, 종목 선정 조건, 최근에 조건에 걸린 종목을 볼 수 있습니다.
             </p>
             <p className="text-slate-400 dark:text-slate-500">
-              전략의 실전 투입·종료는 관리자 페이지(전략 관리)에서만 가능합니다. 이 화면은 누구나
+              전략의 적용·종료는 관리자 페이지(전략 관리)에서만 가능합니다. 이 화면은 누구나
               볼 수 있지만 바꿀 수는 없습니다.
             </p>
           </div>

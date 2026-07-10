@@ -7,7 +7,7 @@ import type { EdgeRule } from '@/types';
 
 // ── 상태: candidate/live/retired → 쉬운 한국어 ──
 export const STATUS_LABEL: Record<string, string> = {
-  live: '실전 적용',
+  live: '적용 중',
   candidate: '검증 중',
   retired: '종료',
 };
@@ -19,8 +19,8 @@ export const STATUS_BADGE: Record<string, string> = {
 };
 
 export const STATUS_HELP: Record<string, string> = {
-  live: '실제 매매에 반영되는 전략입니다.',
-  candidate: '모의(페이퍼)로만 성적을 쌓는 중 — 실제 돈은 쓰지 않습니다.',
+  live: '검증을 통과해 종목 선정에 반영되는 전략입니다.',
+  candidate: '모의 채점으로만 성적을 쌓는 검증 단계입니다.',
   retired: '검증에 실패했거나 수명이 다해 더는 쓰지 않는 전략입니다.',
 };
 
@@ -55,7 +55,7 @@ export const ROLE_META: Record<string, { label: string; badge: string; hint: str
   benchmark: {
     label: '측정용',
     badge: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300',
-    hint: '매매에 쓰지 않고 성적 비교·측정에만 쓰는 기준선입니다',
+    hint: '종목 선정에 쓰지 않고 성적 비교·측정에만 쓰는 기준선입니다',
   },
 };
 
@@ -65,10 +65,10 @@ export function roleMeta(role: string) {
 
 // ── 성적 지표: 쉬운 라벨 + 도움말 ──
 export const STAT_META = {
-  n: { label: '검증 횟수', help: '이 전략 조건에 걸린 종목을 채점한 누적 횟수(종목×일). 40회를 넘어야 실전 투입을 검토합니다.' },
+  n: { label: '검증 횟수', help: '이 전략 조건에 걸린 종목을 채점한 누적 횟수(종목×일). 40회를 넘어야 적용을 검토합니다.' },
   mean_net: { label: '평균 수익', help: '조건에 걸린 종목을 다음날 팔았다고 가정한 회당 평균 수익률. 세금·수수료 등 거래비용(0.25%)을 뺀 값입니다.' },
   win_rate: { label: '성공률', help: '수익이 난 비율. 단, 성공률보다 평균 수익이 더 중요합니다(한 번의 큰 손실이 여러 번의 작은 수익을 지울 수 있음).' },
-  ci_low: { label: '보수적 수익', help: '운이 나쁜 경우까지 감안한 수익 하한 추정치(통계적 신뢰구간). 이 값이 0%보다 커야 "우연이 아니다"라고 보고 실전 투입 조건을 충족합니다.' },
+  ci_low: { label: '보수적 수익', help: '운이 나쁜 경우까지 감안한 수익 하한 추정치(통계적 신뢰구간). 이 값이 0%보다 커야 "우연이 아니다"라고 보고 적용 조건을 충족합니다.' },
   worst_low_ret: { label: '최악 하락', help: '조건에 걸렸던 종목이 다음날 장중 기록한 가장 큰 하락률 — 이 전략의 최악의 날입니다.' },
 } as const;
 
@@ -79,9 +79,9 @@ export const EXIT_LABEL_TEXT: Record<string, string> = {
   next_low_ret: '다음날 최저가 기준(최악 가정)',
   next_close_ret: '다음날 종가까지 들고간다고 가정',
   nxt_open_ret: '다음날 아침 8시(NXT 프리마켓)에 판다고 가정',
-  gap_nxt_pct: '실매매 NXT 청산창 기준',
-  gap_krx_pct: '실매매 KRX 청산창 기준',
-  exec_leg_ret: '실제 매도 시간 기준(NXT 19:50→08:03 / KRX 15:20→09:03)',
+  gap_nxt_pct: 'NXT 청산창 시각 기준',
+  gap_krx_pct: 'KRX 청산창 시각 기준',
+  exec_leg_ret: '청산창 시각 기준(NXT 19:50→08:03 / KRX 15:20→09:03)',
 };
 
 export function exitLabelText(label: string): string {
