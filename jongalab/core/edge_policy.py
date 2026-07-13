@@ -87,7 +87,8 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
 
     rule: stats 가 최신으로 갱신된 rule dict. control_rules: role=benchmark 인 live rule 목록.
     반환: {"eligible": bool, "stat_reasons": [...], "exec_reasons": [...]}
-      - stat_reasons: 표본·신뢰구간·대조군 우위 미충족 사유(veto·benchmark 는 면제)
+      - stat_reasons: selector 는 표본·신뢰구간·대조군 우위, veto 는 최소 실익 게이트
+        (거래일 수 + 제외 종목 평균 음수) 미충족 사유(benchmark 는 면제)
       - exec_reasons: 선정 시점 실행 불가 사유(benchmark 는 면제 — 선정에 안 쓰므로)
     월 승격 상한은 시점 의존 운영 제약이라 여기 넣지 않고 라우터가 별도 검사한다.
     """
@@ -96,8 +97,8 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
     stat_reasons: list[str] = []
     exec_reasons: list[str] = []
 
-    # 통계 게이트 — 수익 가설(selector)만. veto 는 reduce-only(기대값 검증 대상 아님),
-    # benchmark 는 실탄이 아니라 기준선 교체라 면제.
+    # 통계 게이트 — selector 는 기대값 전체 검증, benchmark 는 실탄이 아니라 기준선 교체라 면제.
+    # veto 는 아래 별도의 최소 실익 게이트만 적용한다.
     if role == "selector":
         n = stats.get("n") or 0
         ci_low = stats.get("ci_low")
@@ -125,6 +126,24 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
         elif mean_net is None or mean_net < max(control_means):
             stat_reasons.append(
                 f"대조군 우위 미충족: mean_net={mean_net} < control 최고={max(control_means)}"
+            )
+
+    # veto 최소 실익 게이트 — reduce-only 라 selector 급 검증(CI·대조군)은 요구하지 않지만,
+    # 완전 면제하면 등록 당일 표본 몇 개로도 '승격 후보' 알림이 매일 반복된다
+    # (2026-07-13 veto_bio 사례: 1거래일 n=3, 제외 종목 평균 +0.01%인데 eligible).
+    # 거래일이 쌓이고, 제외했을 종목 평균이 음수(제외가 실제로 손실을 걸러냈다는 증거)여야 후보.
+    elif role == "veto":
+        n_days = stats.get("n_days") or 0
+        if n_days < PROMO_MIN_DAYS:
+            stat_reasons.append(
+                f"거래일 부족: n_days={n_days} < {PROMO_MIN_DAYS} — veto 도 실익을 재려면 "
+                "제외 표본이 여러 거래일 쌓여야 합니다"
+            )
+        mean_net = stats.get("mean_net")
+        if mean_net is None or mean_net >= 0:
+            stat_reasons.append(
+                f"실익 미입증: 제외 종목 평균순수익 mean_net={mean_net}(<0 필요 — "
+                "제외 대상이 평균적으로 손실이어야 veto 이득)"
             )
 
     # 실행 가능성 게이트 — live 는 실탄이므로 선정 시점에 실제 동작해야 한다(benchmark 면제).

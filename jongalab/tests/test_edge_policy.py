@@ -141,14 +141,47 @@ def test_selector_blocked_on_non_executable_predicate():
 
 # ── 승격 게이트: veto / benchmark ──
 
-def test_veto_skips_stat_gates_but_requires_executable():
-    # veto 는 reduce-only 라 통계 게이트 면제 — 단 선정 시점 실행은 가능해야 한다.
-    # role 분리 후 veto 는 도메인 family(f1_news 등) + role='veto' 로 표현된다.
-    ok_rule = _rule(family="f1_news", role="veto", stats=None,
-                    predicate=[{"col": "news_sentiment", "op": "<=", "value": 30}])
-    assert check_promotion(ok_rule, [])["eligible"]
+# veto 실익 입증 통계 — 거래일 충족 + 제외 종목 평균이 음수(제외가 손실을 걸러냄).
+GOOD_VETO_STATS = {"n": 12, "n_days": 11, "mean_net": -0.8, "ci_low": -2.1}
 
-    dead_rule = _rule(family="f3_nxt", role="veto", stats=None,
+
+def test_veto_eligible_with_benefit_stats_and_executable():
+    # veto 는 selector 급 검증(min_sample·CI·대조군)은 면제 — 대조군 없이도, ci_low 가
+    # 음수여도 실익 게이트(n_days + mean_net<0)와 실행 가능성만 충족하면 승격 후보.
+    ok_rule = _rule(family="f1_news", role="veto", stats=GOOD_VETO_STATS,
+                    predicate=[{"col": "news_sentiment", "op": "<=", "value": 30}])
+    gate = check_promotion(ok_rule, [])
+    assert gate["eligible"] and gate["stat_reasons"] == [] and gate["exec_reasons"] == []
+
+
+def test_veto_blocked_without_benefit_evidence():
+    # veto_bio 사례(2026-07-13): 등록 당일 1거래일 n=3, 제외 종목 평균 +0.01% —
+    # 완전 면제였다면 매일 '승격 후보' 알림. 거래일 부족 + 실익 미입증 둘 다 걸려야 한다.
+    day_one = _rule(family="f7_risk", role="veto",
+                    stats={"n": 3, "n_days": 1, "mean_net": 0.012, "ci_low": -1.541},
+                    predicate=[{"col": "is_bio", "op": "==", "value": 1}])
+    gate = check_promotion(day_one, [])
+    assert not gate["eligible"]
+    assert any("거래일 부족" in r for r in gate["stat_reasons"])
+    assert any("실익 미입증" in r for r in gate["stat_reasons"])
+
+    # 거래일은 쌓였어도 제외 종목이 평균 상승이면(veto 가 이득을 걸러낸 증거 없음) 차단.
+    no_benefit = _rule(family="f7_risk", role="veto",
+                       stats={"n": 30, "n_days": 12, "mean_net": 0.4, "ci_low": -0.5},
+                       predicate=[{"col": "is_bio", "op": "==", "value": 1}])
+    gate2 = check_promotion(no_benefit, [])
+    assert not gate2["eligible"]
+    assert any("실익 미입증" in r for r in gate2["stat_reasons"])
+
+    # stats 미평가(None)도 fail-closed.
+    gate3 = check_promotion(
+        _rule(family="f1_news", role="veto", stats=None,
+              predicate=[{"col": "news_sentiment", "op": "<=", "value": 30}]), [])
+    assert not gate3["eligible"]
+
+
+def test_veto_blocked_on_non_executable_predicate():
+    dead_rule = _rule(family="f3_nxt", role="veto", stats=GOOD_VETO_STATS,
                       predicate=[{"col": "nxt_gap_pct", "op": ">=", "value": 5}])
     gate = check_promotion(dead_rule, [])
     assert not gate["eligible"] and gate["exec_reasons"]
