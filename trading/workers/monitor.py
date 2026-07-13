@@ -57,10 +57,20 @@ def in_window(now: datetime) -> bool:
     return (8, 0) <= (now.hour, now.minute) <= (9, 30)
 
 
-def sell_venue(now: datetime) -> str:
-    """매도 거래소: KRX 정규장(09:00~15:30)이면 KRX(시장가), 그 외 NXT 시간대면 NXT(최유리IOC)."""
+def resolve_sell_venue(engine: ExecutionEngine, stk_cd: str, now: datetime) -> str | None:
+    """매도 거래소 결정. None 이면 지금은 이 종목을 매도할 수 없음(보류).
+
+      - KRX 정규장(09:00~15:30): 항상 KRX(시장가).
+      - 그 외(개장 전 NXT 시간대): NXT 거래 가능 종목만 NXT(최유리IOC).
+        NXT 불가 종목은 NXT 주문이 키움에서 **거부**되고(비-NXT 종목의 NXT 명시 거부),
+        KRX 는 아직 개장 전이라 매도할 곳이 없다 → None(09:00 KRX 개장까지 보류).
+
+    is_nxt_enabled 는 매도 발동 시점에만 조회한다(폴링마다 X). 조회 실패 시 False(보수적)라
+    잠깐 보류될 수 있으나, 다음 폴링(15s)에서 재조회되어 자가 복구된다."""
     hm = (now.hour, now.minute)
-    return "KRX" if (9, 0) <= hm < (15, 30) else "NXT"
+    if (9, 0) <= hm < (15, 30):
+        return "KRX"
+    return "NXT" if engine.data.is_nxt_enabled(stk_cd) else None
 
 
 def in_open_warmup(now: datetime) -> bool:
@@ -120,8 +130,15 @@ def check_once(engine: ExecutionEngine) -> None:
             # 1) 하드 손절(칼손절): 평단 대비 -HARD_STOP_LOSS_PCT% 이하면 plan 유무 무관 전량매도
             hard_stop = round(pos["avg_price"] * (1 - HARD_STOP_LOSS_PCT / 100))
             if cur <= hard_stop:
+                venue = resolve_sell_venue(engine, stk_cd, datetime.now())
+                if venue is None:
+                    # NXT 불가 종목 + KRX 개장 전: 매도할 곳이 없어 보류(NXT 주문은 거부됨).
+                    # 09:00 KRX 개장 후 폴링에서 KRX 시장가로 청산된다.
+                    logger.info("하드손절 발동이나 매도 보류 [%s] @%d (선 %d) — NXT 불가, 09:00 KRX 개장 후 청산",
+                                stk_cd, cur, hard_stop)
+                    continue
                 sold = engine.execute_sell(trade_date, stk_cd, pos["qty"], cur,
-                                           dmst_stex_tp=sell_venue(datetime.now()), tag="hardstop")
+                                           dmst_stex_tp=venue, tag="hardstop")
                 audit_log.append("monitor_hardstop", stk_cd, {
                     "cur": cur, "hard_stop": hard_stop, "avg_price": pos["avg_price"],
                     "qty": pos["qty"], "pct": HARD_STOP_LOSS_PCT, "sent": bool(sold)})
@@ -140,8 +157,13 @@ def check_once(engine: ExecutionEngine) -> None:
                 continue
             # 2) 스탑/저가이탈: settle_plan 의 stop_price 이하면 잔량 전량매도
             if plan and cur <= plan["stop_price"]:
+                venue = resolve_sell_venue(engine, stk_cd, datetime.now())
+                if venue is None:
+                    logger.info("스탑 발동이나 매도 보류 [%s] @%d (선 %d) — NXT 불가, 09:00 KRX 개장 후 청산",
+                                stk_cd, cur, plan["stop_price"])
+                    continue
                 sold = engine.execute_sell(plan["trade_date"], stk_cd, pos["qty"], cur,
-                                           dmst_stex_tp=sell_venue(datetime.now()), tag="stop")
+                                           dmst_stex_tp=venue, tag="stop")
                 audit_log.append("monitor_stop", stk_cd, {
                     "cur": cur, "stop": plan["stop_price"], "qty": pos["qty"], "sent": bool(sold)})
                 if sold and _exit_confirmed(stk_cd):
