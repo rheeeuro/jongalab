@@ -19,6 +19,7 @@ wheels/
 mariadb_data/
 ollama_data/
 ecosystem.config.js
+ecosystem.config.js.bak
 docker-compose.yml
 stock_session.*
 .gap_check_pending.json

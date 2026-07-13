@@ -25,8 +25,9 @@ except Exception: print("0")
 # 변경 파일 중복 제거
 mapfile -t FILES < <(sort -u "$PENDING")
 
-NEED_WEB=0; NEED_API=0; NEED_TG=0; NEED_KIWOOM=0; NEED_TAPI=0; NEED_TWEB=0; NEED_ECOSYSTEM=0
+NEED_WEB=0; NEED_API=0; NEED_TG=0; NEED_SCHED=0; NEED_KIWOOM=0; NEED_TAPI=0; NEED_TWEB=0; NEED_ECOSYSTEM=0
 declare -A CRON_HIT=()
+declare -A SCHED_JOB_HIT=()   # jongalab-scheduler 가 spawn 하는 잡(매 실행 새 프로세스 — 재시작 불필요)
 
 for f in "${FILES[@]}"; do
   case "$f" in
@@ -40,11 +41,18 @@ for f in "${FILES[@]}"; do
     */jongalab/api.py|*/jongalab/routers/*.py)    NEED_API=1 ;;
   esac
   case "$f" in
-    */jongalab/core/*.py)                         NEED_API=1; NEED_TG=1 ;;   # core 는 api·telegram 공유
+    */jongalab/core/*.py)                         NEED_API=1; NEED_TG=1; NEED_SCHED=1 ;;   # core 는 api·telegram·scheduler 공유
     */jongalab/workers/telegram_listener.py)      NEED_TG=1 ;;
-    */jongalab/workers/youtube_collector.py)      CRON_HIT[jongalab-collector]=1 ;;
-    */jongalab/workers/gap_check.py)              CRON_HIT[jongalab-gap-check]=1; CRON_HIT[jongalab-gap-check-retry]=1 ;;  # 같은 스크립트(--retry)
-    */jongalab/workers/weight_tuner.py)           CRON_HIT[jongalab-weight-tuner]=1 ;;
+    */jongalab/workers/scheduler.py)              NEED_SCHED=1 ;;   # 잡 정의/스케줄 변경은 재시작해야 반영
+    # 스케줄러 관리 잡(2026-07-13 1단계 이관) — 매 실행 새 프로세스라 재시작 불필요
+    */jongalab/workers/youtube_collector.py|\
+    */jongalab/workers/cleanup_content.py|\
+    */jongalab/workers/news_ticker_seed.py|\
+    */jongalab/workers/outcome_backfill.py|\
+    */jongalab/workers/after_hours_labels.py|\
+    */jongalab/workers/rule_evaluator.py|\
+    */jongalab/workers/weight_tuner.py)           SCHED_JOB_HIT["$(basename "$f")"]=1 ;;
+    */jongalab/workers/gap_check.py)              CRON_HIT[jongalab-gap-base-krx]=1; CRON_HIT[jongalab-gap-base-nxt]=1; CRON_HIT[jongalab-gap-check-nxt]=1; CRON_HIT[jongalab-gap-label-nxt]=1; CRON_HIT[jongalab-gap-check-krx]=1 ;;  # 같은 스크립트(모드 플래그)
     */jongalab/workers/closing_bet.py)            CRON_HIT[jongalab-closing-bet]=1 ;;
   esac
   # ── kiwoom (데이터 전용 서버) ──
@@ -179,9 +187,23 @@ if [ "$NEED_TG" = "1" ]; then
   fi
 fi
 
+# 3-1) 통합 잡 스케줄러(상시) — 잡 정의·core 변경 반영
+if [ "$NEED_SCHED" = "1" ]; then
+  if is_online jongalab-scheduler; then
+    pm2 restart jongalab-scheduler >/dev/null 2>&1 && NOTES+=("✅ jongalab-scheduler 재시작")
+  else
+    NOTES+=("ℹ️ jongalab-scheduler 변경됨(앱이 online 아님 — 재시작 생략)")
+  fi
+fi
+
 # 4) cron 워커: 재시작 금지(다음 cron 실행 때 새 프로세스로 자동 반영)
 for app in "${!CRON_HIT[@]}"; do
   NOTES+=("⏰ $app 변경됨 — cron 워커라 재시작 안 함(다음 스케줄 실행 때 자동 반영)")
+done
+
+# 4-1) 스케줄러 관리 잡: 마찬가지로 재시작 불필요(다음 스케줄 실행 때 자동 반영)
+for w in "${!SCHED_JOB_HIT[@]}"; do
+  NOTES+=("⏰ $w 변경됨 — 스케줄러 관리 잡이라 재시작 불필요(다음 스케줄 실행 때 자동 반영)")
 done
 
 # 빌드 실패 처리: stop 을 막아 Claude 가 이어서 고치게 한다(루프 방지 가드 포함)

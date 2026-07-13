@@ -18,7 +18,7 @@ jongalab/
 ├── api.py            # FastAPI 진입점 — 라우터 등록(include_router)
 ├── core/             # 비즈니스 로직 + 데이터 접근(repository)
 ├── routers/          # HTTP 엔드포인트 핸들러
-├── workers/          # PM2 cron 백그라운드 잡
+├── workers/          # 백그라운드 잡 (통합 스케줄러 + PM2 cron — 아래 workers 절 참고)
 ├── sql/              # jongalab DB 스키마 (1.create_database → 2.create_table)
 └── frontend/         # Next.js 대시보드 (frontend/README.md 참고)
 ```
@@ -54,27 +54,39 @@ jongalab/
 `content`(콘텐츠 분석) · `news`(뉴스 속보 언급 `news_mention`) · `source`(채널) · `ticker`(기업명↔티커, 상장종목 벌크 시딩) · `stock_report`(종목일간리포트 — 리포트 저장·갭 체크·NXT 스냅샷·결과 백필) ·
 `sector_report`(주도 섹터) · `market_snapshot`(일 단위 시장 피처 — 지수·선물·VIX·환율, F2·레짐 연구용) · `trade_signal`(→ trading DB 매수신호 핸드오프, 멱등 upsert) ·
 `trade_result`(trading.audit_log 실현손익 읽기) · `strategy_config`(점수 가중치·임계값) ·
-`weight_tuning`(주간 GPT 제안) · `edge_rule`(가설 원장 CRUD·stats·일별 채점 edge_rule_daily) · `kis_token` · `kis_night_future` · `telegram_user`.
+`weight_tuning`(주간 GPT 제안) · `edge_rule`(가설 원장 CRUD·stats·일별 채점 edge_rule_daily) · `kis_token` · `kis_night_future` · `telegram_user` ·
+`job_run`(스케줄러 잡 실행 이력 — start/finish 기록, 잡별 최신/최근 조회, 재시작 sweep·60일 정리).
 
 ### `routers/` — 엔드포인트
 `admin`(인증) · `contents`(콘텐츠) · `news`(뉴스 재료 히트 `/api/news/heat` + 종목별 당일 헤드라인 `/api/news/{ticker}` — 종목 상세 페이지용) · `market`(주가/지수) · `stock_report`(리포트·갭) ·
-`source`·`strategy_config`·`weight_tuning`·`telegram_user`(admin 전용) · `ticker`(조회 공개/수정 admin) ·
+`source`·`strategy_config`·`weight_tuning`·`telegram_user`·`job_runs`(스케줄러 잡 실행 이력 `/api/job-runs` — admin '워커 현황' 페이지용)(admin 전용) · `ticker`(조회 공개/수정 admin) ·
 `edge_rule`(가설 원장 — GET 스코어보드 공개(daily 는 matched 제외 스칼라만+최신 매칭 1일치 별도, `/{id}/matched?days=`(≤90)로 날짜별 매칭 종목 이력을 별도 제공 — 종목별 change_pct·selected 를 리포트에서 조인해 복기 맥락 포함), POST 등록/승격/강등만 admin. 등록 시 `title`(한글 카드 제목)·`description`(인과 근거) 필수, `family`(도메인)·`role`(selector/veto/benchmark, 기본 selector)은 edge_policy 레지스트리로 검증 — 같은 family 가설이 늘며 카드 구분이 안 되던 문제로 2026-07-06 title 컬럼 추가(NULL 이면 프론트가 name 슬러그 폴백). 승격 게이트는 `core/edge_policy.check_promotion` 단일 소스 — 미충족 시 409+사유, force 없음, 대조군 부재 시 fail-closed. 라우터는 월 승격 상한(2개)만 추가 검사).
 새 라우터는 `routers/` 에 만들고 `api.py` 의 `include_router` 로 등록한다.
 
-### `workers/` — PM2 cron (스케줄은 루트 `ecosystem.config.js`)
+### `workers/` — 백그라운드 잡
+실행 계층은 둘이다 (2026-07-13 1단계 이관):
+- **`scheduler`(통합 잡 스케줄러, PM2 상시 앱 `jongalab-scheduler`)** — 저위험 cron 잡 7개
+  (아래 표에서 ⏰ 표시: collector·cleanup·seed·outcome_backfill·after_hours_labels·rule_evaluator·weight_tuner)를
+  cron 시각마다 **서브프로세스**(`uv run workers/<잡>.py`)로 spawn. 스케줄·타임아웃은
+  `workers/scheduler.py` 의 `JOBS` 가 소스 오브 트루스. 매 실행을 `job_run` 테이블에 기록하고
+  실패(exit≠0/타임아웃) 시 관리자 텔레그램 경보. misfire 유예를 넘긴 지각 실행은 스킵(창 민감 잡 보호),
+  `max_instances=1` 로 중복 실행 방지. 수동 1회 실행: `uv run workers/scheduler.py --once <잡>`.
+  잡 코드 변경은 다음 실행에 자동 반영(매 실행 새 프로세스), **`scheduler.py` 자체 변경은 재시작 필요**(배포 훅이 수행).
+- **PM2 cron**(스케줄은 루트 `ecosystem.config.js`) — 나머지: 상시(telegram)·창 민감/자금 인접
+  잡(gap_check·closing_bet·night_futures·token-refresh)과 trading 도메인 전체. 스케줄러 검증 후 단계 이관 예정.
+
 | 워커 | 스케줄 | 역할 |
 |---|---|---|
-| `youtube_collector` | 15분 | 채널 RSS → 자막 → Ollama 분석 → `content_analysis` |
+| ⏰ `youtube_collector` | 15분 | 채널 RSS → 자막 → Ollama 분석 → `content_analysis` |
 | `telegram_listener` | 상시 | Telethon 감시. **일반 채널**(platform=telegram)→ LLM 분석 → `content_analysis`. **뉴스 채널**(platform=news, 고빈도)→ LLM 없이 사전매칭 → `news_mention` |
-| `news_ticker_seed` | 일 07:30 (등록 시 1회) | 키움 ka10099(코스피/코스닥) → `ticker_dictionary` ACTIVE 업서트. 뉴스 사전매칭 커버리지용 |
-| `cleanup_content` | 매일 04:00 | `content_analysis` 3개월 + `news_mention` 14일 이전 행 삭제(테이블 비대화 방지) |
+| ⏰ `news_ticker_seed` | 일 07:30 (등록 시 1회) | 키움 ka10099(코스피/코스닥) → `ticker_dictionary` ACTIVE 업서트. 뉴스 사전매칭 커버리지용 |
+| ⏰ `cleanup_content` | 매일 04:00 | `content_analysis` 3개월 + `news_mention` 14일 이전 행 삭제(테이블 비대화 방지) |
 | `closing_bet` | 평일 08:30~20시(30분) | Phase 1/2 스크리닝 → Phase 1 진입 전 **ETF/ETN 코드 기반 제외**(ka10099 mrkt_tp 8/60/70/90 상장 리스트 → `_excluded_codes`, 2026-07-10 — 이름 키워드 `EXCLUDE_KEYWORDS` 는 ARIRANG→PLUS 같은 리브랜딩에 뚫려 백업으로 강등, 로드 실패 시 키워드만으로 동작) → `daily_stock_report`(Phase 2 **유니버스 전체** 저장) + `trade_signal`(selected만 핸드오프, `rule_names` 태깅) 적재. 저장은 **분석 컬럼만 upsert**(탈락 종목만 삭제) — 다른 워커가 같은 날 행에 쓴 관측 컬럼(19:50 NXT 스냅샷 등)을 20:00 이후 재실행이 지우지 않는다(2026-07-09, 이전 DELETE+INSERT 는 매일 소실시킴). Phase 2는 음전 후보도 정밀분석·저장해 rule_evaluator 연구 표본으로 쓰고, 실제 selected/핸드오프만 선정 레이어에서 음전 제외한다(2026-07-07). 정배열/신고가는 가점으로만 반영(2026-07-03 풀 확대). **선정 레이어**(`edge_selection`, `EDGE_SELECTION_MODE` 기본 `legacy`=음전 제외 후 점수 top-N)가 `selected`/핸드오프만 정하고 점수·rank_no·저장은 불변 — `hybrid`/`rules` 는 데이터 게이트+승인 후 전환(Phase 4). veto rule 은 전 모드에서 선정 직전 제외 — 바이오 veto 는 2026-07-10 HLB 하한가 사건으로 도입: `veto_bio`(전면 제외, sql/16)를 잠깐 live 로 뒀다가 사용자 판단(바이오 랠리 전망)으로 `veto_bio_kosdaq`(코스닥 바이오만, sql/17)와 함께 **둘 다 candidate** — 페이퍼 성적 비교 검증 후 관리자 API 승격 예정. 판별 컬럼은 선정 시점 파생 `is_bio`(edge_features)·`market`(ka10100 캡처) |
 | `gap_check` (`--base-krx`/`--base-nxt`/`--check-nxt`/`--label-nxt`/`--check-krx`) | 평일 15:20 / 19:50 / 08:03 / 08:06 / 09:03 | 실매매 청산 창과 동일 기준의 갭 측정. 15:20 KRX(top-10)·19:50 NXT 기준가를 state 로 수집(19:50 NXT 조회되는 종목=NXT 종목) → 익일 08:03 NXT 종목(`gap_nxt_*`), 09:03 KRX 종목(`gap_krx_*`) 확정 — 종목별로 자기 venue 창 하나만 채점. 기준가 미수집 시 리포트가 폴백(알림에 ≈ 표시). 텔레그램 알림은 09:03 확정 후 하루 1회. **19:50(`--base-nxt`)은 확장 관측**: 유니버스 전체에 KRX 확정 종가+NXT 현재가(종목당 2콜)를 붙여 `daily_stock_report` NXT 스냅샷(`krx_close_price`·`nxt_price_1950`·`nxt_gap_pct`·`nxt_after_value`·`nxt_listed`) UPDATE + `market_snapshot` 1행 upsert. **08:06(`--label-nxt`)은 엣지 연구 라벨**: 전일 유니버스 전체 NXT 상장 종목의 08:06 NXT 가격 → `nxt_open_price`·`nxt_open_ret`(앵커=KRX 확정 종가) UPDATE — 실매매 08:03(settle·check-nxt, top-10)과 시각·부하 완전 분리. 관측 확장은 매매 영향 0 |
-| `outcome_backfill` | 평일 09:30 | `daily_stock_report` 유니버스 전체에 **일봉 결과 라벨 4종**(`next_open_ret`·`next_high_ret`·`next_low_ret`·`next_close_ret` = 리포트일 종가→다음 거래일 시가/고가/저가/종가 등락률) + **실집행 통합 라벨**(`exec_leg_ret`·`exec_leg_venue`) 백필. `exec_leg_ret` 는 종목별 실제 청산 venue 기준(NXT: 전일 19:50→익일 08:03, KRX: 전일 15:20→익일 09:03)을 하나로 접은 evaluator 기본 라벨. 일봉은 같은 일봉 1회 조회에서 파생, 실집행 레그는 1분봉 첫 체결가 기준. ±35% 초과 아티팩트 스킵, 미완결분은 다음 실행에서 재시도. 실집행 레그는 `exec_leg_ret` 활성 rule 의 가장 이른 registered_at 이후만 대상(활성 rule 이 없으면 **건너뜀** — 과거 전체 분봉 백필 폭주 방지), NXT 시도 후 KRX 폴백 시 로그 기록 |
-| `after_hours_labels` | 평일 17:50 | 당일 유니버스 전체에 **시간외 반응 + 리스크 라벨** UPDATE(관측 컬럼 — closing_bet upsert 와 분리, 점수·매매 무영향). ① 시간외단일가 `ah_price`·`ah_flu_rt`·`ah_volume`(ka10087 — 세션 16~18시 **중**에만 값이 살아있어 17:50 스냅샷, 체결 0주는 NULL) + `ah_react`(시간외가 ÷ 당일 KRX 종가 −1%, 앵커=수정주가 일봉 — predicate 가 컬럼 간 비교를 못 해 파생으로 굽는 rule 용 컬럼) — 익일 갭 선행지표 ② 리스크 지표(악재 veto 연구, 전부 **T-1 확정치**라 선정 시점에 알 수 있던 값=누수 없음): `credit_remn_rt`(ka10013 신용 잔고율)·`short_wght`/`_5d`(ka10014 공매도 비중)·`lend_remn`/`lend_irds_5d`(ka20068 대차 잔고·5일 증감 합) ③ `exec_str`/`_5d`(ka10047 체결강도, KRX 마감 후 확정치) ④ `market_snapshot.ah_up3_cnt`/`ah_dn3_cnt`(ka10098 시간외 ±3% 급등/급락 종목 수 — 시장 분위기). 스냅샷 TR 특성상 과거 백필 불가 — 놓친 날은 NULL |
-| `rule_evaluator` | 평일 09:40 | **Edge Ledger 일별 채점(2-pass)** — pass1: 활성 rule(status≠retired)을 유니버스 전체 + `market_snapshot` 에 적용(`edge_predicate.evaluate`), `exit_label` 결과 수집 → `mean_net = 평균 − EDGE_COST_PCT` → `edge_rule_daily` upsert(catch-up: 라벨 미도래 날짜는 다음날 재시도, 14일 초과 시 n=0 sentinel 종결 — 실시간 라벨은 소급 불가라 영구 재시도 방지) + registered_at 이후 표본만으로 누적 stats 재계산(`n_days`=라벨 표본이 있는 거래일 수 포함). 채점 당시 미도래였던 `next_low_ret` 는 재시도 마감 전 날짜에 한해 matched 스냅샷에 소급 반영(worst_low_ret 복원 — exec_leg_ret 는 D+1, next_low_ret 는 D+2 에 채워지는 시차 보정). pass2: 전 rule stats 가 신선해진 뒤 `edge_policy.check_promotion`(라우터와 동일 게이트: selector 는 min_sample + **PROMO_MIN_DAYS=10 거래일** + ci_low>0 + live 대조군 우위 — 종목-일 n 은 같은 날 시장 무브로 상관되어 거래일 수가 실효 표본, veto 는 n_days≥10 + 제외 종목 mean_net<0 실익 게이트)으로 `stats.promo_eligible` 저장 + 텔레그램 알림 — 승격 후보(게이트 전체 충족) / 집행 설계 필요(통계·표본 충족이나 선정 시점 실행 불가 피처) / 강등 검토(live, 최근 30표본 mean_net<0). 전이는 관리자 API 수동, 매매 집행 없음 |
-| `weight_tuner` | 토 08:00 | 지난주 실현손익(단 `SCORE_LOGIC_MIN_DATE`=2026-07-07 이전 구 로직 주는 스킵) → GPT 가중치 제안 → backtest 검증: IMPROVES=pending(승인 대상) / 그 외=archived(비적용·표시용) + [건강지표] 로깅 |
+| ⏰ `outcome_backfill` | 평일 09:30 | `daily_stock_report` 유니버스 전체에 **일봉 결과 라벨 4종**(`next_open_ret`·`next_high_ret`·`next_low_ret`·`next_close_ret` = 리포트일 종가→다음 거래일 시가/고가/저가/종가 등락률) + **실집행 통합 라벨**(`exec_leg_ret`·`exec_leg_venue`) 백필. `exec_leg_ret` 는 종목별 실제 청산 venue 기준(NXT: 전일 19:50→익일 08:03, KRX: 전일 15:20→익일 09:03)을 하나로 접은 evaluator 기본 라벨. 일봉은 같은 일봉 1회 조회에서 파생, 실집행 레그는 1분봉 첫 체결가 기준. ±35% 초과 아티팩트 스킵, 미완결분은 다음 실행에서 재시도. 실집행 레그는 `exec_leg_ret` 활성 rule 의 가장 이른 registered_at 이후만 대상(활성 rule 이 없으면 **건너뜀** — 과거 전체 분봉 백필 폭주 방지), NXT 시도 후 KRX 폴백 시 로그 기록 |
+| ⏰ `after_hours_labels` | 평일 17:50 | 당일 유니버스 전체에 **시간외 반응 + 리스크 라벨** UPDATE(관측 컬럼 — closing_bet upsert 와 분리, 점수·매매 무영향). ① 시간외단일가 `ah_price`·`ah_flu_rt`·`ah_volume`(ka10087 — 세션 16~18시 **중**에만 값이 살아있어 17:50 스냅샷, 체결 0주는 NULL) + `ah_react`(시간외가 ÷ 당일 KRX 종가 −1%, 앵커=수정주가 일봉 — predicate 가 컬럼 간 비교를 못 해 파생으로 굽는 rule 용 컬럼) — 익일 갭 선행지표 ② 리스크 지표(악재 veto 연구, 전부 **T-1 확정치**라 선정 시점에 알 수 있던 값=누수 없음): `credit_remn_rt`(ka10013 신용 잔고율)·`short_wght`/`_5d`(ka10014 공매도 비중)·`lend_remn`/`lend_irds_5d`(ka20068 대차 잔고·5일 증감 합) ③ `exec_str`/`_5d`(ka10047 체결강도, KRX 마감 후 확정치) ④ `market_snapshot.ah_up3_cnt`/`ah_dn3_cnt`(ka10098 시간외 ±3% 급등/급락 종목 수 — 시장 분위기). 스냅샷 TR 특성상 과거 백필 불가 — 놓친 날은 NULL |
+| ⏰ `rule_evaluator` | 평일 09:40 | **Edge Ledger 일별 채점(2-pass)** — pass1: 활성 rule(status≠retired)을 유니버스 전체 + `market_snapshot` 에 적용(`edge_predicate.evaluate`), `exit_label` 결과 수집 → `mean_net = 평균 − EDGE_COST_PCT` → `edge_rule_daily` upsert(catch-up: 라벨 미도래 날짜는 다음날 재시도, 14일 초과 시 n=0 sentinel 종결 — 실시간 라벨은 소급 불가라 영구 재시도 방지) + registered_at 이후 표본만으로 누적 stats 재계산(`n_days`=라벨 표본이 있는 거래일 수 포함). 채점 당시 미도래였던 `next_low_ret` 는 재시도 마감 전 날짜에 한해 matched 스냅샷에 소급 반영(worst_low_ret 복원 — exec_leg_ret 는 D+1, next_low_ret 는 D+2 에 채워지는 시차 보정). pass2: 전 rule stats 가 신선해진 뒤 `edge_policy.check_promotion`(라우터와 동일 게이트: selector 는 min_sample + **PROMO_MIN_DAYS=10 거래일** + ci_low>0 + live 대조군 우위 — 종목-일 n 은 같은 날 시장 무브로 상관되어 거래일 수가 실효 표본, veto 는 n_days≥10 + 제외 종목 mean_net<0 실익 게이트)으로 `stats.promo_eligible` 저장 + 텔레그램 알림 — 승격 후보(게이트 전체 충족) / 집행 설계 필요(통계·표본 충족이나 선정 시점 실행 불가 피처) / 강등 검토(live, 최근 30표본 mean_net<0). 전이는 관리자 API 수동, 매매 집행 없음 |
+| ⏰ `weight_tuner` | 토 08:00 | 지난주 실현손익(단 `SCORE_LOGIC_MIN_DATE`=2026-07-07 이전 구 로직 주는 스킵) → GPT 가중치 제안 → backtest 검증: IMPROVES=pending(승인 대상) / 그 외=archived(비적용·표시용) + [건강지표] 로깅 |
 | `kis_night_futures_ws` | 평일 18:00~익일 새벽 | KIS WebSocket 야간선물 체결 → `kis_night_future` |
 | (토큰) `kis_token_refresh` | 매일 07:00 | 키움+KIS 토큰 갱신(`refresh_tokens.sh`) |
 

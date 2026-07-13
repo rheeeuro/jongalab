@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, FormEvent } from "react";
-import { Lock, Tags, SlidersHorizontal, Rss, Send, Scale, FlaskConical } from "lucide-react";
+import { Lock, Tags, SlidersHorizontal, Rss, Send, Scale, FlaskConical, Timer } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -12,6 +12,7 @@ const ADMIN_TABS = [
   { href: "/admin/settings", label: "전략 설정", icon: SlidersHorizontal },
   { href: "/admin/weight-tuning", label: "가중치 튜닝", icon: Scale },
   { href: "/admin/edge-rules", label: "전략 관리", icon: FlaskConical },
+  { href: "/admin/jobs", label: "워커 현황", icon: Timer },
 ];
 
 export default function AdminLayout({
@@ -127,7 +128,8 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   return (
     <div>
       <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
-        <div className="mx-auto max-w-7xl flex items-center gap-1 px-4 sm:px-6 pt-2">
+        {/* 탭 7개 — 모바일(≈375px)에서 넘치므로 가로 스크롤 허용 */}
+        <div className="mx-auto max-w-7xl flex items-center gap-1 px-4 sm:px-6 pt-2 overflow-x-auto whitespace-nowrap">
           {ADMIN_TABS.map(({ href, label, icon: Icon }) => {
             const isActive = pathname.startsWith(href);
             return (

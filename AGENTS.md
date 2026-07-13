@@ -21,8 +21,10 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
 - `core/` — 비즈니스 로직. `ai_service.py`(LLM 추상화), `trading_engine.py`(종가베팅 전략),
   `db.py`, `config.py`, `kiwoom_client.py`(키움 데이터 서버 HTTP 클라이언트), `repository/`(DB 접근 계층, 패턴 준수 필수)
 - `routers/` — FastAPI 라우트 핸들러 (`api.py`의 `app`에 등록)
-- `workers/` — PM2 cron 백그라운드 잡 (youtube_collector, telegram_listener,
-  gap_check, closing_bet)
+- `workers/` — 백그라운드 잡. 저위험 cron 잡 7개는 `workers/scheduler.py`(통합 스케줄러,
+  PM2 상시 앱 `jongalab-scheduler`)가 spawn 하고 실행 이력을 `job_run` 에 남긴다(2026-07-13 1단계 이관).
+  나머지(telegram_listener, gap_check, closing_bet 등 창 민감/자금 인접 잡)는 PM2 cron 유지.
+  상세는 `jongalab/README.md` workers 절
 - `frontend/` — Next.js 16 App Router + Tailwind 4 + recharts. `app/`(페이지), `components/`,
   `lib/api.ts`(fetch 래퍼, API_BASE=:8000), `types/index.ts`
 - `sql/` — `jongalab` DB 스키마 (`1. create_database.sql` + `2. create_table.sql`)
@@ -114,10 +116,11 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
   - 백엔드 주요 로직(`*/core/**`·`*/routers/**`·`*/workers/**`·`*/api.py`) 편집마다
     해당 도메인 `README.md` 동기화 + 설계 5원칙 점검 가이드가 컨텍스트로 주입된다(track-changes.sh).
   - `jongalab/api.py`/`jongalab/routers/**`/`jongalab/core/**` → `jongalab-be` 재시작,
-    `jongalab/core/**`·`telegram_listener.py` → `jongalab-telegram` 재시작.
+    `jongalab/core/**`·`telegram_listener.py` → `jongalab-telegram` 재시작,
+    `jongalab/core/**`·`workers/scheduler.py` → `jongalab-scheduler` 재시작(잡 정의 반영).
   - `kiwoom/api.py`/`kiwoom/core/**` → `kiwoom-api` 재시작.
-  - cron 워커(`youtube_collector`/`gap_check`/`closing_bet`/`kiwoom_token_refresh`)는
-    **재시작하지 않는다** — cron 마다 새 프로세스로 spawn 되어 다음 스케줄 실행 때 자동 반영된다.
+  - cron 잡 워커(PM2 cron 이든 `jongalab-scheduler` 관리 잡이든)는 **재시작하지 않는다**
+    — 매 실행이 새 프로세스로 spawn 되어 다음 스케줄 실행 때 자동 반영된다.
   - `ecosystem.config.js` 편집 시 **새로 정의된 앱(아직 pm2 에 없는 이름)을 자동 등록**한다
     (`pm2 start ecosystem.config.js --only <name>` 후 `pm2 save`). cron 워커는 등록 시 1회 즉시
     실행되고 이후 스케줄대로 spawn 된다. 이미 등록된 앱은 건드리지 않는다(필요 시 위 분류대로 재시작).

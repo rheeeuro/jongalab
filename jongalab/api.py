@@ -18,6 +18,7 @@ from routers.weight_tuning import router as weight_tuning_router
 from routers.telegram_user import router as telegram_user_router
 from routers.ticker import router as ticker_router
 from routers.edge_rule import router as edge_rule_router
+from routers.job_runs import router as job_runs_router
 
 app = FastAPI()
 
@@ -42,6 +43,8 @@ app.include_router(stock_report_router)
 app.include_router(strategy_config_router, dependencies=[Depends(require_admin)])
 app.include_router(weight_tuning_router, dependencies=[Depends(require_admin)])
 app.include_router(telegram_user_router, dependencies=[Depends(require_admin)])
+# 스케줄러 잡 실행 이력 — 운영 내부 정보라 관리자 전용
+app.include_router(job_runs_router, dependencies=[Depends(require_admin)])
 # ticker-dictionary 는 GET(목록/resolve)이 공개 sitemap 등에서 쓰이므로 라우터 단위로 막지 않고,
 # 변경(PUT/DELETE)에만 ticker.py 에서 개별 require_admin 을 건다.
 app.include_router(ticker_router)

@@ -2,6 +2,8 @@
 알림 모듈 - 텔레그램 메시지 전송 로직 통합
 """
 import logging
+from datetime import datetime
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -48,6 +50,24 @@ def _send_telegram_admin(message: str):
     for chat_id in chat_ids:
         _post(chat_id, message)
     return len(chat_ids)
+
+
+def send_job_alert(job_name: str, status: str, exit_code: int | None, log_tail: str = ""):
+    """스케줄러 잡 실패/타임아웃 경보 — 관리자(ADMIN)에게만 (workers/scheduler.py 전용).
+
+    경보 실패가 스케줄러를 죽이면 안 되므로 예외는 삼키고 로그만 남긴다.
+    """
+    try:
+        detail = f"\n```\n{log_tail[-700:]}\n```" if log_tail else ""
+        message = (
+            f"🚨 *[스케줄러] {job_name} {status}* "
+            f"{datetime.now():%Y-%m-%d %H:%M}\n"
+            f"exit={exit_code} — 관리자 워커 현황 페이지·`logs/jobs/{job_name}.log` 확인{detail}"
+        )
+        count = _send_telegram_admin(message)
+        logging.info(f"📨 스케줄러 경보 전송: {job_name} {status} -> {count}개 채팅방")
+    except Exception as e:
+        logging.error(f"❌ 스케줄러 경보 전송 실패: {e}")
 
 
 def send_analysis_alert(channel: str, title: str, analysis: str, score: int = 50, related_tickers: list[dict] | None = None):

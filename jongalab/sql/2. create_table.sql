@@ -309,3 +309,23 @@ CREATE TABLE IF NOT EXISTS edge_rule_daily (
     UNIQUE KEY uq_rule_date (rule_id, report_date),
     INDEX idx_date (report_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 통합 잡 스케줄러 실행 이력 (workers/scheduler.py)
+-- 스케줄러가 잡을 spawn 할 때 running 행을 만들고, 종료 시 상태를 확정한다.
+-- 관리자 페이지(워커 현황)와 실패 경보의 데이터 소스. 60일 지난 행은 자동 정리.
+-- status: running / success / fail / timeout / aborted(스케줄러 재시작으로 유실)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS job_run (
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    job_name     VARCHAR(64) NOT NULL,
+    scheduled_at DATETIME NOT NULL,
+    started_at   DATETIME DEFAULT NULL,
+    finished_at  DATETIME DEFAULT NULL,
+    status       VARCHAR(10) NOT NULL DEFAULT 'running',
+    exit_code    INT DEFAULT NULL,
+    log_tail     TEXT DEFAULT NULL,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_job_time (job_name, scheduled_at),
+    INDEX idx_time (scheduled_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -361,3 +361,22 @@ export type EdgeRuleWithDaily = EdgeRule & {
   daily: EdgeRuleDaily[];
   latest_matched: EdgeRuleLatestMatched | null;
 };
+
+// ── 스케줄러 잡 실행 이력 (workers/scheduler.py → job_run 테이블, admin 워커 현황) ──
+export type JobRunStatus = 'running' | 'success' | 'fail' | 'timeout' | 'aborted';
+
+export interface JobRun {
+  id: number;
+  job_name: string;
+  scheduled_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  status: JobRunStatus;
+  exit_code: number | null;
+  log_tail: string | null;
+}
+
+export interface JobRunsResponse {
+  latest: JobRun[]; // 잡별 최신 1건
+  runs: JobRun[];   // 최근 N일 이력(최신순)
+}
