@@ -2,8 +2,8 @@
 
 불변식:
   - _score_split: 점수 상위½ 평균수익 − 하위½ 평균수익
-  - _split_to_mult: split>=FULL→1.0 / split<=INVERT→MIN_MULT / 사이 선형(단조증가)
-  - seed_multiplier: 표본부족→1.0(미개입) / 역전→축소 / 건강→1.0
+  - _split_to_mult: 이진 — split < INVERT_THRESHOLD → MIN_MULT / 아니면 1.0
+  - seed_multiplier: 거래일 부족→1.0(미개입) / 역전→MIN_MULT / 건강→1.0
 """
 import core.regime_gate as rg
 
@@ -30,38 +30,35 @@ def test_score_split_negative_when_inverted():
     assert rg._score_split(samples) == -2.0
 
 
-def test_split_to_mult_boundaries():
-    assert rg._split_to_mult(rg.REGIME_SPLIT_FULL) == 1.0
-    assert rg._split_to_mult(rg.REGIME_SPLIT_FULL + 5) == 1.0
-    assert rg._split_to_mult(rg.REGIME_SPLIT_INVERT) == rg.REGIME_MIN_MULT
-    assert rg._split_to_mult(rg.REGIME_SPLIT_INVERT - 5) == rg.REGIME_MIN_MULT
+def test_split_to_mult_binary():
+    # 역전 깊이와 무관하게 이진 — 임계 미만이면 MIN_MULT, 이상이면 1.0
+    assert rg._split_to_mult(rg.REGIME_INVERT_THRESHOLD - 0.01) == rg.REGIME_MIN_MULT
+    assert rg._split_to_mult(rg.REGIME_INVERT_THRESHOLD - 5) == rg.REGIME_MIN_MULT
+    assert rg._split_to_mult(rg.REGIME_INVERT_THRESHOLD) == 1.0
+    assert rg._split_to_mult(rg.REGIME_INVERT_THRESHOLD + 5) == 1.0
 
 
-def test_split_to_mult_monotonic_midrange():
-    lo = rg._split_to_mult(rg.REGIME_SPLIT_INVERT + 0.01)
-    mid = rg._split_to_mult((rg.REGIME_SPLIT_FULL + rg.REGIME_SPLIT_INVERT) / 2)
-    hi = rg._split_to_mult(rg.REGIME_SPLIT_FULL - 0.01)
-    assert rg.REGIME_MIN_MULT <= lo < mid < hi <= 1.0
-
-
-def test_seed_multiplier_insufficient_samples(monkeypatch):
-    monkeypatch.setattr(rg, "_recent_samples", lambda w: [{"score": 1, "next_open_ret": 1.0}])
+def test_seed_multiplier_insufficient_days(monkeypatch):
+    # 종목-일 표본이 많아도 거래일 수가 부족하면 미개입 — 같은 날 표본은 상관되어 실효 표본이 아니다.
+    many = [{"score": 90, "next_open_ret": -2.0}, {"score": 10, "next_open_ret": 2.0}] * 30
+    monkeypatch.setattr(rg, "_recent_samples", lambda w: (many, rg.REGIME_MIN_DAYS - 1))
     mult, diag = rg.seed_multiplier()
-    assert mult == 1.0 and diag["gated"] is False and diag["reason"] == "insufficient"
+    assert mult == 1.0 and diag["gated"] is False and diag["reason"] == "insufficient_days"
 
 
 def test_seed_multiplier_inverted_reduces(monkeypatch):
-    # 역전(고점수 손실) 표본을 MIN_SAMPLES 이상 → 배수 축소
-    bad = [{"score": 90, "next_open_ret": -2.0}, {"score": 10, "next_open_ret": 2.0}]
-    monkeypatch.setattr(rg, "_recent_samples", lambda w: bad * rg.REGIME_MIN_SAMPLES)
+    # 역전(고점수 손실) + 거래일 충족 → MIN_MULT 로 축소
+    bad = [{"score": 90, "next_open_ret": -2.0}, {"score": 10, "next_open_ret": 2.0}] * 20
+    monkeypatch.setattr(rg, "_recent_samples", lambda w: (bad, rg.REGIME_MIN_DAYS))
     mult, diag = rg.seed_multiplier()
     assert diag["gated"] is True and diag["inverted"] is True
+    assert diag["n_days"] == rg.REGIME_MIN_DAYS
     assert mult == rg.REGIME_MIN_MULT
 
 
 def test_seed_multiplier_healthy_full(monkeypatch):
-    good = [{"score": 90, "next_open_ret": 2.0}, {"score": 10, "next_open_ret": -2.0}]
-    monkeypatch.setattr(rg, "_recent_samples", lambda w: good * rg.REGIME_MIN_SAMPLES)
+    good = [{"score": 90, "next_open_ret": 2.0}, {"score": 10, "next_open_ret": -2.0}] * 20
+    monkeypatch.setattr(rg, "_recent_samples", lambda w: (good, rg.REGIME_MIN_DAYS))
     mult, diag = rg.seed_multiplier()
     assert diag["gated"] is True and diag["inverted"] is False
     assert mult == 1.0

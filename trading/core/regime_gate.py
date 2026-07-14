@@ -8,8 +8,11 @@
     (점수 상위½ 평균 next_open_ret) − (점수 하위½ 평균 next_open_ret)   단위 %p
   양수 = 점수가 승자/패자를 잘 가름(건강), 음수 = 역전.
 
-[배수] split >= REGIME_SPLIT_FULL → 1.0(정상) / split <= REGIME_SPLIT_INVERT → REGIME_MIN_MULT(역전)
-  그 사이는 선형. 표본 < REGIME_MIN_SAMPLES 이면 판단 보류 → 1.0(게이트 미개입).
+[배수] 이진: split < REGIME_INVERT_THRESHOLD(기본 0) → REGIME_MIN_MULT / 아니면 1.0.
+  근거(2026-07-14 백테스트, 4/9~7/10 60판단일): 역전 '깊이'는 다음날 성적과 무상관
+  (mult 0.3 바닥일 평균 +0.36% > 약한 축소일 −0.18%) — 부호만 유효해 선형 램프를 이진으로 대체.
+  거래일 < REGIME_MIN_DAYS 면 판단 보류 → 1.0(미개입). 종목-일 수가 아니라 거래일 수 기준 —
+  같은 날 표본은 시장 무브로 상관되어 거래일이 실효 표본이다(edge_policy PROMO_MIN_DAYS 와 동일 논리).
 
 next_open_ret 은 jongalab outcome_backfill 워커가 채운다(리포트일 종가→다음 거래일 시가 등락률).
 읽기 전용으로 jongalab DB 를 조회한다.
@@ -20,9 +23,8 @@ from core.db import get_jongalab_db
 from core.config import (
     REGIME_GATE_ENABLED,
     REGIME_WINDOW_DAYS,
-    REGIME_MIN_SAMPLES,
-    REGIME_SPLIT_FULL,
-    REGIME_SPLIT_INVERT,
+    REGIME_MIN_DAYS,
+    REGIME_INVERT_THRESHOLD,
     REGIME_MIN_MULT,
     REGIME_MIN_DATE,
 )
@@ -30,8 +32,8 @@ from core.config import (
 logger = logging.getLogger("RegimeGate")
 
 
-def _recent_samples(window: int) -> list[dict]:
-    """최근 window 거래일(next_open_ret 확정분) 의 selected 종목 (score, next_open_ret)."""
+def _recent_samples(window: int) -> tuple[list[dict], int]:
+    """최근 window 거래일(next_open_ret 확정분)의 selected 종목 (score, next_open_ret) + 거래일 수."""
     with get_jongalab_db() as (conn, cursor):
         # report_date >= REGIME_MIN_DATE 만 대상 — 그 이전은 구 스코어 로직이라 판별력 비교 무의미.
         cursor.execute(
@@ -43,7 +45,7 @@ def _recent_samples(window: int) -> list[dict]:
         )
         dates = [r["report_date"] for r in cursor.fetchall()]
         if not dates:
-            return []
+            return [], 0
         ph = ",".join(["%s"] * len(dates))
         cursor.execute(
             f"""SELECT score, next_open_ret FROM daily_stock_report
@@ -51,7 +53,7 @@ def _recent_samples(window: int) -> list[dict]:
                    AND report_date IN ({ph})""",
             tuple(dates),
         )
-        return cursor.fetchall()
+        return cursor.fetchall(), len(dates)
 
 
 def _score_split(samples: list[dict]) -> float:
@@ -69,38 +71,34 @@ def _score_split(samples: list[dict]) -> float:
 
 
 def _split_to_mult(split: float) -> float:
-    """점수 스프레드(%p) → 시드 배수. INVERT..FULL 을 MIN_MULT..1.0 으로 선형 클램프."""
-    if split >= REGIME_SPLIT_FULL:
-        return 1.0
-    if split <= REGIME_SPLIT_INVERT:
-        return REGIME_MIN_MULT
-    frac = (split - REGIME_SPLIT_INVERT) / (REGIME_SPLIT_FULL - REGIME_SPLIT_INVERT)
-    return round(REGIME_MIN_MULT + frac * (1.0 - REGIME_MIN_MULT), 3)
+    """점수 스프레드(%p) → 시드 배수. 이진: 역전이면 MIN_MULT, 아니면 1.0."""
+    return REGIME_MIN_MULT if split < REGIME_INVERT_THRESHOLD else 1.0
 
 
 def seed_multiplier() -> tuple[float, dict]:
-    """총 시드에 곱할 레짐 배수(REGIME_MIN_MULT~1.0) + 진단 정보를 반환.
+    """총 시드에 곱할 레짐 배수(REGIME_MIN_MULT 또는 1.0) + 진단 정보를 반환.
 
-    게이트 비활성/표본부족이면 1.0(미개입). 로깅·감사용 진단 dict 동봉.
+    게이트 비활성/거래일 부족이면 1.0(미개입). 로깅·감사용 진단 dict 동봉.
     """
     if not REGIME_GATE_ENABLED:
         return 1.0, {"gated": False, "reason": "disabled"}
     try:
-        samples = _recent_samples(REGIME_WINDOW_DAYS)
+        samples, n_days = _recent_samples(REGIME_WINDOW_DAYS)
     except Exception as e:
         logger.warning("레짐 표본 조회 실패 — 게이트 미개입(1.0): %s", e)
         return 1.0, {"gated": False, "reason": f"query_error: {e}"}
 
     n = len(samples)
-    if n < REGIME_MIN_SAMPLES:
-        logger.info("레짐 표본 부족(%d < %d, %s 이후만) — 게이트 미개입(1.0)",
-                    n, REGIME_MIN_SAMPLES, REGIME_MIN_DATE)
-        return 1.0, {"gated": False, "reason": "insufficient", "n": n, "since": REGIME_MIN_DATE}
+    if n_days < REGIME_MIN_DAYS:
+        logger.info("레짐 거래일 부족(%d < %d일, %s 이후만) — 게이트 미개입(1.0)",
+                    n_days, REGIME_MIN_DAYS, REGIME_MIN_DATE)
+        return 1.0, {"gated": False, "reason": "insufficient_days",
+                     "n": n, "n_days": n_days, "since": REGIME_MIN_DATE}
 
     split = _score_split(samples)
     mult = _split_to_mult(split)
-    diag = {"gated": True, "n": n, "split": round(split, 3), "multiplier": mult,
-            "inverted": split < 0}
-    logger.info("레짐 게이트: 표본 %d, 점수스프레드 %+.3f%%p → 시드배수 %.3f%s",
-                n, split, mult, " (역전)" if split < 0 else "")
+    diag = {"gated": True, "n": n, "n_days": n_days, "split": round(split, 3),
+            "multiplier": mult, "inverted": split < REGIME_INVERT_THRESHOLD}
+    logger.info("레짐 게이트: 거래일 %d(표본 %d), 점수스프레드 %+.3f%%p → 시드배수 %.3f%s",
+                n_days, n, split, mult, " (역전)" if diag["inverted"] else "")
     return mult, diag

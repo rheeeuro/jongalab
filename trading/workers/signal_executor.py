@@ -297,14 +297,15 @@ def main() -> int:
     # 롤링 엣지 게이트 — 최근 선정 종목의 점수 판별력이 역전된 레짐이면 총 시드를 축소.
     #   등가중 사이징이라 조절 대상은 개별 비중이 아니라 총 노출(seed). 배분 로직은 불변.
     mult, regime = seed_multiplier()
+    before = seed
     if mult < 1.0:
-        before = seed
         seed = int(seed * mult)
         logger.info("레짐 게이트 적용: 시드 %d → %d원 (배수 %.3f, 스프레드 %s)",
                     before, seed, mult, regime.get("split"))
-        audit_log.append("regime_gate", None,
-                         {"venue": args.venue, "multiplier": mult,
-                          "seed_before": before, "seed_after": seed, **regime})
+    # 미개입(1.0)이어도 매 판단을 기록 — 게이트 성적을 사후 채점(백테스트)할 관찰 로그.
+    audit_log.append("regime_gate", None,
+                     {"venue": args.venue, "multiplier": mult,
+                      "seed_before": before, "seed_after": seed, **regime})
 
     # 3) 윈도우 시작 시점 현재가로 시드 배분 → 종목별 매수 수량 확정 (이후 눌려도 수량 고정)
     cands: list[dict] = [

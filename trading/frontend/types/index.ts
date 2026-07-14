@@ -165,11 +165,12 @@ export interface FuturesGateDiag {
 
 // 롤링 엣지 게이트(레짐) 진단
 export interface RegimeGateDiag {
-  multiplier: number; // 총 시드 배수 (<1이면 축소)
+  multiplier: number; // 총 시드 배수 (이진: 역전이면 REGIME_MIN_MULT, 아니면 1.0)
   gated: boolean;
   split?: number; // 점수 스프레드(%p)
   inverted?: boolean;
-  n?: number; // 표본 수
+  n?: number; // 종목-일 표본 수
+  n_days?: number; // 거래일 수 (판단 기준: REGIME_MIN_DAYS 이상)
   reason?: string;
 }
 

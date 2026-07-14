@@ -467,7 +467,7 @@ function GateNotes({ regime, venue }: { regime: RegimeGateDiag; venue: BuyPrevie
 
   const regimeLine =
     regime && regime.multiplier < 1
-      ? `레짐 ×${regime.multiplier} · 점수 판별력 ${regime.inverted ? "역전" : "약화"} → 시드 ${wonExact(
+      ? `레짐 ×${regime.multiplier} · 점수 판별력 역전 → 시드 ${wonExact(
           venue.seed_base,
         )}→${wonExact(venue.seed)}`
       : null;

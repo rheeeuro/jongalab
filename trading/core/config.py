@@ -91,11 +91,15 @@ SEED_MAX_NAME_PCT = float(os.getenv('SEED_MAX_NAME_PCT', '0.25'))
 # 근거: 엣지가 레짐 의존적이라(봄엔 고점수 우세, 6월엔 역전) 역전 구간엔 자본을 덜 싣는다.
 REGIME_GATE_ENABLED = os.getenv('REGIME_GATE_ENABLED', '1') == '1'
 REGIME_WINDOW_DAYS = int(os.getenv('REGIME_WINDOW_DAYS', '10'))     # 최근 몇 거래일 표본
-REGIME_MIN_SAMPLES = int(os.getenv('REGIME_MIN_SAMPLES', '30'))    # 이보다 적으면 게이트 미개입(1.0)
-# 점수 상위½−하위½ 익일시가수익 스프레드(%p). FULL 이상=건강(1.0), INVERT 이하=역전(MIN_MULT)
-REGIME_SPLIT_FULL = float(os.getenv('REGIME_SPLIT_FULL', '0.5'))
-REGIME_SPLIT_INVERT = float(os.getenv('REGIME_SPLIT_INVERT', '-0.5'))
-REGIME_MIN_MULT = float(os.getenv('REGIME_MIN_MULT', '0.3'))       # 역전 시 최소 시드 배수(30%)
+# 최소 거래일 수 — 미만이면 게이트 미개입(1.0). 종목-일 표본은 같은 날 시장 무브로 상관되어
+# 거래일 수가 실효 표본이다(edge_policy PROMO_MIN_DAYS 와 같은 논리). 종목-일 30개 기준이던
+# 구 REGIME_MIN_SAMPLES 는 신로직 전환 직후 실효 4거래일로 최대 축소가 나가는 문제로 대체(2026-07-14).
+REGIME_MIN_DAYS = int(os.getenv('REGIME_MIN_DAYS', '10'))
+# 이진 배수: split(점수 상위½−하위½ 익일시가수익, %p) < INVERT_THRESHOLD 면 역전 → MIN_MULT, 아니면 1.0.
+# 근거: 4/9~7/10 백테스트에서 역전 '깊이'는 다음날 성적과 무상관(강한 역전일이 오히려 나음) —
+# 부호만 유효해 선형 램프(±0.5→0.3~1.0)를 이진으로 대체(2026-07-14).
+REGIME_INVERT_THRESHOLD = float(os.getenv('REGIME_INVERT_THRESHOLD', '0.0'))
+REGIME_MIN_MULT = float(os.getenv('REGIME_MIN_MULT', '0.3'))       # 역전 시 시드 배수(30%)
 # 표본 하한 날짜(YYYY-MM-DD, inclusive) — 이 날짜 이전 report_date 는 레짐 표본에서 제외.
 # 근거: 선정/스코어 로직 변경 이전 표본은 익일수익 판별력 비교가 무의미(=구로직). 최신 변경일부터만 사용.
 # 창(REGIME_WINDOW_DAYS)이 이 날짜를 넘어 충분히 지나면 자연히 무의미해지는 자기소멸 가드.

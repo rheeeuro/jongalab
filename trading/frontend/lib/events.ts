@@ -96,9 +96,13 @@ export function eventDetail(event: string, payload: any): string {
       return `${num(p.qty)}주 @${num(p.price)} 체결 · 실현 ${num(p.realized)}원`;
     case "sell_filled_live":
       return `${num(p.qty)}주 @${num(p.price)} 체결 · 실현 ${num(p.realized)}원 (수수료 ${num(p.cmsn)}·세금 ${num(p.tax)})`;
-    case "regime_gate":
-      // 최근 선정종목 점수 판별력이 역전/약화 → 총 시드 축소
-      return `점수 판별력 ${p.inverted ? "역전" : "약화"}(스프레드 ${pct(p.split)}%p · 표본 ${p.n ?? "?"}) · 시드 ×${p.multiplier} (${num(p.seed_before)}→${num(p.seed_after)}원)`;
+    case "regime_gate": {
+      // 매 판단 기록(미개입 포함). 축소 시에만 시드 변화를 보여준다.
+      if (!p.gated) return `판단 보류(${p.reason ?? "?"}) · 시드 유지`;
+      const sample = `스프레드 ${pct(p.split)}%p · ${p.n_days ?? "?"}거래일 ${p.n ?? "?"}표본`;
+      if (p.multiplier >= 1) return `점수 판별력 정상(${sample}) · 시드 유지`;
+      return `점수 판별력 역전(${sample}) · 시드 ×${p.multiplier} (${num(p.seed_before)}→${num(p.seed_after)}원)`;
+    }
     case "futures_gate": {
       // 매수시점 NQ·야간선물 방향 → 하락 섹터 차등 감액 (둘 다 상승이면 감액 없음)
       const kospi = p.kospi_label ?? "코스피선물";
