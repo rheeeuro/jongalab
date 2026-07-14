@@ -39,6 +39,7 @@ const EVENT_META: Record<string, EventMeta> = {
   // 시드 축소 게이트 (왜 시드가 줄었는지)
   regime_gate: { label: "시드축소·레짐", tone: GATE },
   futures_gate: { label: "선물 게이트", tone: GATE },
+  macro_gate: { label: "거시 게이트", tone: GATE },
 };
 
 /** 이벤트명 → 라벨/색. 미정의 이벤트는 이벤트명 그대로(중립색) 노출해 누락이 없게 한다. */
@@ -102,6 +103,14 @@ export function eventDetail(event: string, payload: any): string {
       const sample = `스프레드 ${pct(p.split)}%p · ${p.n_days ?? "?"}거래일 ${p.n ?? "?"}표본`;
       if (p.multiplier >= 1) return `점수 판별력 정상(${sample}) · 시드 유지`;
       return `점수 판별력 역전(${sample}) · 시드 ×${p.multiplier} (${num(p.seed_before)}→${num(p.seed_after)}원)`;
+    }
+    case "macro_gate": {
+      // 매 판단 기록(미개입 포함). 보유 창의 예정 이벤트(FOMC·CPI·고용) → sev3 있으면 시드 keep 축소.
+      if (!p.gated) return `판단 보류(${p.reason ?? "?"}) · 시드 유지`;
+      const evs = (p.events ?? []) as { name: string; severity: number }[];
+      const names = evs.map((e) => `${e.name}${e.severity >= 3 ? "⚠" : ""}`).join("·");
+      if (p.keep >= 1) return evs.length === 0 ? "창 내 이벤트 없음 · 시드 유지" : `${names} (관찰) · 시드 유지`;
+      return `${names} → 시드 ×${p.keep}`;
     }
     case "futures_gate": {
       // 매수시점 NQ·야간선물 방향 → 하락 섹터 차등 감액 (둘 다 상승이면 감액 없음)

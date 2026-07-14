@@ -25,6 +25,7 @@ from core.execution_engine import ExecutionEngine
 from core.seed_allocator import allocate
 from core.regime_gate import seed_multiplier
 from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
+from core.macro_gate import macro_keep
 from core.config import SEED_COMBINED_MIN_MULT
 from core.kiwoom_data_client import to_int
 from core.repository import trade_signal as signal_repo
@@ -317,6 +318,12 @@ def main() -> int:
         c["high"] = c["price"]  # 장중 고점 초기값 = 윈도우 시작가
     allocate(seed, cands)
 
+    # 거시 이벤트 게이트 — 보유 창(매수→익일 시가)에 sev3 예정 이벤트(FOMC·CPI·고용)가 걸려 있으면
+    #   총 노출 축소. 프록시(VIX·WTI·환율)는 관찰 전용으로 진단만 기록. 미개입 포함 매 판단을 audit.
+    m_keep, macro = macro_keep(args.venue)
+    audit_log.append("macro_gate", None,
+                     {"seed": seed, "regime_mult": mult, **macro})
+
     # 선물 환경 게이트(섹터 차등, NXT 전용) — 배분 뒤 섹터별 keep-factor 로 수량 감액(reduce-only).
     #   NQ·야간선물 하락 시 고베타 섹터(반도체·IT)를 더, 방어주(통신·음식료)를 덜 깎는다.
     #   그 시점 선물값+섹터별 keep 은 audit 로 스냅샷(추후 섹터×선물 실측·재튜닝용).
@@ -324,13 +331,14 @@ def main() -> int:
     detail = futures.get("detail") or {}
     for c in cands:
         raw = factors.get(c["stk_cd"], 1.0)
-        keep = effective_keep(raw, mult)  # 레짐×선물 결합 하한(SEED_COMBINED_MIN_MULT) 반영
+        # 선물(섹터별) × 거시(공통) 곱에 레짐 결합 하한(SEED_COMBINED_MIN_MULT) 반영
+        keep = effective_keep(raw * m_keep, mult)
         if keep < 1.0:
             before_sh = c["shares"]
             c["shares"] = gated_shares(c["shares"], keep)  # 반올림 감액(mild 컷이 1주를 0으로 안 만듦)
             c["cost"] = c["shares"] * c["price"]
-            logger.info("선물 섹터 감액 [%s] keep=%.3f(raw %.3f): %d → %d주",
-                        c["stk_cd"], keep, raw, before_sh, c["shares"])
+            logger.info("게이트 감액 [%s] keep=%.3f(선물 %.3f × 거시 %.3f): %d → %d주",
+                        c["stk_cd"], keep, raw, m_keep, before_sh, c["shares"])
         # 감사: 실제 적용 keep 과 원본 섹터 keep(연구용) 둘 다 기록
         if c["stk_cd"] in detail:
             detail[c["stk_cd"]]["keep_raw"] = raw

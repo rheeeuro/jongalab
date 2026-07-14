@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ContentAnalysis, StockReport, MentionStats, MarketIndex, PaginatedResponse, SectorReport, NewsHeatItem } from "@/types";
+import { ContentAnalysis, StockReport, MentionStats, MarketIndex, PaginatedResponse, SectorReport, NewsHeatItem, MacroEvent, MacroEventsResponse } from "@/types";
 import { apiFetch } from "@/lib/api";
 
 export const metadata: Metadata = {
@@ -12,6 +12,7 @@ import { MentionPulse } from "@/components/today/MentionPulse";
 import { NewsHeat } from "@/components/today/NewsHeat";
 import { ContentTeaser } from "@/components/today/ContentTeaser";
 import { IndicesStrip, IndicesStripSkeleton } from "@/components/today/IndicesStrip";
+import { MacroEventNotice } from "@/components/today/MacroEventNotice";
 import { Suspense } from "react";
 
 async function getContents(): Promise<PaginatedResponse<ContentAnalysis>> {
@@ -55,6 +56,12 @@ async function getLatestSectorReport(): Promise<SectorReport[]> {
   return apiFetch<SectorReport[]>(`/api/sector-report/${dates[0]}`, []);
 }
 
+// 오늘 밤 배너용 — 이틀치면 충분(오늘 남은 발표 + 내일 새벽 FOMC)
+async function getMacroEvents(): Promise<MacroEvent[]> {
+  const res = await apiFetch<MacroEventsResponse | null>(`/api/macro-events?days=2`, null);
+  return res?.events ?? [];
+}
+
 async function getMarketIndices(): Promise<{
   US: MarketIndex[];
   KR: MarketIndex[];
@@ -73,19 +80,21 @@ async function IndicesSection() {
 }
 
 export default async function HomePage() {
-  const [contents, topPick, mentionStats, sectorReport, newsHeat] =
+  const [contents, topPick, mentionStats, sectorReport, newsHeat, macroEvents] =
     await Promise.all([
       getContents(),
       getLatestTopPick(),
       getMentionStats(),
       getLatestSectorReport(),
       getNewsHeat(),
+      getMacroEvents(),
     ]);
 
   return (
     <main className="min-h-screen">
       <div className="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6 sm:py-10 lg:space-y-10">
         <TodayHero reportDate={topPick?.report_date ?? null} mentionStats={mentionStats} />
+        <MacroEventNotice events={macroEvents} />
         <TopPicks pick={topPick} />
         <Suspense fallback={<IndicesStripSkeleton />}>
           <IndicesSection />

@@ -134,6 +134,24 @@ FUTURES_STALE_SEC = int(os.getenv('FUTURES_STALE_SEC', '900'))    # 야간선물
 # NQ 등락률 취득용 — jongalab market-indices 엔드포인트(야간선물은 jongalab DB 직접 조회)
 JONGALAB_BASE_URL = os.getenv('JONGALAB_BASE_URL', 'http://127.0.0.1:8000')
 
+# ── 거시 이벤트 게이트 (core.macro_gate) — 보유 창의 '예정 이벤트'(FOMC·CPI·고용)로 총 시드 축소 ──
+# 선물 게이트가 '이미 실현된 방향'을 재는 것과 달리, 이건 '아직 실현 안 된 이진 이벤트 리스크'를 잰다
+# (발표 전엔 선물이 보합이라 futures_gate 가 못 잡음). jongalab DB macro_event(수동 시드 캘린더) 조회.
+# 근거: 2026-07-15 백테스트(4/9~7/10 63거래일) — severity 3(FOMC/CPI/고용) 이벤트 밤 선정종목
+#   일평균 -0.74% vs 평일 +1.04%(Welch t=-2.27, 혼재일 제외 t=-2.13, 음수일 62% vs 25%).
+#   PPI(severity 2)는 +3.6%로 감액 근거 없음 → 관찰 전용(진단 기록만).
+MACRO_GATE_ENABLED = os.getenv('MACRO_GATE_ENABLED', '1') == '1'
+MACRO_EVENT_KEEP = float(os.getenv('MACRO_EVENT_KEEP', '0.5'))   # sev3 이벤트 밤 시드 keep(≤1.0)
+# 관찰 전용 프록시 축(지정학 쇼크 대비: VIX 레벨 / WTI·원달러 급등) — keep 을 계산해 진단에만 남기고
+# 감액엔 미적용(임계 미검증). 표본이 쌓이면 승격 판단. 강도는 futures_gate 와 같은 선형 램프(LO=0~HI=1).
+MACRO_VIX_LO = float(os.getenv('MACRO_VIX_LO', '25'))            # VIX 레벨 — 강도 0 시작점
+MACRO_VIX_HI = float(os.getenv('MACRO_VIX_HI', '35'))            # 강도 1 도달점
+MACRO_WTI_BAND = float(os.getenv('MACRO_WTI_BAND', '3.0'))       # WTI 급등 %p — 강도 0 시작점
+MACRO_WTI_FULL = float(os.getenv('MACRO_WTI_FULL', '6.0'))
+MACRO_FX_BAND = float(os.getenv('MACRO_FX_BAND', '1.0'))         # 원/달러 급등 %p
+MACRO_FX_FULL = float(os.getenv('MACRO_FX_FULL', '2.0'))
+MACRO_PROXY_MAX_CUT = float(os.getenv('MACRO_PROXY_MAX_CUT', '0.5'))  # 관찰 keep 계산용 축당 최대 감액
+
 # ── ⚠️ 매매 안전장치 ──
 # 'paper': 모의(주문 미전송, 의도만 로깅·기록) / 'live': 실주문 전송. 기본값은 paper.
 TRADING_MODE = os.getenv('TRADING_MODE', 'paper').lower()

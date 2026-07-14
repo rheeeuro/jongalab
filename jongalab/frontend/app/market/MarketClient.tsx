@@ -1,6 +1,7 @@
 "use client";
 
 import { MarketIndicesSection } from "@/components/MarketIndicesSection";
+import { MacroEventsCard } from "@/components/MacroEventsCard";
 import { LineChart } from "lucide-react";
 
 export function MarketClient() {
@@ -21,6 +22,7 @@ export function MarketClient() {
         </div>
 
         <MarketIndicesSection />
+        <MacroEventsCard />
       </div>
     </main>
   );

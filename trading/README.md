@@ -42,6 +42,7 @@ trading/
 │   ├── seed_allocator.py       # 시드 배분(거래소별): 상위10 선정(점수순)·등가중 배분·최소투입 우선 그리디·종목당 시드 25% 캡(고가주 첫 1주만 캡×2 이내 예외 — 2026-07-10 HLB 하한가 사건으로 50%→25%, .env SEED_MAX_NAME_PCT)
 │   ├── regime_gate.py          # 롤링 엣지 게이트: 최근 선정종목 점수판별력(익일시가 상위½−하위½)이 역전이면 총 시드 축소(이진 배수)
 │   ├── futures_gate.py         # 선물 환경 게이트(KRX·NXT): 매수시점 NQ+코스피선물(KRX=주간/NXT=야간) 하락 시 섹터별 차등 감액(반도체·IT 더, 방어주 덜)
+│   ├── macro_gate.py           # 거시 이벤트 게이트: 보유 창(매수→익일 시가)에 sev3 예정 이벤트(FOMC·CPI·고용, jongalab macro_event)가 있으면 시드 keep 축소 + VIX·WTI·환율 프록시 관찰
 │   ├── kiwoom_order_client.py  # 키움 REST 직접 호출(kt10000~3 주문, kt00018 잔고, ka10074~6)
 │   ├── kiwoom_data_client.py   # kiwoom 데이터 서버(:8001) 읽기(현재가·NXT·차트)
 │   ├── fill_sync.py            # 실거래 체결 동기화(ka10076 → fill/position)
@@ -75,7 +76,7 @@ trading/
 [jongalab closing_bet] → trade_signal(pending)
         │
 signal_executor (KRX 15:00 / NXT 19:30)
-  · 블록리스트 제외 → 거래소 분류 → 시드 산정 → **regime_gate(역전 레짐)로 총 시드 축소** → seed_allocator 등가중 배분 → **futures_gate(선물 하락 시 섹터별 수량 감액, KRX·NXT)**
+  · 블록리스트 제외 → 거래소 분류 → 시드 산정 → **regime_gate(역전 레짐)로 총 시드 축소** → seed_allocator 등가중 배분 → **futures_gate(선물 하락 시 섹터별 수량 감액, KRX·NXT) × macro_gate(보유 창 sev3 예정 이벤트 시 공통 감액)**
   · 15초 폴링으로 장중 고점 추적, 고점 대비 되돌림(BUY_PULLBACK_PCT) 시 매수(IOC)
   · NXT 는 최유리 IOC 특성상 부분체결 가능 — 주문 직후 ka10076 체결내역으로 목표 수량 대비 체결량을 확인하고,
     체결 row 가 확인된 부분체결이면 19:50 전 잔량을 최대 2회 별도 멱등키(`:partial:N`)로 재시도한다
@@ -125,6 +126,7 @@ reconcile (20:00) · kt00018 잔고 vs 로컬 position 대조 → 드리프트 �
 | 블록리스트 | `blocklist.py`, `signal_executor.py` | 수동 보유 종목 자동매수 차단 |
 | 롤링 엣지 게이트 | `regime_gate.py`, `signal_executor.py` | 최근 REGIME_WINDOW_DAYS 선정종목의 점수 판별력(익일시가 상위½−하위½ 스프레드)이 역전(split < REGIME_INVERT_THRESHOLD, 기본 0)이면 총 시드에 **이진 배수** REGIME_MIN_MULT(기본 0.3) 적용, 아니면 1.0 — 2026-07-14 백테스트(4/9~7/10 60판단일)에서 역전 '깊이'가 다음날 성적과 무상관(강한 역전일 +0.36% > 약한 축소일 −0.18%)이라 선형 램프를 이진으로 대체. jongalab `daily_stock_report.next_open_ret` 읽기전용 조회(단 `report_date >= REGIME_MIN_DATE` 만 — 그 이전은 구 스코어 로직이라 제외), **거래일 < REGIME_MIN_DAYS(기본 10)면 미개입(1.0)** — 종목-일 표본은 같은 날 시장 무브로 상관되어 거래일이 실효 표본(edge_policy PROMO_MIN_DAYS 와 동일 논리, 구 '종목-일 30개' 기준은 실효 4거래일로 최대 축소가 나가는 문제로 대체). **매 판단(미개입 포함)을 `audit_log('regime_gate')`에 기록**해 게이트 성적을 사후 채점 가능 → 모니터 탭 활동 피드에 사유 노출. `/buy-preview`(매수 예정)도 동일 배수로 시드를 미리 반영·표시 |
 | 선물 환경 게이트(섹터 차등) | `futures_gate.py`, `signal_executor.py` | **KRX·NXT(`FUTURES_GATE_VENUES`).** 매수시점 NQ 선물(jongalab market-indices) + 코스피200 선물 방향으로. **코스피 축은 그 시각 살아있는 선물**: KRX(15:20)=주간선물(K200DF, market-indices 실시간) / NXT(19:50)=야간선물(K200NF, jongalab DB `kis_night_future`, 신선도 FUTURES_STALE_SEC 초과 시 미개입). seed_allocator 등가중 배분 뒤 **종목 섹터(키움 업종명, `ticker_dictionary`)별 keep-factor(≤1.0)로 수량 감액**. 섹터 클래스별 축 민감도: 반도체·IT(NQ 민감)·경기민감주(자동차·화학·금융, 지수 민감)를 더 깎고 통신·음식료 등 방어주를 덜 깎음. `keep=∏_axis(1−MAX_CUT×민감도×하락강도)`, 하락강도는 폭 비례(-FUTURES_FLAT_BAND=0 ~ -FUTURES_FULL_CUT_PCT=1) — 작은 하락(NQ -0.5%)은 살짝, 급락(-2%+)은 최대컷. 하한 FUTURES_SECTOR_MIN_KEEP(0.25). 상승/보합이면 감액 없음(reduce-only). 수량 적용은 `gated_shares()` 로 **반올림**(내림 아님) — mild 컷(keep≥0.5)이 1주짜리를 0주로 없애지 않도록(keep<0.5 만 0 가능). **결합 하한**: 레짐×선물 곱이 SEED_COMBINED_MIN_MULT(0.3) 밑으로 안 내려가게 종목 keep 을 `effective_keep()` 로 클램프(REGIME_MIN_MULT>=이 값이어야 보장, 기본 둘 다 0.3). 지표 취득 실패면 미개입. 매 적용을 audit_log(`futures_gate`)에 선물값+섹터별 keep 스냅샷으로 기록 → 모니터 탭 활동 피드에 사유(NQ·코스피선물 등락, 감액 종목수·섹터) 노출. `/buy-preview`도 동일 로직으로 예상 수량을 미리 감액·표시(NXT 는 야간세션 개장 전이면 미개입·"대기" 표기). ⚠️ **섹터 민감도는 통설 기반 미검증 가정** — 추후 stk_cd→섹터 조인으로 실측 후 재튜닝 |
+| 거시 이벤트 게이트 | `macro_gate.py`, `signal_executor.py` | **보유 창(매수→다음 평일 09:00)의 '예정 이벤트 리스크'** — futures_gate 가 이미 실현된 선물 방향을 재는 것과 상보적(발표 전엔 선물이 보합이라 저건 못 잡음). jongalab DB `macro_event`(수동 시드 캘린더, `sql/18. migrate_macro_event.sql`, 2026 연말까지 시드)에서 창 안 이벤트를 조회해 **severity 3(FOMC·CPI·고용) 존재 시 시드 keep=MACRO_EVENT_KEEP(0.5)**, 아니면 1.0. 근거: 2026-07-15 백테스트(4/9~7/10 63거래일) — sev3 이벤트 밤 선정종목 일평균 −0.74% vs 평일 +1.04%(Welch t=−2.27, 혼재일 제외 t=−2.13, 음수일 62% vs 25%). **PPI(sev2)는 +3.6%로 감액 근거 없음 → 관찰 전용**(진단 기록만). 금통위(09:50)는 시가 매도 후라 자연히 창 밖. 적용: 선물 keep 과 곱한 뒤 `effective_keep` 결합 하한(SEED_COMBINED_MIN_MULT) 클램프. **관찰 축**: VIX 레벨(25~35 램프)·WTI 급등(+3~6%p)·원달러 급등(+1~2%p) — 호르무즈류 지정학 쇼크 프록시. keep 을 계산해 진단에만 기록, 감액 미적용(미검증). 축끼리 min 결합(같은 쇼크 이중 감액 방지) — 승격 시에도 futures_gate 와 곱이 아닌 min 으로 붙일 것. 캘린더 조회 실패 시 미개입(1.0). **매 판단(미개입 포함)을 `audit_log('macro_gate')`에 기록** → 모니터 탭 활동 피드 노출. `/buy-preview` 응답 `macro` 키로 동일 반영. 캘린더 고갈은 jongalab `macro_event_check` 잡(월 08:20)이 감시 |
 | 정합성 점검 | `reconcile.py` | 매일 브로커 잔고 vs 로컬 포지션 대조 |
 | 미실행 감시(dead-man's switch) | `watchdog.py` + `audit_log` worker_done 마커 | 핵심 워커가 완료 시 마커를 남기고, watchdog(평일 09:35)가 마커 누락 시 텔레그램 경보 |
 
@@ -137,6 +139,13 @@ reconcile (20:00) · kt00018 잔고 vs 로컬 position 대조 → 드리프트 �
 ## 프론트엔드 (`frontend/`, :3001)
 홈(당일 손익·매수·보유·매수 프리뷰) · 모니터(워커 하트비트·활성 플랜) · 히스토리(월/일 주문) ·
 캘린더(월간 손익) · 설정(킬스위치·리스크 한도·블록리스트). 관리자 비밀번호 로그인(httpOnly 쿠키).
+
+**거시 이벤트 표시** (`GET /macro-events?month=YYYYMM` — `macro_gate.month_events`, jongalab `macro_event` 읽기):
+- **캘린더 탭**: 날짜 셀 우상단 점 마커(주황=sev3 FOMC·CPI·고용 → 전야 시드 축소 대상 / 회색=sev2 PPI·금통위 관찰)
+  + 하단 범례. 날짜를 누르면 상세에 이벤트 뱃지(이름·발표시각 KST). 발표일 기준 표시 — sev3 감액은 그 전날 밤 매수분에 걸린다.
+- **홈 '오늘 매수 예정' 카드**: `/buy-preview` 의 `macro` 진단으로 오늘 밤 이벤트를 안내 —
+  sev3 있으면 "오늘 밤 {이벤트} — 시드 ×keep 축소"(주황), sev2 만 있으면 "발표 예정 — 감액 없음(관찰)"(회색).
+  레짐 게이트 축소(×multiplier)도 같은 자리에 안내. 조회 실패 시 이벤트 표시만 생략(달력·프리뷰는 정상 동작).
 
 **반복 거부/취소 표시 병합**: 히스토리 탭은 같은 날 (종목·방향·상태)가 같은 rejected/canceled 행을
 한 줄로 묶어 "거부 ×238 · 08:17~09:30"(횟수·시간범위)로 보여준다(`collapseRepeats`, 표시 전용 —
@@ -181,7 +190,8 @@ cd trading/frontend && npm run dev                                        # 대�
 `tests/` 는 자금 손실에 직결되는 순수 로직의 동작을 **DB·키움 네트워크 없이** 고정한다
 (fake 협력 객체 주입 + repository 함수 monkeypatch). 커버리지: 시드 배분(`seed_allocator`),
 멱등키·사이징·paper 체결 시뮬레이션(`execution_engine`), 한도·서킷브레이커 분기(`risk_engine`),
-롤링 엣지 게이트 배수 매핑·역전 판정(`regime_gate`), 선물 섹터 게이트 클래스 매핑·섹터별 keep 차등·미개입 분기(`futures_gate`).
+롤링 엣지 게이트 배수 매핑·역전 판정(`regime_gate`), 선물 섹터 게이트 클래스 매핑·섹터별 keep 차등·미개입 분기(`futures_gate`),
+거시 이벤트 게이트 보유 창·severity 매핑·프록시 관찰 전용·미개입 분기(`macro_gate`).
 민감 파일(`risk_engine.py`·`execution_engine.py`)은 **수정하지 않고 동작만 핀**한다.
 ```bash
 uv run --directory trading --group dev pytest

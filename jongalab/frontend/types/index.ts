@@ -380,3 +380,16 @@ export interface JobRunsResponse {
   latest: JobRun[]; // 잡별 최신 1건
   runs: JobRun[];   // 최근 N일 이력(최신순)
 }
+
+// ── 거시 이벤트 캘린더 (macro_event 테이블 — /api/macro-events, trading 거시 게이트와 공유) ──
+export interface MacroEvent {
+  date: string; // YYYY-MM-DD (발표/결정일, KST)
+  time: string; // HH:MM (KST)
+  name: string; // "FOMC 금리결정" / "미 CPI" / "한은 금통위" …
+  category: string; // rate | inflation | employment | other
+  severity: number; // 3=중대(전야 자동매매 시드 축소) / 2=주의(관찰)
+}
+
+export interface MacroEventsResponse {
+  events: MacroEvent[];
+}

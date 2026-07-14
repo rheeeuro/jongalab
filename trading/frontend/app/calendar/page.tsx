@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { won, wonExact, wonCompact, pnlClass, fmtDate, todayYYYYMMDD } from "@/lib/format";
-import type { MonthlyPnl, DayDetail, NameMap } from "@/types";
+import type { MonthlyPnl, DayDetail, NameMap, MacroEvent, MacroEventsMonth } from "@/types";
 import RoundTrips from "@/components/RoundTrips";
 
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
@@ -16,6 +16,7 @@ function nowMonth(): string {
 export default function CalendarPage() {
   const [month, setMonth] = useState(nowMonth());
   const [data, setData] = useState<MonthlyPnl | null>(null);
+  const [macroDays, setMacroDays] = useState<Record<string, MacroEvent[]>>({});
   const [names, setNames] = useState<NameMap>({});
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<DayDetail | null>(null);
@@ -43,6 +44,19 @@ export default function CalendarPage() {
         setData(r.ok ? await r.json() : null);
       } catch {
         if (!cancelled) setData(null);
+      }
+    })();
+    // 거시 이벤트(FOMC·CPI 등) 마커 — 실패해도 달력은 그대로 동작
+    (async () => {
+      try {
+        const r = await fetch(`/api/macro-events?month=${month}`);
+        if (cancelled) return;
+        const j: MacroEventsMonth | null = r.ok ? await r.json() : null;
+        const byDay: Record<string, MacroEvent[]> = {};
+        for (const ev of j?.events ?? []) (byDay[ev.date] ??= []).push(ev);
+        setMacroDays(byDay);
+      } catch {
+        if (!cancelled) setMacroDays({});
       }
     })();
     return () => {
@@ -128,12 +142,19 @@ export default function CalendarPage() {
             const isSel = selected === key;
             const isToday = key === today;
             const isWeekend = i % 7 === 0 || i % 7 === 6; // 0=일, 6=토
+            const events = macroDays[key];
+            // 거시 이벤트 마커 — 최고 severity 기준(주황=sev3 시드 감액 대상, 회색=sev2 관찰)
+            const evTone = !events
+              ? null
+              : events.some((e) => e.severity >= 3)
+              ? "bg-amber-400 dark:bg-amber-500"
+              : "bg-slate-300 dark:bg-slate-600";
             return (
               <button
                 key={key}
                 onClick={() => openDay(key)}
                 disabled={isWeekend}
-                className={`flex aspect-square flex-col items-center justify-center rounded-xl transition-colors ${
+                className={`relative flex aspect-square flex-col items-center justify-center rounded-xl transition-colors ${
                   isWeekend
                     ? "cursor-not-allowed opacity-40"
                     : isSel
@@ -157,10 +178,28 @@ export default function CalendarPage() {
                   </span>
                 )}
                 {has && v === 0 && <span className="mt-0.5 text-[9px] leading-none text-slate-300">·</span>}
+                {evTone && (
+                  <span
+                    className={`absolute right-1 top-1 h-1.5 w-1.5 rounded-full ${evTone}`}
+                    aria-label="거시 이벤트"
+                  />
+                )}
               </button>
             );
           })}
         </div>
+        {Object.keys(macroDays).length > 0 && (
+          <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+            <span className="flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 dark:bg-amber-500" />
+              FOMC·CPI·고용 (전야 시드 축소)
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-slate-300 dark:bg-slate-600" />
+              PPI·금통위 (관찰)
+            </span>
+          </p>
+        )}
       </section>
 
       {/* 선택 일자 상세 */}
@@ -172,6 +211,24 @@ export default function CalendarPage() {
               {won(detail?.realized_pnl ?? 0)}
             </span>
           </div>
+
+          {/* 이 날의 거시 이벤트 — 발표 시각(KST) 기준. sev3는 전날 밤 매수분 시드가 축소됨 */}
+          {(macroDays[selected]?.length ?? 0) > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {macroDays[selected].map((ev) => (
+                <span
+                  key={`${ev.time}${ev.name}`}
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    ev.severity >= 3
+                      ? "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400"
+                      : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                  }`}
+                >
+                  {ev.name} {ev.time}
+                </span>
+              ))}
+            </div>
+          )}
 
           {loadingDay ? (
             <div className="flex min-h-[140px] items-center justify-center">

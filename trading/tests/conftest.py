@@ -62,13 +62,18 @@ class FakeRisk:
 
 
 class FakeData:
-    """KiwoomDataClient 대역. 사이징 fallback 의 현재가만 제공."""
+    """KiwoomDataClient 대역. 사이징 fallback 현재가 + 매도 거래소 해석(NXT 가능 여부) 제공."""
 
-    def __init__(self, price=10000):
+    def __init__(self, price=10000, nxt_enabled=True):
         self._price = price
+        self._nxt_enabled = nxt_enabled
 
     def get_market_price(self, stk_cd):
         return self._price
+
+    def is_nxt_enabled(self, stk_cd):
+        # monitor.resolve_sell_venue 가 매도 발동 시점에 조회 — 기본 True(NXT 매도 가능)
+        return self._nxt_enabled
 
 
 # ── repository 부수효과 recorder ────────────────────────────────

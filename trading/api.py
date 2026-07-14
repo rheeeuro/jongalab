@@ -30,6 +30,7 @@ from core.kiwoom_order_client import KiwoomOrderClient
 from core.seed_allocator import allocate
 from core.regime_gate import seed_multiplier
 from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
+from core.macro_gate import macro_keep, month_events
 
 setup_logging()
 logger = logging.getLogger("TradingAPI")
@@ -282,6 +283,9 @@ def buy_preview(date: str | None = None):
     # 롤링 엣지 게이트(레짐) 배수 — 두 거래소 시드에 공통 적용(executor 와 동일).
     regime_mult, regime_diag = seed_multiplier()
 
+    # 거시 이벤트 게이트 — 보유 창의 sev3 예정 이벤트(FOMC·CPI·고용) keep. 두 거래소 공통(executor 와 동일).
+    m_keep, macro_diag = macro_keep("preview")
+
     # 2) 거래소별 시드 = 가용현금 × (거래소 점수합 / 전체 점수합), 그 안에서 점수가중 배분
     #    executor 와 동일하게 게이트를 반영한다: regime 은 총 시드 축소, futures(NXT)는 배분 뒤 섹터별 수량 감액.
     #    가격·현금·야간선물은 호출 시점 실시간값이라 실제 집행과 다를 수 있다(미리보기).
@@ -302,12 +306,13 @@ def buy_preview(date: str | None = None):
         for c, a in zip(items, cands):
             sig = c["sig"]
             shares, cost = a.get("shares", 0), a.get("cost", 0)
-            keep = effective_keep(factors.get(sig["stk_cd"], 1.0), regime_mult)  # 결합 하한 반영
+            # 선물(섹터별) × 거시(공통) 곱에 레짐 결합 하한 반영 (executor 와 동일)
+            keep = effective_keep(factors.get(sig["stk_cd"], 1.0) * m_keep, regime_mult)
             if keep < 1.0:
                 shares = gated_shares(shares, keep)  # 반올림 감액(mild 컷이 1주를 0으로 안 만듦)
                 cost = shares * c["price"]
             note = ("현재가 없음" if c["price"] <= 0
-                    else "선물 게이트 감액" if keep < 1.0 and shares < 1
+                    else "게이트 감액" if keep < 1.0 and shares < 1
                     else "배분 0주(시드 부족)" if shares < 1
                     else None)
             stocks.append({
@@ -334,8 +339,9 @@ def buy_preview(date: str | None = None):
         })
 
     regime = {"multiplier": regime_mult, **regime_diag}
+    macro = {"keep": m_keep, **macro_diag}
     return {"trade_date": trade_date, "cash": cash, "total_score": total_score,
-            "regime": regime, "venues": venues}
+            "regime": regime, "macro": macro, "venues": venues}
 
 
 def _attach_reason(rows: list[dict]) -> list[dict]:
@@ -468,6 +474,20 @@ def pnl_monthly(month: str | None = None):
     }
     total = sum(d["realized_pnl"] for d in days.values())
     return {"month": month, "total": total, "days": days}
+
+
+@app.get("/macro-events")
+def macro_events(month: str | None = None):
+    """월별 거시 이벤트(macro_event 캘린더) — 손익 달력 마커용. month=YYYYMM (기본 이번 달).
+
+    조회 실패는 빈 목록(달력은 이벤트 없이도 동작해야 한다 — 게이트의 미개입 원칙과 동형).
+    """
+    month = month or datetime.now().strftime("%Y%m")
+    try:
+        return {"month": month, "events": month_events(month)}
+    except Exception as e:
+        logger.warning("macro-events 조회 실패(빈 목록 반환): %s", e)
+        return {"month": month, "events": []}
 
 
 def _build_roundtrips(date_dash: str, sells: list[dict], realized_map: dict) -> list[dict]:

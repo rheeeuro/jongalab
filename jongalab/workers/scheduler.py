@@ -91,6 +91,9 @@ JOBS = [
     # 토요일 08:00 주간 가중치 튜너(GPT 호출 포함). 유예 6h.
     Job("weight_tuner", UV_RUN + ["workers/weight_tuner.py"],
         timeout=2400, grace=21600, minute="0", hour="8", day_of_week="sat"),
+    # 월요일 08:20 거시 이벤트 캘린더 고갈 체크(3주 내 바닥나면 exit 1 → 경보). 유예 6h.
+    Job("macro_event_check", UV_RUN + ["workers/macro_event_check.py"],
+        timeout=120, grace=21600, minute="20", hour="8", day_of_week="mon"),
 ]
 
 

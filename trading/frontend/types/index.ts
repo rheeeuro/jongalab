@@ -185,11 +185,35 @@ export interface BuyPreviewVenue {
   stocks: BuyPreviewStock[];
 }
 
+// 거시 이벤트 게이트 진단 (buy-preview·audit 공유 shape)
+export interface MacroGateDiag {
+  keep: number; // 시드 keep(≤1.0) — sev3 이벤트가 보유 창에 있으면 MACRO_EVENT_KEEP(0.5)
+  gated: boolean;
+  reason?: string; // 미개입 사유 (disabled / query_error …)
+  window_end?: string; // 보유 창 끝(다음 평일 09:00)
+  events?: { time: string; name: string; severity: number }[]; // 창 안 이벤트 (sev2는 관찰만)
+}
+
+// 거시 이벤트 캘린더 항목 (/macro-events — 손익 달력 마커용)
+export interface MacroEvent {
+  date: string; // YYYYMMDD (발표/결정일)
+  time: string; // HH:MM (KST)
+  name: string; // "FOMC 금리결정" / "미 CPI" …
+  category: string; // rate | inflation | employment | other
+  severity: number; // 3=중대(시드 감액 대상) / 2=주의(관찰)
+}
+
+export interface MacroEventsMonth {
+  month: string; // YYYYMM
+  events: MacroEvent[];
+}
+
 export interface BuyPreview {
   trade_date: string;
   cash: number; // 가용현금 (현금주문가능금액)
   total_score: number;
   regime: RegimeGateDiag; // 레짐 게이트(두 거래소 공통)
+  macro: MacroGateDiag; // 거시 이벤트 게이트(두 거래소 공통)
   venues: BuyPreviewVenue[];
 }
 

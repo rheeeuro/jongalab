@@ -20,6 +20,10 @@ class FakeData:
     def get_market_price(self, stk_cd):
         return self._price
 
+    def is_nxt_enabled(self, stk_cd):
+        # resolve_sell_venue 가 KRX 장외 시간대에 조회 — True 라야 어느 시각에 돌아도 매도 가능
+        return True
+
 
 class FakeEngine:
     """check_once 가 쓰는 최소 표면만: client(유지보수 인자), data, execute_sell."""

@@ -329,3 +329,21 @@ CREATE TABLE IF NOT EXISTS job_run (
     INDEX idx_job_time (job_name, scheduled_at),
     INDEX idx_time (scheduled_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 거시 이벤트 캘린더 (trading macro_gate 읽기 전용 조회)
+-- FOMC·CPI·고용 등 예정 이벤트를 수동 시드(연 단위, sql/18 참고).
+-- severity: 1 참고 / 2 주의(관찰 전용) / 3 중대(보유 창에 있으면 시드 감액)
+-- 고갈 감시: workers/macro_event_check.py (월 08:20, 3주 내 바닥나면 경보)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS macro_event (
+    id         INT AUTO_INCREMENT PRIMARY KEY,
+    event_time DATETIME NOT NULL,                  -- 발표/결정 시각(KST)
+    name       VARCHAR(100) NOT NULL,
+    category   VARCHAR(20) NOT NULL,               -- rate | inflation | employment | other
+    severity   TINYINT NOT NULL,
+    source     VARCHAR(20) NOT NULL DEFAULT 'manual',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_macro_event (event_time, name),
+    KEY idx_macro_event_time (event_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
