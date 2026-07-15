@@ -347,3 +347,19 @@ CREATE TABLE IF NOT EXISTS macro_event (
     UNIQUE KEY uq_macro_event (event_time, name),
     KEY idx_macro_event_time (event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================
+-- 콘텐츠 스킵 기록 (LLM 분석까지 갔지만 저장하지 않기로 확정된 콘텐츠)
+-- youtube_collector 가 15분마다 같은 영상을 재분석(Ollama 수 분/건)해
+-- 타임아웃 나는 것을 막는 캐시. is_content_processed() 가 content_analysis 와
+-- 함께 조회한다. 일시적 실패(LLM 오류·파싱 실패·자막 미생성)는 기록하지 않아
+-- 다음 주기에 재시도된다. 보존 정책: cleanup_content 워커가 3개월 이전 삭제.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS content_skip (
+    external_id VARCHAR(255) NOT NULL PRIMARY KEY, -- 유튜브ID or 텔레그램Link
+    platform    VARCHAR(20) NOT NULL DEFAULT 'youtube',
+    source_name VARCHAR(100) DEFAULT NULL,          -- 채널명
+    title       VARCHAR(255) DEFAULT NULL,
+    reason      VARCHAR(30) NOT NULL,               -- irrelevant | no_companies | hallucination | no_ticker
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

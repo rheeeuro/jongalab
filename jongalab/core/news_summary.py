@@ -48,7 +48,7 @@ def summarize_news(name: str, ticker: str, headlines: list[str]) -> dict | None:
     except Exception as e:
         logger.warning(f"뉴스 요약 실패 [{name}]: {e}")
         return None
-    if not result or not result.content:
+    if not result or not result.content or result.sentiment_score == -1:
         return None
 
     sentiment = result.sentiment_score

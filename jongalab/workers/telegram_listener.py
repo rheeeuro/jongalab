@@ -128,6 +128,10 @@ while True:
                 logging.info(f"[{channel_name}] 분석 결과 없음 - 저장하지 않습니다.")
                 return
 
+            if result.sentiment_score == -1:
+                logging.info(f"[{channel_name}] 주식 무관 판정 - 저장하지 않습니다.")
+                return
+
             if not result.related_companies:
                 logging.info(f"[{channel_name}] 관련 기업(related_companies) 없음 - 스킵합니다.")
                 return

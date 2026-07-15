@@ -28,7 +28,7 @@ jongalab/
 |---|---|
 | `config.py` | `.env` 로딩, DB(jongalab/trading)·AI(Ollama/OpenAI)·키움/KIS 설정 |
 | `db.py` | 컨텍스트 매니저(`get_db`, `get_trading_db`) — 안전한 연결 관리 |
-| `ai_service.py` | **LLM 추상화(`analyze_content`)** — Ollama(콘텐츠 분석)/OpenAI(다이제스트) 분기. 직접 SDK 호출 금지, 항상 여기로. LLM 은 구조화 JSON(tldr/tags/summary/stocks/strategy)만 내보내고 `build_analysis_markdown()` 이 `analysis_content`(마크다운)를 재조립 |
+| `ai_service.py` | **LLM 추상화(`analyze_content`)** — Ollama(콘텐츠 분석)/OpenAI(다이제스트) 분기. 직접 SDK 호출 금지, 항상 여기로. LLM 은 구조화 JSON(tldr/tags/summary/stocks/strategy)만 내보내고 `build_analysis_markdown()` 이 `analysis_content`(마크다운)를 재조립. 반환 규약: 일시적 실패(파싱/LLM 오류)=None(재시도 가치 있음), 주식 무관 확정 판정=`sentiment_score=-1` 인 결과 — 호출부는 -1 이면 저장 없이 스킵 |
 | `ai_utils.py` | LLM 응답 파싱(JSON 추출, 코드펜스/`<think>` 제거) |
 | `trading_engine.py` | **종가베팅 분석 엔진** ⚠️민감/가드. Phase 1 사전 스크리닝(거래대금 상위 50·시총) → Phase 2 정밀(수급 그레이드·정배열/신고가·대장주·테마·콘텐츠·등락률) → 종합점수·top-N. 2026-07-03 실증 반영: 등락률 항(2~12% 가점/15%+ 감점) 신설, 대장주 10→3·프로그램 10→0 축소, ka10131 연속수급 버그(_AL 접미사·코스피만·abs) 수정. 2026-07-07: 거래대금 후보 풀 30→50 확대, 테마 보너스는 거래대금 상위 50 교집합에만 부여. 2026-07-06: 5일 수급점수에서 기관/외인 순매수 0(ka10059 잠정치 미반영 가능성)을 중립 처리 — 가점 없이 스트릭 유지, 순매도(<0)만 스트릭 리셋(당일 집계 지연이 연속매수 보너스를 무너뜨리던 문제 수정) |
 | `prompts.py` | 콘텐츠 분석 프롬프트 ⚠️민감/가드. 구조화 출력(sentiment_score·tldr·tags·summary·stocks[방향/확신/시간축]·strategy·related_companies) |
@@ -71,17 +71,19 @@ jongalab/
   cron 시각마다 **서브프로세스**(`uv run workers/<잡>.py`)로 spawn. 스케줄·타임아웃은
   `workers/scheduler.py` 의 `JOBS` 가 소스 오브 트루스. 매 실행을 `job_run` 테이블에 기록하고
   실패(exit≠0/타임아웃) 시 관리자 텔레그램 경보. misfire 유예를 넘긴 지각 실행은 스킵(창 민감 잡 보호),
-  `max_instances=1` 로 중복 실행 방지. 수동 1회 실행: `uv run workers/scheduler.py --once <잡>`.
+  `max_instances=1` 로 중복 실행 방지. 타임아웃 kill 은 **프로세스 그룹 단위**(`start_new_session`+`killpg`)
+  — `uv` 부모만 죽이면 python 자식이 고아로 남아 중복 실행·DB 중복키 충돌을 일으킨다(2026-07-15 사건).
+  수동 1회 실행: `uv run workers/scheduler.py --once <잡>`.
   잡 코드 변경은 다음 실행에 자동 반영(매 실행 새 프로세스), **`scheduler.py` 자체 변경은 재시작 필요**(배포 훅이 수행).
 - **PM2 cron**(스케줄은 루트 `ecosystem.config.js`) — 나머지: 상시(telegram)·창 민감/자금 인접
   잡(gap_check·closing_bet·night_futures·token-refresh)과 trading 도메인 전체. 스케줄러 검증 후 단계 이관 예정.
 
 | 워커 | 스케줄 | 역할 |
 |---|---|---|
-| ⏰ `youtube_collector` | 15분 | 채널 RSS → 자막 → Ollama 분석 → `content_analysis` |
+| ⏰ `youtube_collector` | 15분 | 채널 RSS → 자막 → Ollama 분석 → `content_analysis`. 분석까지 갔지만 저장 안 하기로 **확정된** 영상(무관/기업없음/환각/티커없음)은 `content_skip` 에 기록해 재분석 방지(2026-07-15 — 미기록 시 15분마다 같은 영상을 Ollama 재분석해 잡 타임아웃). 일시적 실패(자막 미생성·LLM 오류)는 기록하지 않아 다음 주기 재시도 |
 | `telegram_listener` | 상시 | Telethon 감시. **일반 채널**(platform=telegram)→ LLM 분석 → `content_analysis`. **뉴스 채널**(platform=news, 고빈도)→ LLM 없이 사전매칭 → `news_mention` |
 | ⏰ `news_ticker_seed` | 일 07:30 (등록 시 1회) | 키움 ka10099(코스피/코스닥) → `ticker_dictionary` ACTIVE 업서트. 뉴스 사전매칭 커버리지용 |
-| ⏰ `cleanup_content` | 매일 04:00 | `content_analysis` 3개월 + `news_mention` 14일 이전 행 삭제(테이블 비대화 방지) |
+| ⏰ `cleanup_content` | 매일 04:00 | `content_analysis`·`content_skip` 3개월 + `news_mention` 14일 이전 행 삭제(테이블 비대화 방지) |
 | `closing_bet` | 평일 08:30~20시(30분) | Phase 1/2 스크리닝 → Phase 1 진입 전 **ETF/ETN 코드 기반 제외**(ka10099 mrkt_tp 8/60/70/90 상장 리스트 → `_excluded_codes`, 2026-07-10 — 이름 키워드 `EXCLUDE_KEYWORDS` 는 ARIRANG→PLUS 같은 리브랜딩에 뚫려 백업으로 강등, 로드 실패 시 키워드만으로 동작) → `daily_stock_report`(Phase 2 **유니버스 전체** 저장) + `trade_signal`(selected만 핸드오프, `rule_names` 태깅) 적재. 저장은 **분석 컬럼만 upsert**(탈락 종목만 삭제) — 다른 워커가 같은 날 행에 쓴 관측 컬럼(19:50 NXT 스냅샷 등)을 20:00 이후 재실행이 지우지 않는다(2026-07-09, 이전 DELETE+INSERT 는 매일 소실시킴). Phase 2는 음전 후보도 정밀분석·저장해 rule_evaluator 연구 표본으로 쓰고, 실제 selected/핸드오프만 선정 레이어에서 음전 제외한다(2026-07-07). 정배열/신고가는 가점으로만 반영(2026-07-03 풀 확대). **선정 레이어**(`edge_selection`, `EDGE_SELECTION_MODE` 기본 `legacy`=음전 제외 후 점수 top-N)가 `selected`/핸드오프만 정하고 점수·rank_no·저장은 불변 — `hybrid`/`rules` 는 데이터 게이트+승인 후 전환(Phase 4). veto rule 은 전 모드에서 선정 직전 제외 — 바이오 veto 는 2026-07-10 HLB 하한가 사건으로 도입: `veto_bio`(전면 제외, sql/16)를 잠깐 live 로 뒀다가 사용자 판단(바이오 랠리 전망)으로 `veto_bio_kosdaq`(코스닥 바이오만, sql/17)와 함께 **둘 다 candidate** — 페이퍼 성적 비교 검증 후 관리자 API 승격 예정. 판별 컬럼은 선정 시점 파생 `is_bio`(edge_features)·`market`(ka10100 캡처) |
 | `gap_check` (`--base-krx`/`--base-nxt`/`--check-nxt`/`--label-nxt`/`--check-krx`) | 평일 15:20 / 19:50 / 08:03 / 08:06 / 09:03 | 실매매 청산 창과 동일 기준의 갭 측정. 15:20 KRX(top-10)·19:50 NXT 기준가를 state 로 수집(19:50 NXT 조회되는 종목=NXT 종목) → 익일 08:03 NXT 종목(`gap_nxt_*`), 09:03 KRX 종목(`gap_krx_*`) 확정 — 종목별로 자기 venue 창 하나만 채점. 기준가 미수집 시 리포트가 폴백(알림에 ≈ 표시). 텔레그램 알림은 09:03 확정 후 하루 1회. **19:50(`--base-nxt`)은 확장 관측**: 유니버스 전체에 KRX 확정 종가+NXT 현재가(종목당 2콜)를 붙여 `daily_stock_report` NXT 스냅샷(`krx_close_price`·`nxt_price_1950`·`nxt_gap_pct`·`nxt_after_value`·`nxt_listed`) UPDATE + `market_snapshot` 1행 upsert. **08:06(`--label-nxt`)은 엣지 연구 라벨**: 전일 유니버스 전체 NXT 상장 종목의 08:06 NXT 가격 → `nxt_open_price`·`nxt_open_ret`(앵커=KRX 확정 종가) UPDATE — 실매매 08:03(settle·check-nxt, top-10)과 시각·부하 완전 분리. 관측 확장은 매매 영향 0 |
 | ⏰ `outcome_backfill` | 평일 09:30 | `daily_stock_report` 유니버스 전체에 **일봉 결과 라벨 4종**(`next_open_ret`·`next_high_ret`·`next_low_ret`·`next_close_ret` = 리포트일 종가→다음 거래일 시가/고가/저가/종가 등락률) + **실집행 통합 라벨**(`exec_leg_ret`·`exec_leg_venue`) 백필. `exec_leg_ret` 는 종목별 실제 청산 venue 기준(NXT: 전일 19:50→익일 08:03, KRX: 전일 15:20→익일 09:03)을 하나로 접은 evaluator 기본 라벨. 일봉은 같은 일봉 1회 조회에서 파생, 실집행 레그는 1분봉 첫 체결가 기준. ±35% 초과 아티팩트 스킵, 미완결분은 다음 실행에서 재시도. 실집행 레그는 `exec_leg_ret` 활성 rule 의 가장 이른 registered_at 이후만 대상(활성 rule 이 없으면 **건너뜀** — 과거 전체 분봉 백필 폭주 방지), NXT 시도 후 KRX 폴백 시 로그 기록 |

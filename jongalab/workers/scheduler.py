@@ -21,6 +21,7 @@ PM2 대비 추가되는 것:
 import argparse
 import logging
 import os
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -127,9 +128,12 @@ def run_job(job: Job) -> str:
         f.flush()
         offset = f.tell()
         try:
+            # start_new_session: uv run 이 낳는 python 자식까지 한 프로세스 그룹으로 묶는다
+            # (타임아웃 kill 시 그룹 전체를 죽여야 고아 워커가 남지 않는다).
             proc = subprocess.Popen(
                 job.cmd, cwd=job.cwd, stdout=f, stderr=subprocess.STDOUT,
                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                start_new_session=True,
             )
         except OSError as e:
             f.write(f"[scheduler] spawn 실패: {e}\n")
@@ -139,10 +143,13 @@ def run_job(job: Job) -> str:
             exit_code = proc.wait(timeout=job.timeout)
             status = "success" if exit_code == 0 else "fail"
         except subprocess.TimeoutExpired:
-            proc.kill()
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)   # uv 부모만 죽이면 python 자식이 고아로 남는다
+            except ProcessLookupError:
+                pass
             proc.wait()
             status = "timeout"
-            f.write(f"[scheduler] {job.timeout}s 타임아웃 — 강제 종료\n")
+            f.write(f"[scheduler] {job.timeout}s 타임아웃 — 프로세스 그룹 강제 종료\n")
 
     tail = _read_tail(log_path, offset)
     _finalize(job, run_id, status, exit_code, tail)

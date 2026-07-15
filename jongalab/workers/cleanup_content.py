@@ -7,7 +7,11 @@ import logging
 import sys
 
 from core.logging_setup import setup_logging
-from core.repository import delete_old_content_analysis, delete_old_news_mentions
+from core.repository import (
+    delete_old_content_analysis,
+    delete_old_content_skips,
+    delete_old_news_mentions,
+)
 
 setup_logging()
 logger = logging.getLogger("CleanupContent")
@@ -30,6 +34,12 @@ def main() -> int:
         logger.info(f"뉴스 언급 정리 완료: {NEWS_RETENTION_DAYS}일 이전 {news_deleted}건 삭제")
     except Exception as e:
         logger.error(f"뉴스 언급 정리 실패: {e}")
+        rc = 1
+    try:
+        skip_deleted = delete_old_content_skips(RETENTION_MONTHS)
+        logger.info(f"스킵 기록 정리 완료: {RETENTION_MONTHS}개월 이전 {skip_deleted}건 삭제")
+    except Exception as e:
+        logger.error(f"스킵 기록 정리 실패: {e}")
         rc = 1
     return rc
 

@@ -78,7 +78,11 @@ def get_ai_client() -> Client:
 def analyze_content(prompt: str, model: str | None = None, **chat_options) -> AnalysisResult | None:
     """
     프롬프트를 AI에 전달하고 파싱된 분석 결과를 반환.
-    sentiment_score가 -1이거나 파싱 실패 시 None 반환.
+
+    반환 규약:
+    - 파싱 실패·LLM 오류(일시적, 재시도 가치 있음) → None
+    - AI가 주식 무관으로 판단(확정 판정, 재시도 무의미) → sentiment_score=-1 인 AnalysisResult
+      호출부는 `result.sentiment_score == -1` 이면 저장/알림 없이 스킵해야 한다.
     """
     model = model or OLLAMA_MODEL
     try:
@@ -96,7 +100,7 @@ def analyze_content(prompt: str, model: str | None = None, **chat_options) -> An
 
         if data.get("sentiment_score") == -1:
             logging.info("⏭️ [스킵] AI가 주식 무관 콘텐츠로 판단 (sentiment_score: -1)")
-            return None
+            return AnalysisResult(sentiment_score=-1, raw=data)
 
         tldr = data.get("tldr", "") or ""
         tags = data.get("tags", []) or []

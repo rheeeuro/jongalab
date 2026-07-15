@@ -9,7 +9,12 @@ from core.logging_setup import setup_logging
 from core.config import OLLAMA_MODEL
 from core.prompts import YOUTUBE_ANALYSIS_PROMPT
 from core.ai_service import analyze_content
-from core.repository import get_active_sources, is_content_processed, save_content_analysis
+from core.repository import (
+    get_active_sources,
+    is_content_processed,
+    mark_content_skipped,
+    save_content_analysis,
+)
 from core.filters import should_save_content, validate_analysis
 from core.notifications import send_analysis_alert
 from core.ticker import get_tickers
@@ -60,6 +65,7 @@ class StockYoutubeAgent:
             script_text = self.get_transcript(video_id)
 
             if not script_text:
+                # 자막은 늦게 생성될 수 있고 재시도가 싸다(피드 조회뿐) — 스킵 확정하지 않는다
                 logging.warning("자막이 없어 분석하지 않음")
                 continue
 
@@ -67,16 +73,25 @@ class StockYoutubeAgent:
             result = analyze_content(prompt)
 
             if not result:
+                # 일시적 실패(LLM 오류/파싱 실패) — 다음 주기에 재시도
                 logging.warning("AI 분석 결과가 없어 저장하지 않음")
+                continue
+
+            # 아래 스킵들은 확정 판정 — 기록해 두지 않으면 15분마다 같은 영상을
+            # 재분석(Ollama 수 분/건)해 잡 타임아웃의 원인이 된다.
+            if result.sentiment_score == -1:
+                mark_content_skipped(video_id, 'youtube', name, video_title, 'irrelevant')
                 continue
 
             if not result.related_companies:
                 logging.info("관련 기업(related_companies) 없음 - 스킵합니다.")
+                mark_content_skipped(video_id, 'youtube', name, video_title, 'no_companies')
                 continue
 
             analysis_text = f"{video_title}\n{script_text}"
             if not validate_analysis(analysis_text, result.related_companies, video_title):
                 logging.warning("환각 감지 - 저장하지 않습니다.")
+                mark_content_skipped(video_id, 'youtube', name, video_title, 'hallucination')
                 continue
 
             video_url = f"https://www.youtube.com/watch?v={video_id}"
@@ -84,6 +99,7 @@ class StockYoutubeAgent:
             tickers = get_tickers(result.related_companies)
 
             if not should_save_content(result.sentiment_score, tickers, skip_neutral=False, allow_no_ticker=False):
+                mark_content_skipped(video_id, 'youtube', name, video_title, 'no_ticker')
                 continue
 
             save_content_analysis(

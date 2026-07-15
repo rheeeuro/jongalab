@@ -101,13 +101,36 @@ def get_contents_by_ticker(ticker: str) -> list[dict]:
 
 
 def is_content_processed(external_id: str) -> bool:
-    """이미 처리된 콘텐츠인지 확인"""
+    """이미 처리된 콘텐츠인지 확인 (저장 완료 또는 스킵 확정)"""
     with get_db() as (conn, cursor):
         cursor.execute(
-            "SELECT count(*) as cnt FROM content_analysis WHERE external_id = %s",
-            (external_id,),
+            "SELECT EXISTS(SELECT 1 FROM content_analysis WHERE external_id = %s) "
+            "OR EXISTS(SELECT 1 FROM content_skip WHERE external_id = %s) AS processed",
+            (external_id, external_id),
         )
-        return cursor.fetchone()["cnt"] > 0
+        return cursor.fetchone()["processed"] > 0
+
+
+def mark_content_skipped(
+    external_id: str,
+    platform: str,
+    source_name: str,
+    title: str,
+    reason: str,
+) -> None:
+    """분석까지 갔지만 저장하지 않기로 확정된 콘텐츠를 기록한다.
+
+    이후 is_content_processed() 가 True 를 반환해 매 주기 재분석(LLM 비용)을 막는다.
+    확정 판정(무관/기업없음/환각/티커없음)만 기록할 것 — 일시적 실패는 기록하지
+    않아야 다음 주기에 재시도된다.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "INSERT IGNORE INTO content_skip (external_id, platform, source_name, title, reason) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (external_id, platform, source_name, title[:255] if title else None, reason),
+        )
+        conn.commit()
 
 
 def save_content_analysis(
@@ -194,6 +217,22 @@ def delete_old_content_analysis(months: int = 3) -> int:
     with get_db() as (conn, cursor):
         cursor.execute(
             "DELETE FROM content_analysis WHERE created_at < NOW() - INTERVAL %s MONTH",
+            (months,),
+        )
+        deleted = cursor.rowcount
+        conn.commit()
+    return deleted
+
+
+def delete_old_content_skips(months: int = 3) -> int:
+    """N개월 이전 스킵 기록을 삭제한다 (cleanup_content 워커에서 호출).
+
+    RSS 피드는 채널당 최신 영상만 보므로, 오래된 스킵 기록은 재분석 방지 가치가 없다.
+    삭제된 행 수를 반환한다.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "DELETE FROM content_skip WHERE created_at < NOW() - INTERVAL %s MONTH",
             (months,),
         )
         deleted = cursor.rowcount
