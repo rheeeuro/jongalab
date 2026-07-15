@@ -59,7 +59,7 @@ jongalab/
 `macro_event`(거시 이벤트 캘린더 조회 — 고갈 감시용 `last_event_time`, trading macro_gate 는 직접 읽기 전용 조회).
 
 ### `routers/` — 엔드포인트
-`admin`(인증) · `contents`(콘텐츠) · `news`(뉴스 재료 히트 `/api/news/heat` + 종목별 당일 헤드라인 `/api/news/{ticker}` — 종목 상세 페이지용) · `market`(주가/지수 + 다가오는 거시 이벤트 `/api/macro-events?days=` — macro_event 캘린더, 마켓 페이지 카드·메인 '오늘 밤 이벤트' 배너용, 실패 시 빈 목록) · `stock_report`(리포트·갭) ·
+`admin`(인증) · `contents`(콘텐츠) · `news`(뉴스 재료 히트 `/api/news/heat` + 종목별 당일 헤드라인 `/api/news/{ticker}` — 종목 상세 페이지용) · `market`(주가/지수 + 거시 이벤트 `/api/macro-events` — macro_event 캘린더: 기본 `?days=`(향후, 마켓 카드·메인 '오늘 밤' 배너) / `?month=YYYY-MM`(그 달 전체·과거 포함, 리포트 캘린더 셀 마커·범례), 실패 시 빈 목록) · `stock_report`(리포트·갭) ·
 `source`·`strategy_config`·`weight_tuning`·`telegram_user`·`job_runs`(스케줄러 잡 실행 이력 `/api/job-runs` — admin '워커 현황' 페이지용)(admin 전용) · `ticker`(조회 공개/수정 admin) ·
 `edge_rule`(가설 원장 — GET 스코어보드 공개(daily 는 matched 제외 스칼라만+최신 매칭 1일치 별도, `/{id}/matched?days=`(≤90)로 날짜별 매칭 종목 이력을 별도 제공 — 종목별 change_pct·selected 를 리포트에서 조인해 복기 맥락 포함), POST 등록/승격/강등만 admin. 등록 시 `title`(한글 카드 제목)·`description`(인과 근거) 필수, `family`(도메인)·`role`(selector/veto/benchmark, 기본 selector)은 edge_policy 레지스트리로 검증 — 같은 family 가설이 늘며 카드 구분이 안 되던 문제로 2026-07-06 title 컬럼 추가(NULL 이면 프론트가 name 슬러그 폴백). 승격 게이트는 `core/edge_policy.check_promotion` 단일 소스 — 미충족 시 409+사유, force 없음, 대조군 부재 시 fail-closed. 라우터는 월 승격 상한(2개)만 추가 검사).
 새 라우터는 `routers/` 에 만들고 `api.py` 의 `include_router` 로 등록한다.

@@ -16,6 +16,19 @@ def last_event_time() -> datetime | None:
         return row["last_ev"] if row else None
 
 
+def by_month(month: str) -> list[dict]:
+    """해당 월(YYYY-MM)의 이벤트 전체(과거 포함, 시각순) — 리포트 캘린더 마커용."""
+    start = datetime.strptime(month, "%Y-%m")
+    end = datetime(start.year + (start.month == 12), start.month % 12 + 1, 1)
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT event_time, name, category, severity FROM macro_event "
+            "WHERE event_time >= %s AND event_time < %s ORDER BY event_time",
+            (start, end),
+        )
+        return cursor.fetchall()
+
+
 def upcoming(days: int = 30) -> list[dict]:
     """지금부터 days일 안의 이벤트(시각순) — 대시보드 '다가오는 거시 이벤트' 표시용."""
     with get_db() as (conn, cursor):

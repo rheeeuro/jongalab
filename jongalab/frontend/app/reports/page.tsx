@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { TopPick } from "@/types";
+import { TopPick, MacroEventsResponse } from "@/types";
 import { apiFetch } from "@/lib/api";
 import Link from "next/link";
 import { FileText, ChevronLeft, ChevronRight } from "lucide-react";
@@ -10,6 +10,7 @@ export const metadata: Metadata = {
 import {
   ReportCalendarGrid,
   CalendarCellData,
+  CalendarEvent,
 } from "@/components/ReportCalendarGrid";
 
 type GapStat = { wins: number; losses: number; flats: number; total: number };
@@ -42,6 +43,25 @@ async function getTopThemes(
     `/api/sector-report/top-themes?dates=${encodeURIComponent(dates.join(","))}&limit=3`,
     {},
   );
+}
+
+// 선택 월의 거시 이벤트(FOMC·CPI 등, 과거 포함)를 날짜별로 묶는다 — 캘린더 셀 마커용
+async function getMacroEventsByDate(
+  month: string,
+): Promise<Record<string, CalendarEvent[]>> {
+  const res = await apiFetch<MacroEventsResponse | null>(
+    `/api/macro-events?month=${month}`,
+    null,
+  );
+  const byDate: Record<string, CalendarEvent[]> = {};
+  for (const ev of res?.events ?? []) {
+    (byDate[ev.date] ??= []).push({
+      name: ev.name,
+      time: ev.time,
+      severity: ev.severity,
+    });
+  }
+  return byDate;
 }
 
 export const dynamic = "force-dynamic";
@@ -131,6 +151,7 @@ export default async function ReportsArchivePage({
   const canPrev = selectedMonth > minMonth;
   const canNext = selectedMonth < maxMonth;
 
+  const macroByDate = await getMacroEventsByDate(selectedMonth);
   const weeks = buildWeeks(selectedMonth, picksByDate);
 
   // 클라이언트 컴포넌트로 넘길 직렬화 가능한 셀 데이터
@@ -148,6 +169,7 @@ export default async function ReportsArchivePage({
           gap && gap.total > 0
             ? { wins: gap.wins, losses: gap.losses, total: gap.total }
             : null,
+        events: macroByDate[cell.dateStr] ?? [],
       };
     }),
   );
