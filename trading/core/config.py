@@ -152,6 +152,13 @@ MACRO_FX_BAND = float(os.getenv('MACRO_FX_BAND', '1.0'))         # 원/달러 �
 MACRO_FX_FULL = float(os.getenv('MACRO_FX_FULL', '2.0'))
 MACRO_PROXY_MAX_CUT = float(os.getenv('MACRO_PROXY_MAX_CUT', '0.5'))  # 관찰 keep 계산용 축당 최대 감액
 
+# ── 뉴스 베토 (core.news_veto + workers/monitor.py) — 밤사이 중대 악재 종목 개장 즉시 전량매도 ──
+# jongalab workers/news_guard.py 가 보유 종목의 밤사이 뉴스(FDA 불승인·계약 파기류)를 OpenAI 로
+# 판정해 jongalab DB news_veto_verdict(severe=1)에 기록하면, monitor 가 읽어 가격 무관·가장 이른
+# 거래소(NXT 08시대/KRX 09:00)에서 전량 매도한다. 조회 실패·비활성 시 미개입(09:28 백스톱 유지).
+NEWS_VETO_ENABLED = os.getenv('NEWS_VETO_ENABLED', '1') == '1'
+NEWS_VETO_CACHE_SEC = int(os.getenv('NEWS_VETO_CACHE_SEC', '60'))  # 15초 폴링의 jongalab DB 조회 캐시 TTL
+
 # ── ⚠️ 매매 안전장치 ──
 # 'paper': 모의(주문 미전송, 의도만 로깅·기록) / 'live': 실주문 전송. 기본값은 paper.
 TRADING_MODE = os.getenv('TRADING_MODE', 'paper').lower()

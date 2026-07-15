@@ -363,3 +363,27 @@ CREATE TABLE IF NOT EXISTS content_skip (
     reason      VARCHAR(30) NOT NULL,               -- irrelevant | no_companies | hallucination | no_ticker
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 뉴스 베토 판정 (trading monitor 읽기 전용 조회)
+-- news_guard(평일 07:00~09:25)가 보유 종목의 밤사이 중대 악재를 OpenAI 로 판정해 기록하고,
+-- trading monitor(08:01~09:30)가 severe=1 종목을 개장 즉시 전량 매도한다(sql/19 참고).
+-- severe 는 GREATEST upsert 로 1→0 강등 금지(매도 진행 중 판정 뒤집힘 방지).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS news_veto_verdict (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    verdict_date CHAR(8) NOT NULL,                 -- 매도 아침 거래일 YYYYMMDD (trading 조회 키)
+    stk_cd VARCHAR(20) NOT NULL,
+    stk_nm VARCHAR(100),
+    severe TINYINT(1) NOT NULL DEFAULT 0,          -- 1=강제청산 대상(확신도 게이트 통과)
+    confidence TINYINT,                            -- LLM 확신도 0~100
+    category VARCHAR(20),                          -- 임상실패|계약파기|횡령배임|거래정지|규제제재|증자희석|사고재해|해당없음
+    reason VARCHAR(500),
+    headlines JSON,                                -- 판정에 쓴 헤드라인 스냅샷(감사·튜닝용)
+    news_max_at DATETIME,                          -- 반영된 마지막 뉴스 created_at (신규 헤드라인 재판정 기준)
+    model VARCHAR(40),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_news_veto (verdict_date, stk_cd),
+    KEY idx_veto_date_severe (verdict_date, severe)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

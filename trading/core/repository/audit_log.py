@@ -158,7 +158,7 @@ def last_heartbeat():
 # 폴링 워커가 남기는 활동 이벤트 (하트비트 monitor_poll/buy_poll 은 제외 — 로그 피드 노이즈 방지).
 #   매도 모니터: monitor_*  /  매수 집행: buy_start, buy_exec(눌림/데드라인), buy_skip
 _ACTIVITY_EVENTS = (
-    "monitor_start", "monitor_trail", "monitor_stop", "monitor_hardstop",
+    "monitor_start", "monitor_trail", "monitor_stop", "monitor_hardstop", "monitor_newsveto",
     "buy_start", "buy_exec", "buy_skip",
     "regime_gate", "futures_gate",  # 시드 축소 사유(레짐 역전 / 선물 하락 섹터 감액)
 )

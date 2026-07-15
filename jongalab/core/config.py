@@ -40,6 +40,14 @@ OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'exaone3.5:7.8b')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5.4-nano')
 
+# ── 뉴스 베토 감시 (workers/news_guard.py) ──
+# 보유 종목의 밤사이 중대 악재를 OpenAI 로 판정해 news_veto_verdict 에 기록 →
+# trading monitor 가 severe=1 종목을 개장 즉시 전량 매도한다.
+NEWS_GUARD_POLL_SEC = int(os.getenv('NEWS_GUARD_POLL_SEC', '300'))            # 판정 폴링 주기(초)
+# severe 발동 최소 확신도(0~100) — 미만이면 severe=0 으로 기록만(오탐 완충)
+NEWS_GUARD_MIN_CONFIDENCE = int(os.getenv('NEWS_GUARD_MIN_CONFIDENCE', '85'))
+NEWS_GUARD_MAX_HEADLINES = int(os.getenv('NEWS_GUARD_MAX_HEADLINES', '30'))   # 종목당 판정 헤드라인 상한
+
 # 스코어/선정 로직 유효 시작일(YYYY-MM-DD, inclusive) — 이 날짜 이전은 구 로직이라
 # 가중치 튜닝 백테스트 표본에서 제외한다. weight_tuner 가 분석 주 시작을 이 날짜로 클램프.
 # (trading 쪽 레짐 게이트의 REGIME_MIN_DATE 와 같은 로직 변경을 가리킴 — 도메인 분리라 값만 맞춘다.)

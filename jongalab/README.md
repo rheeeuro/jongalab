@@ -39,6 +39,7 @@ jongalab/
 | `ticker.py` | 기업명↔티커 변환, 신규 티커 등록, 콘텐츠 본문 기업명 추출 |
 | `news_matcher.py` | 뉴스 헤드라인 → 종목 사전매칭(LLM 없음). ticker_dictionary(ACTIVE) 인메모리 매처, 경계 룩어라운드 + 발행처 대괄호([]·【】) 제거로 오탐 억제 |
 | `news_summary.py` | 후보 소수 뉴스 재료 배치 요약(Ollama, `analyze_content` 경유). 요약과 함께 재료 방향(`news_sentiment` 0~100)·유형(`news_catalyst`, 화이트리스트 강제)을 같은 1회 호출로 라벨링. 프롬프트는 가드 파일과 분리 |
+| `news_veto_judge.py` | **보유 종목 밤사이 중대 악재 판정**(OpenAI `complete_json`, temperature=0 — 돈이 걸린 판정이라 로컬 Ollama 불사용). news_mention 헤드라인만 근거로 '시초가 갭하락이 거의 확실한 중대 악재'(FDA 불승인·계약 파기·횡령·거래정지류) 여부를 JSON 판정. severe 발동은 `is_actionable`(confidence ≥ `NEWS_GUARD_MIN_CONFIDENCE`=85) 게이트 통과 시만 — 형식 불량 응답은 None(무효, 재시도)으로 절대 발동으로 새지 않는다(`validate_verdict`). 프롬프트는 가드 파일과 분리. 단위 테스트 `tests/test_news_veto_judge.py` |
 | `filters.py` | 분석 결과 저장 여부 판단(점수 범위·티커 포함·환각 검증) |
 | `backtest.py` | 가중치 제안 백테스트 — `score_candidate` 공식을 미러링(`recompute_score`)해 저장된 표본에 제안 가중치를 재적용, 승자/패자 판별력 비교. ⚠️엔진 공식 변경 시 미러도 갱신(테스트가 드리프트 감지) |
 | `edge_predicate.py` | **Edge Ledger predicate 평가기**(순수 함수, DB 무의존). `evaluate(predicate, row, market)` — 조건 목록 AND 결합(op 9종: == != > >= < <= between in not_null, `market.` 접두사로 market_snapshot 참조, NULL=매칭실패). `validate_predicate` 로 저장 전 검증. 단위 테스트 `tests/test_edge_predicate.py` 가 계약 고정 |
@@ -56,7 +57,9 @@ jongalab/
 `trade_result`(trading.audit_log 실현손익 읽기) · `strategy_config`(점수 가중치·임계값) ·
 `weight_tuning`(주간 GPT 제안) · `edge_rule`(가설 원장 CRUD·stats·일별 채점 edge_rule_daily) · `kis_token` · `kis_night_future` · `telegram_user` ·
 `job_run`(스케줄러 잡 실행 이력 — start/finish 기록, 잡별 최신/최근 조회, 재시작 sweep·60일 정리) ·
-`macro_event`(거시 이벤트 캘린더 조회 — 고갈 감시용 `last_event_time`, trading macro_gate 는 직접 읽기 전용 조회).
+`macro_event`(거시 이벤트 캘린더 조회 — 고갈 감시용 `last_event_time`, trading macro_gate 는 직접 읽기 전용 조회) ·
+`news_veto`(뉴스 베토 판정 `news_veto_verdict` — news_guard 가 upsert(severe 는 GREATEST 로 1→0 강등 금지), trading monitor 는 직접 읽기 전용 조회) ·
+`trading_position`(trading DB `position` 읽기 전용 — news_guard 의 보유 종목 집합 조회 전용, 쓰기 금지).
 
 ### `routers/` — 엔드포인트
 `admin`(인증) · `contents`(콘텐츠) · `news`(뉴스 재료 히트 `/api/news/heat` + 종목별 당일 헤드라인 `/api/news/{ticker}` — 종목 상세 페이지용) · `market`(주가/지수 + 거시 이벤트 `/api/macro-events` — macro_event 캘린더: 기본 `?days=`(향후, 마켓 카드·메인 '오늘 밤' 배너) / `?month=YYYY-MM`(그 달 전체·과거 포함, 리포트 캘린더 셀 마커·범례), 실패 시 빈 목록) · `stock_report`(리포트·갭) ·
@@ -82,6 +85,7 @@ jongalab/
 |---|---|---|
 | ⏰ `youtube_collector` | 15분 | 채널 RSS → 자막 → Ollama 분석 → `content_analysis`. 분석까지 갔지만 저장 안 하기로 **확정된** 영상(무관/기업없음/환각/티커없음)은 `content_skip` 에 기록해 재분석 방지(2026-07-15 — 미기록 시 15분마다 같은 영상을 Ollama 재분석해 잡 타임아웃). 일시적 실패(자막 미생성·LLM 오류)는 기록하지 않아 다음 주기 재시도 |
 | `telegram_listener` | 상시 | Telethon 감시. **일반 채널**(platform=telegram)→ LLM 분석 → `content_analysis`. **뉴스 채널**(platform=news, 고빈도)→ LLM 없이 사전매칭 → `news_mention` |
+| `news_guard` | 평일 07:00~09:25 (5분 폴링, PM2 — 자금 인접이라 스케줄러 비이관) | **뉴스 베토 감시** — 보유 종목(trading.position 읽기 전용) × 전거래일 15:00 이후 `news_mention` 을 OpenAI(`news_veto_judge`)로 판정해 `news_veto_verdict` upsert + severe 확정 시 관리자 텔레그램. trading monitor 가 severe=1 을 읽어 개장 즉시(NXT 08시대/KRX 09:00) **전량 매도**. 이미 severe 확정·신규 헤드라인 없음은 스킵(LLM 호출 아침당 0~10회), 보유 0 이면 자체 종료. LLM/DB 실패 시 기록 없이 다음 폴링 재시도(판정 없음 = trading 미개입, settle 09:28 백스톱 유지). 수동 검증 `--once` |
 | ⏰ `news_ticker_seed` | 일 07:30 (등록 시 1회) | 키움 ka10099(코스피/코스닥) → `ticker_dictionary` ACTIVE 업서트. 뉴스 사전매칭 커버리지용 |
 | ⏰ `cleanup_content` | 매일 04:00 | `content_analysis`·`content_skip` 3개월 + `news_mention` 14일 이전 행 삭제(테이블 비대화 방지) |
 | `closing_bet` | 평일 08:30~20시(30분) | Phase 1/2 스크리닝 → Phase 1 진입 전 **ETF/ETN 코드 기반 제외**(ka10099 mrkt_tp 8/60/70/90 상장 리스트 → `_excluded_codes`, 2026-07-10 — 이름 키워드 `EXCLUDE_KEYWORDS` 는 ARIRANG→PLUS 같은 리브랜딩에 뚫려 백업으로 강등, 로드 실패 시 키워드만으로 동작) → `daily_stock_report`(Phase 2 **유니버스 전체** 저장) + `trade_signal`(selected만 핸드오프, `rule_names` 태깅) 적재. 저장은 **분석 컬럼만 upsert**(탈락 종목만 삭제) — 다른 워커가 같은 날 행에 쓴 관측 컬럼(19:50 NXT 스냅샷 등)을 20:00 이후 재실행이 지우지 않는다(2026-07-09, 이전 DELETE+INSERT 는 매일 소실시킴). Phase 2는 음전 후보도 정밀분석·저장해 rule_evaluator 연구 표본으로 쓰고, 실제 selected/핸드오프만 선정 레이어에서 음전 제외한다(2026-07-07). 정배열/신고가는 가점으로만 반영(2026-07-03 풀 확대). **선정 레이어**(`edge_selection`, `EDGE_SELECTION_MODE` 기본 `legacy`=음전 제외 후 점수 top-N)가 `selected`/핸드오프만 정하고 점수·rank_no·저장은 불변 — `hybrid`/`rules` 는 데이터 게이트+승인 후 전환(Phase 4). veto rule 은 전 모드에서 선정 직전 제외 — 바이오 veto 는 2026-07-10 HLB 하한가 사건으로 도입: `veto_bio`(전면 제외, sql/16)를 잠깐 live 로 뒀다가 사용자 판단(바이오 랠리 전망)으로 `veto_bio_kosdaq`(코스닥 바이오만, sql/17)와 함께 **둘 다 candidate** — 페이퍼 성적 비교 검증 후 관리자 API 승격 예정. 판별 컬럼은 선정 시점 파생 `is_bio`(edge_features)·`market`(ka10100 캡처) |
@@ -101,6 +105,8 @@ jongalab/
 ```
 콘텐츠 수집(youtube/telegram) ──► content_analysis (sentiment, 한줄요약 tldr, 테마 tags, 종목별 방향 stock_calls)
 뉴스 속보 채널(고빈도) ──사전매칭(LLM X)──► news_mention (종목·헤드라인)
+                                        │ └► 익일 07:00~09:25 news_guard ─► 보유 종목(trading.position) 밤사이 중대 악재 OpenAI 판정
+                                        │      → news_veto_verdict(severe=1) ─► trading monitor 가 개장 즉시 전량 매도(뉴스 베토)
                                         │
 종가 분석(closing_bet, 평일 13:00~15:00)│
   Phase 1 거래대금(시장별 상위 50) + 관심섹터 보강 · ETF/ETN 코드셋 제외(ka10099, 2026-07-10) · 공통 기본필터(제외키워드·시총·거래대금) ─┘

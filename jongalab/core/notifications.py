@@ -70,6 +70,27 @@ def send_job_alert(job_name: str, status: str, exit_code: int | None, log_tail: 
         logging.error(f"❌ 스케줄러 경보 전송 실패: {e}")
 
 
+def send_news_veto_alert(stk_nm: str, stk_cd: str, category: str, confidence: int,
+                         reason: str, evidence: list[str] | None = None):
+    """뉴스 베토 severe 판정 경보 — 관리자 전용 (workers/news_guard.py).
+
+    경보 실패가 판정 루프를 막으면 안 되므로 예외는 삼키고 로그만 남긴다.
+    """
+    try:
+        ev = "\n".join(f"  · {e}" for e in (evidence or [])[:2])
+        message = (
+            f"🚨 *뉴스 베토 판정* {stk_nm}(`{stk_cd}`)\n"
+            f"분류: {category} · 확신도 {confidence}\n"
+            f"사유: {reason}\n"
+            + (f"근거:\n{ev}\n" if ev else "")
+            + "→ 개장 즉시 전량 매도 예정 (NXT 가능 시 08시대, 아니면 09:00 KRX)"
+        )
+        count = _send_telegram_admin(message)
+        logging.info(f"📨 뉴스 베토 경보 전송: {stk_cd} -> {count}개 채팅방")
+    except Exception as e:
+        logging.error(f"❌ 뉴스 베토 경보 전송 실패: {e}")
+
+
 def send_analysis_alert(channel: str, title: str, analysis: str, score: int = 50, related_tickers: list[dict] | None = None):
     """콘텐츠 분석 결과 텔레그램 전송 (YouTube/Telegram 공통)"""
     try:

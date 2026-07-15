@@ -43,6 +43,7 @@ trading/
 │   ├── regime_gate.py          # 롤링 엣지 게이트: 최근 선정종목 점수판별력(익일시가 상위½−하위½)이 역전이면 총 시드 축소(이진 배수)
 │   ├── futures_gate.py         # 선물 환경 게이트(KRX·NXT): 매수시점 NQ+코스피선물(KRX=주간/NXT=야간) 하락 시 섹터별 차등 감액(반도체·IT 더, 방어주 덜)
 │   ├── macro_gate.py           # 거시 이벤트 게이트: 보유 창(매수→익일 시가)에 sev3 예정 이벤트(FOMC·CPI·고용, jongalab macro_event)가 있으면 시드 keep 축소 + VIX·WTI·환율 프록시 관찰
+│   ├── news_veto.py            # 뉴스 베토 조회: jongalab news_veto_verdict(severe=1, 밤사이 중대 악재 판정) 읽기 전용 — monitor 가 해당 종목 개장 즉시 전량매도. 실패 시 미개입, 60s TTL 캐시
 │   ├── kiwoom_order_client.py  # 키움 REST 직접 호출(kt10000~3 주문, kt00018 잔고, ka10074~6)
 │   ├── kiwoom_data_client.py   # kiwoom 데이터 서버(:8001) 읽기(현재가·NXT·차트)
 │   ├── fill_sync.py            # 실거래 체결 동기화(ka10076 → fill/position)
@@ -96,6 +97,10 @@ settle --venue krx_open (09:03) · NXT 미상장 종목: KRX 개장가로 갭 �
     (08:00~08:01 은 얇은 단발 호가 허수가 끼어 제외). KRX 불가 종목은 개장 드리프트가 없어(평균 ≈0%)
     시점 중립이라 :03 으로 통일. KRX 상장 종목과 달리 NXT 불가 종목엔 "1분이 더 높다"가 성립하지 않는다.
 monitor (08:01~09:30, 15초 폴링)
+  · **0순위 뉴스 베토**: jongalab news_guard(07:00~09:25)가 밤사이 중대 악재(FDA 불승인·계약 파기류)로
+    판정한 종목(news_veto_verdict severe=1)은 **가격 무관 즉시 전량 매도**(tag=newsveto) — 하드손절보다
+    앞이라 갭이 가격에 반영되기 전에도 탈출. 매도 전송 성공 시 관리자 텔레그램, 체결 확인 후 plan 해제.
+    조회 실패/비활성(NEWS_VETO_ENABLED)이면 미개입(core/news_veto.py, 60s 캐시) — 아래 백스톱 불변.
   · 하드 손절(HARD_STOP_LOSS_PCT) · 트레일링 스톱(TRAIL_PCT, 단조 상승) → 돌파 시 전량 매도(tag=stop)
   · 매도 거래소는 `resolve_sell_venue()`가 시각+NXT여부로 결정: 정규장(09:00~15:30)=KRX 시장가, 그 외 NXT 시간대는 NXT 가능 종목만 NXT(최유리IOC). **NXT 불가 종목이 09:00 이전에 손절/스탑에 걸리면 매도 보류**(NXT 주문은 키움에서 거부되고 KRX는 개장 전) → 09:00 KRX 개장 후 폴링에서 청산. is_nxt_enabled 는 발동 시점에만 조회(실패 시 보수적 보류, 다음 폴링서 자가복구)
   · 스테일 주문 취소 + dead 주문 정리 + 체결 동기화(유지보수 단계는 각자 격리 — 실패해도 손절/스탑 감시는 계속) + 하트비트 로그(대시보드 표시; check_once 성공 시에만 찍어 점검 실패가 '신호 없음'으로 드러남)
@@ -127,6 +132,7 @@ reconcile (20:00) · kt00018 잔고 vs 로컬 position 대조 → 드리프트 �
 | 롤링 엣지 게이트 | `regime_gate.py`, `signal_executor.py` | 최근 REGIME_WINDOW_DAYS 선정종목의 점수 판별력(익일시가 상위½−하위½ 스프레드)이 역전(split < REGIME_INVERT_THRESHOLD, 기본 0)이면 총 시드에 **이진 배수** REGIME_MIN_MULT(기본 0.3) 적용, 아니면 1.0 — 2026-07-14 백테스트(4/9~7/10 60판단일)에서 역전 '깊이'가 다음날 성적과 무상관(강한 역전일 +0.36% > 약한 축소일 −0.18%)이라 선형 램프를 이진으로 대체. jongalab `daily_stock_report.next_open_ret` 읽기전용 조회(단 `report_date >= REGIME_MIN_DATE` 만 — 그 이전은 구 스코어 로직이라 제외), **거래일 < REGIME_MIN_DAYS(기본 10)면 미개입(1.0)** — 종목-일 표본은 같은 날 시장 무브로 상관되어 거래일이 실효 표본(edge_policy PROMO_MIN_DAYS 와 동일 논리, 구 '종목-일 30개' 기준은 실효 4거래일로 최대 축소가 나가는 문제로 대체). **매 판단(미개입 포함)을 `audit_log('regime_gate')`에 기록**해 게이트 성적을 사후 채점 가능 → 모니터 탭 활동 피드에 사유 노출. `/buy-preview`(매수 예정)도 동일 배수로 시드를 미리 반영·표시 |
 | 선물 환경 게이트(섹터 차등) | `futures_gate.py`, `signal_executor.py` | **KRX·NXT(`FUTURES_GATE_VENUES`).** 매수시점 NQ 선물(jongalab market-indices) + 코스피200 선물 방향으로. **코스피 축은 그 시각 살아있는 선물**: KRX(15:20)=주간선물(K200DF, market-indices 실시간) / NXT(19:50)=야간선물(K200NF, jongalab DB `kis_night_future`, 신선도 FUTURES_STALE_SEC 초과 시 미개입). seed_allocator 등가중 배분 뒤 **종목 섹터(키움 업종명, `ticker_dictionary`)별 keep-factor(≤1.0)로 수량 감액**. 섹터 클래스별 축 민감도: 반도체·IT(NQ 민감)·경기민감주(자동차·화학·금융, 지수 민감)를 더 깎고 통신·음식료 등 방어주를 덜 깎음. `keep=∏_axis(1−MAX_CUT×민감도×하락강도)`, 하락강도는 폭 비례(-FUTURES_FLAT_BAND=0 ~ -FUTURES_FULL_CUT_PCT=1) — 작은 하락(NQ -0.5%)은 살짝, 급락(-2%+)은 최대컷. 하한 FUTURES_SECTOR_MIN_KEEP(0.25). 상승/보합이면 감액 없음(reduce-only). 수량 적용은 `gated_shares()` 로 **반올림**(내림 아님) — mild 컷(keep≥0.5)이 1주짜리를 0주로 없애지 않도록(keep<0.5 만 0 가능). **결합 하한**: 레짐×선물 곱이 SEED_COMBINED_MIN_MULT(0.3) 밑으로 안 내려가게 종목 keep 을 `effective_keep()` 로 클램프(REGIME_MIN_MULT>=이 값이어야 보장, 기본 둘 다 0.3). 지표 취득 실패면 미개입. 매 적용을 audit_log(`futures_gate`)에 선물값+섹터별 keep 스냅샷으로 기록 → 모니터 탭 활동 피드에 사유(NQ·코스피선물 등락, 감액 종목수·섹터) 노출. `/buy-preview`도 동일 로직으로 예상 수량을 미리 감액·표시(NXT 는 야간세션 개장 전이면 미개입·"대기" 표기). ⚠️ **섹터 민감도는 통설 기반 미검증 가정** — 추후 stk_cd→섹터 조인으로 실측 후 재튜닝 |
 | 거시 이벤트 게이트 | `macro_gate.py`, `signal_executor.py` | **보유 창(매수→다음 평일 09:00)의 '예정 이벤트 리스크'** — futures_gate 가 이미 실현된 선물 방향을 재는 것과 상보적(발표 전엔 선물이 보합이라 저건 못 잡음). jongalab DB `macro_event`(수동 시드 캘린더, `sql/18. migrate_macro_event.sql`, 2026 연말까지 시드)에서 창 안 이벤트를 조회해 **severity 3(FOMC·CPI·고용) 존재 시 시드 keep=MACRO_EVENT_KEEP(0.5)**, 아니면 1.0. 근거: 2026-07-15 백테스트(4/9~7/10 63거래일) — sev3 이벤트 밤 선정종목 일평균 −0.74% vs 평일 +1.04%(Welch t=−2.27, 혼재일 제외 t=−2.13, 음수일 62% vs 25%). **PPI(sev2)는 +3.6%로 감액 근거 없음 → 관찰 전용**(진단 기록만). 금통위(09:50)는 시가 매도 후라 자연히 창 밖. 적용: 선물 keep 과 곱한 뒤 `effective_keep` 결합 하한(SEED_COMBINED_MIN_MULT) 클램프. **관찰 축**: VIX 레벨(25~35 램프)·WTI 급등(+3~6%p)·원달러 급등(+1~2%p) — 호르무즈류 지정학 쇼크 프록시. keep 을 계산해 진단에만 기록, 감액 미적용(미검증). 축끼리 min 결합(같은 쇼크 이중 감액 방지) — 승격 시에도 futures_gate 와 곱이 아닌 min 으로 붙일 것. 캘린더 조회 실패 시 미개입(1.0). **매 판단(미개입 포함)을 `audit_log('macro_gate')`에 기록** → 모니터 탭 활동 피드 노출. `/buy-preview` 응답 `macro` 키로 동일 반영. 캘린더 고갈은 jongalab `macro_event_check` 잡(월 08:20)이 감시 |
+| 뉴스 베토(악재 강제청산) | `news_veto.py`, `monitor.py` + jongalab `news_guard` | 밤사이 중대 악재 판정(jongalab OpenAI, confidence≥85 게이트) 종목을 monitor 가 **개장 즉시·가격 무관 전량 매도**(tag=newsveto, 가장 이른 거래소 — NXT 가능 08시대 / 불가 종목은 09:00 KRX 개장 후). `execute_sell` 재사용이라 멱등키·paper/live 분기 동일, 매도는 리스크 게이트 미경유(탈출 허용). 판정 조회 실패·비활성 시 미개입 — 하드손절/스탑/09:28 데드라인 백스톱 불변. severe 는 jongalab upsert 에서 1→0 강등 금지. 매 발동을 `audit_log('monitor_newsveto')` 기록 → 모니터 탭 활동 피드 노출 |
 | 정합성 점검 | `reconcile.py` | 매일 브로커 잔고 vs 로컬 포지션 대조 |
 | 미실행 감시(dead-man's switch) | `watchdog.py` + `audit_log` worker_done 마커 | 핵심 워커가 완료 시 마커를 남기고, watchdog(평일 09:35)가 마커 누락 시 텔레그램 경보 |
 
@@ -191,7 +197,8 @@ cd trading/frontend && npm run dev                                        # 대�
 (fake 협력 객체 주입 + repository 함수 monkeypatch). 커버리지: 시드 배분(`seed_allocator`),
 멱등키·사이징·paper 체결 시뮬레이션(`execution_engine`), 한도·서킷브레이커 분기(`risk_engine`),
 롤링 엣지 게이트 배수 매핑·역전 판정(`regime_gate`), 선물 섹터 게이트 클래스 매핑·섹터별 keep 차등·미개입 분기(`futures_gate`),
-거시 이벤트 게이트 보유 창·severity 매핑·프록시 관찰 전용·미개입 분기(`macro_gate`).
+거시 이벤트 게이트 보유 창·severity 매핑·프록시 관찰 전용·미개입 분기(`macro_gate`),
+뉴스 베토 전량매도·0순위 우선·fail-safe(빈 판정/조회 실패에도 하드손절 정상)·venue 보류·TTL 캐시(`test_news_veto`).
 민감 파일(`risk_engine.py`·`execution_engine.py`)은 **수정하지 않고 동작만 핀**한다.
 ```bash
 uv run --directory trading --group dev pytest

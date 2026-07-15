@@ -1,6 +1,9 @@
 """시초가 청산 윈도우 트레일링 스탑 + 하드 손절 감시 워커 (15초 폴링).
 
 15초마다 모든 보유 포지션을 점검:
+  0) 뉴스 베토: jongalab news_guard 가 밤사이 중대 악재(FDA 불승인·계약 파기류)로 판정한
+     종목(news_veto_verdict severe=1)은 **가격 무관 즉시 전량 매도**. 하드손절보다 앞 —
+     갭이 가격에 반영되기 전에도 악재 확인 즉시 탈출한다. 조회 실패 시 미개입(core/news_veto.py).
   1) 하드 손절(칼손절): 현재가가 평단(avg_price) 대비 HARD_STOP_LOSS_PCT% 아래면
      settle_plan 유무와 무관하게 **즉시 전량 매도**. 08:01~settle(:05) 사이
      갭하락으로 손실이 커지기 전에 끊는 안전망.
@@ -28,6 +31,8 @@ from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.fill_sync import sync_fills
 from core.order_maintenance import cancel_stale_orders, reconcile_dead_sent
+from core import news_veto
+from core.notifications import notify_admin
 from core.repository import position as position_repo
 from core.repository import settle_plan as plan_repo
 from core.repository import audit_log
@@ -111,6 +116,7 @@ def check_once(engine: ExecutionEngine) -> None:
 
     plans = {p["stk_cd"]: p for p in plan_repo.get_active_plans()}
     positions = {p["stk_cd"]: p for p in position_repo.get_open_positions()}
+    vetoes = news_veto.get_severe_verdicts()  # 실패/비활성 → {} — 감시 루프는 계속 돈다
 
     # plan 은 있는데 포지션이 사라진 경우 정리
     for stk_cd, plan in plans.items():
@@ -126,6 +132,39 @@ def check_once(engine: ExecutionEngine) -> None:
         try:
             cur = engine.data.get_market_price(stk_cd)
             if cur <= 0:
+                continue
+            # 0) 뉴스 베토: 밤사이 중대 악재 판정(jongalab news_guard) 종목은 가격 무관 즉시 전량매도.
+            #    하드손절보다 앞 — 갭이 아직 가격에 반영되기 전에도(악재 확인 즉시) 탈출한다.
+            veto = vetoes.get(stk_cd)
+            if veto:
+                venue = resolve_sell_venue(engine, stk_cd, datetime.now())
+                if venue is None:
+                    logger.info("뉴스베토 발동이나 매도 보류 [%s] — NXT 불가, 09:00 KRX 개장 후 청산", stk_cd)
+                    continue
+                sold = engine.execute_sell(trade_date, stk_cd, pos["qty"], cur,
+                                           dmst_stex_tp=venue, tag="newsveto")
+                audit_log.append("monitor_newsveto", stk_cd, {
+                    "cur": cur, "qty": pos["qty"], "venue": venue,
+                    "category": veto.get("category"), "confidence": veto.get("confidence"),
+                    "reason": veto.get("reason"), "sent": bool(sold)})
+                if sold:
+                    notify_admin(
+                        f"🚨 *뉴스 베토 전량매도* {veto.get('stk_nm') or stk_cd}(`{stk_cd}`) "
+                        f"{pos['qty']}주 @{cur:,} ({venue})\n"
+                        f"분류: {veto.get('category')} · 확신도 {veto.get('confidence')}\n"
+                        f"사유: {veto.get('reason')}")
+                    if _exit_confirmed(stk_cd):
+                        if plan:
+                            plan_repo.deactivate(plan["trade_date"], stk_cd,
+                                                 f"뉴스베토 전량매도 @{cur}")
+                        logger.info("뉴스베토 청산완료 [%s] %d주 @%d (%s, %s)",
+                                    stk_cd, pos["qty"], cur, venue, veto.get("category"))
+                    else:
+                        logger.info("뉴스베토 매도 전송 [%s] @%d — 체결 미확인, 다음 폴링에서 재확인/재시도",
+                                    stk_cd, cur)
+                else:
+                    logger.warning("뉴스베토 매도 거부/미전송(또는 멱등 스킵) [%s] @%d — 다음 폴링 재시도",
+                                   stk_cd, cur)
                 continue
             # 1) 하드 손절(칼손절): 평단 대비 -HARD_STOP_LOSS_PCT% 이하면 plan 유무 무관 전량매도
             hard_stop = round(pos["avg_price"] * (1 - HARD_STOP_LOSS_PCT / 100))

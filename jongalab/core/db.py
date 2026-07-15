@@ -33,7 +33,8 @@ def get_db():
 
 @contextmanager
 def get_trading_db():
-    """trading DB(매수 시그널 적재용) 안전 연결. closing_bet 핸드오프 전용."""
+    """trading DB 안전 연결. closing_bet 핸드오프(trade_signal 쓰기) +
+    news_guard 보유 포지션 조회(position 읽기 전용)에만 쓴다."""
     conn = mysql.connector.connect(**TRADING_DB_CONFIG)
     cursor = conn.cursor(dictionary=True)
     try:

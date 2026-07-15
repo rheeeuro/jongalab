@@ -131,6 +131,28 @@ def get_today_news_by_stock(stock_code: str, limit: int = 15) -> list[dict]:
         return results
 
 
+def get_news_since(stock_code: str, since_dt: datetime, limit: int = 30) -> list[dict]:
+    """특정 종목의 since_dt 이후 뉴스 언급 (시간순 ASC — 뉴스 베토 판정용).
+
+    get_today_news_by_stock 은 CURDATE() 기준이라 전일 저녁(매수 후 밤사이) 뉴스를 놓친다 —
+    오버나잇 창(전거래일 15:00~) 조회는 이 함수를 쓴다. created_at 은 datetime 그대로 반환한다
+    (호출부 news_guard 가 news_max_at 비교에 사용).
+    """
+    code = stock_code.split(".")[0].split("_")[0]
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """
+            SELECT headline, company_name, channel_name, created_at
+            FROM news_mention
+            WHERE ticker = %s AND created_at >= %s
+            ORDER BY created_at ASC
+            LIMIT %s
+            """,
+            (code, since_dt, int(limit)),
+        )
+        return cursor.fetchall()
+
+
 def get_news_heat(hours: int = 24, limit: int = 20) -> list[dict]:
     """최근 N시간 뉴스 언급이 많은 종목 순위 (프론트 '뉴스 재료' 카드용)."""
     with get_db() as (conn, cursor):

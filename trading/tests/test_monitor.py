@@ -51,6 +51,9 @@ def patched(monkeypatch):
     monkeypatch.setattr(monitor.position_repo, "get_open_positions", lambda: [dict(pos)])
     monkeypatch.setattr(monitor.position_repo, "get_position", lambda stk_cd: None)  # 청산 확인
     monkeypatch.setattr(monitor.audit_log, "append", lambda *a, **k: None)
+    # 뉴스 베토·알림은 jongalab DB/텔레그램을 타므로 fake — 기존 하드손절 테스트는 베토 무발동
+    monkeypatch.setattr(monitor.news_veto, "get_severe_verdicts", lambda: {})
+    monkeypatch.setattr(monitor, "notify_admin", lambda msg: 0)
 
     return FakeEngine(cur)
 
