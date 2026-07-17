@@ -100,6 +100,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from core.market_calendar import exit_if_not_trading_day
+    # cron 은 평일만 돌지만 평일 공휴일(휴장)은 못 거른다 — 진입부에서 한 번 더 차단.
+    exit_if_not_trading_day()
     try:
         rc = main()
     except Exception as e:

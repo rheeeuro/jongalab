@@ -9,17 +9,25 @@
 
 판정은 완료 마커 유무만 본다(포지션/신호 상태를 추론하지 않음) → 무거래일에도 오경보 없음.
 모든 핵심 워커의 가동 구간이 끝난 뒤(평일 09:35) 한 번 실행한다.
+
+추가로 jongalab 통합 스케줄러의 dead-man's switch 도 겸한다: 스케줄러는 매 잡 실행을
+jongalab `job_run` 에 남기는데(youtube_collector 가 15분 주기라 살아있으면 항상 신선),
+최신 기록이 오래되면 스케줄러 중단으로 보고 경보한다 — 2026-07-15 배포 훅 재시작이
+끊겨 이틀간 조용히 멈춰 있던 사고의 재발 감지용.
 """
 import sys
 import logging
 from datetime import datetime
 
 from core.logging_setup import setup_logging
+from core.db import get_jongalab_db
 from core.repository import audit_log
 from core.notifications import notify_admin
 
 setup_logging()
 logger = logging.getLogger("Watchdog")
+
+SCHEDULER_STALE_HOURS = 2  # youtube_collector 15분 주기 기준, 2시간 무기록 = 중단 판정
 
 # 감시 대상: (완료 마커 이름, 마감 시각 (시,분), 설명). 마감 시각까지 완료돼야 한다.
 # 새 워커를 감시에 추가하려면 여기에 한 줄(가동 구간 종료 시각 기준)만 더한다.
@@ -46,6 +54,33 @@ def missing_workers(now_hm, done, critical=CRITICAL_WORKERS) -> list:
             if now_m >= _minutes(by) and name not in done]
 
 
+def scheduler_stale(now, last_scheduled_at, stale_hours=SCHEDULER_STALE_HOURS) -> bool:
+    """jongalab 통합 스케줄러 중단 판정 (순수함수).
+
+    최신 job_run scheduled_at 이 없거나(None) stale_hours 이상 오래되면 중단으로 본다.
+    """
+    if last_scheduled_at is None:
+        return True
+    return (now - last_scheduled_at).total_seconds() >= stale_hours * 3600
+
+
+def _check_jongalab_scheduler(now) -> str | None:
+    """jongalab-scheduler dead-man's switch — 이상 시 경보 메시지, 정상이면 None."""
+    try:
+        with get_jongalab_db() as (conn, cursor):
+            cursor.execute("SELECT MAX(scheduled_at) AS last_run FROM job_run")
+            row = cursor.fetchone()
+        last = row["last_run"] if row else None
+    except Exception as e:
+        # 기록을 못 읽으면 감시 자체가 무력화된 것 → 안전상 경보.
+        return f"job_run 조회 실패: `{e}`"
+    if scheduler_stale(now, last):
+        last_s = f"{last:%Y-%m-%d %H:%M}" if last else "기록 없음"
+        return (f"마지막 잡 실행 {last_s} — `jongalab-scheduler` 중단 의심. "
+                f"`pm2 status` 확인 후 `pm2 start jongalab-scheduler`")
+    return None
+
+
 def main() -> int:
     now = datetime.now()
     # 실행 윈도우 가드: 평일에만(주말·pm2 즉시 오실행 방지).
@@ -62,23 +97,36 @@ def main() -> int:
         notify_admin(f"🚨 *watchdog 오류* {now:%Y-%m-%d %H:%M}\n완료 마커 조회 실패: `{e}`")
         return 1
 
+    rc = 0
     missing = missing_workers((now.hour, now.minute), done)
-    if not missing:
+    if missing:
+        lines = "\n".join(
+            f"• `{name}` — {desc} (마감 {by[0]:02d}:{by[1]:02d})" for name, by, desc in missing
+        )
+        msg = (
+            f"🚨 *자동매매 워커 미실행 감지* {now:%Y-%m-%d %H:%M}\n"
+            f"아래 워커의 완료 마커가 없습니다. 손절/청산 미작동 위험 — "
+            f"PM2 로그·포지션을 즉시 확인하세요.\n{lines}"
+        )
+        logger.error("미실행 워커 감지: %s", [m[0] for m in missing])
+        notify_admin(msg)
+        rc = 1
+    else:
         logger.info("핵심 워커 정상 완료 확인 — 이상 없음 (done=%s)", sorted(done))
-        return 0
 
-    lines = "\n".join(
-        f"• `{name}` — {desc} (마감 {by[0]:02d}:{by[1]:02d})" for name, by, desc in missing
-    )
-    msg = (
-        f"🚨 *자동매매 워커 미실행 감지* {now:%Y-%m-%d %H:%M}\n"
-        f"아래 워커의 완료 마커가 없습니다. 손절/청산 미작동 위험 — "
-        f"PM2 로그·포지션을 즉시 확인하세요.\n{lines}"
-    )
-    logger.error("미실행 워커 감지: %s", [m[0] for m in missing])
-    notify_admin(msg)
-    return 1
+    sched_alert = _check_jongalab_scheduler(now)
+    if sched_alert:
+        logger.error("jongalab-scheduler 이상: %s", sched_alert)
+        notify_admin(f"🚨 *jongalab 스케줄러 중단 의심* {now:%Y-%m-%d %H:%M}\n{sched_alert}")
+        rc = 1
+    else:
+        logger.info("jongalab-scheduler job_run 신선도 정상")
+
+    return rc
 
 
 if __name__ == "__main__":
+    from core.market_calendar import exit_if_not_trading_day
+    # 휴장일엔 워커들이 스킵되어 worker_done 마커가 없다 — 오경보 방지 위해 함께 스킵.
+    exit_if_not_trading_day()
     sys.exit(main())

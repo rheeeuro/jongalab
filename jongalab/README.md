@@ -48,7 +48,7 @@ jongalab/
 | `edge_features.py` | **F5 수급 구조 피처 파생**(순수 함수, DB 무의존). `afternoon_ret`(당일 13시 시간봉 시가→현재가 %)·`prog_buy_days`(최근 5일 중 프로그램 순매수일)·`vol_ratio`(당일 거래량÷20일 평균) — closing_bet 이 이미 수집한 응답에서 스칼라를 굽는다. 결측=None(predicate 의 NULL=매칭실패 계약과 맞물림). `is_bio`(2026-07-10, F7): 바이오/제약 분류 — 키움 업종명 '제약' + 사명 키워드 + 알려진 예외 코드 3단 판별(키움 upName 이 코스닥 바이오벤처를 '일반서비스'로 뭉뚱그리는 구멍 보완), `veto_bio` 계열 rule 이 참조. 단위 테스트 `tests/test_edge_features.py` |
 | `daily_ohlc.py` | 수정주가 일봉(ka10081)·분봉(ka10080) 파싱 + 결과 라벨 아티팩트 가드(`SANE_RET_PCT`=±35%) **공유 모듈** — outcome_backfill(일봉·실집행 레그)·gap_check --label-nxt 가 함께 사용(라벨 간 유효성 기준이 어긋나면 청산창 비교가 오염되므로 라벨 경로는 반드시 이 모듈만) |
 | `notifications.py` | 텔레그램 알림(재시도 포함) |
-| `market_calendar.py` | KRX 개장일 판별(exchange_calendars XKRX) |
+| `market_calendar.py` | KRX 개장일 판별(exchange_calendars XKRX + `EXTRA_HOLIDAYS` 수동 오버라이드 — 달력 데이터에 없는 신규 공휴일은 여기와 trading 쪽 복제본에 함께 추가) |
 | `logging_setup.py` | 로그 설정 |
 
 #### `core/repository/` — DB 접근 계층 (raw SQL 은 반드시 여기서만)
@@ -78,6 +78,9 @@ jongalab/
   — `uv` 부모만 죽이면 python 자식이 고아로 남아 중복 실행·DB 중복키 충돌을 일으킨다(2026-07-15 사건).
   수동 1회 실행: `uv run workers/scheduler.py --once <잡>`.
   잡 코드 변경은 다음 실행에 자동 반영(매 실행 새 프로세스), **`scheduler.py` 자체 변경은 재시작 필요**(배포 훅이 수행).
+  **중단 감시**: 스케줄러 자신은 죽어도 알리지 못하므로 trading watchdog(평일 09:35)이 `job_run`
+  최신 기록이 2시간 이상 오래되면 경보한다(2026-07-15 배포 훅 재시작 끊김 → 이틀 무감지 중단 사고 재발 방지.
+  배포 훅도 재시작 후 online 검증·재시도를 하도록 보강).
 - **PM2 cron**(스케줄은 루트 `ecosystem.config.js`) — 나머지: 상시(telegram)·창 민감/자금 인접
   잡(gap_check·closing_bet·night_futures·token-refresh)과 trading 도메인 전체. 스케줄러 검증 후 단계 이관 예정.
 

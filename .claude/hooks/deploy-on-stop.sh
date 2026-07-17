@@ -89,6 +89,19 @@ sys.exit(1)
 ' "$1"
 }
 
+# 재시작 후 online 검증 + 1회 재시도. pm2 restart 는 stop→start 2단계라 중간에 끊기면
+# 앱이 stopped 로 방치된다(2026-07-15 jongalab-scheduler 이틀 중단 사고). $1=앱 $2=성공 메모
+restart_app() {
+  pm2 restart "$1" >/dev/null 2>&1
+  sleep 2
+  if is_online "$1"; then NOTES+=("✅ $2"); return 0; fi
+  pm2 start "$1" >/dev/null 2>&1
+  sleep 2
+  if is_online "$1"; then NOTES+=("✅ $2 (재시작 끊김 → start 재시도로 복구)"); return 0; fi
+  NOTES+=("🚨 $1 재시작 후에도 online 아님 — pm2 수동 확인 필요")
+  return 1
+}
+
 NOTES=()
 BUILD_FAILED=""
 
@@ -127,7 +140,7 @@ if [ "$NEED_WEB" = "1" ]; then
     BUILD_FAILED="$BUILD_OUT"
   else
     if is_online jongalab-fe; then
-      pm2 restart jongalab-fe >/dev/null 2>&1 && NOTES+=("✅ jongalab-fe 빌드+재시작")
+      restart_app jongalab-fe "jongalab-fe 빌드+재시작"
     else
       NOTES+=("ℹ️ jongalab-fe 빌드 성공(앱이 online 아님 — 재시작 생략)")
     fi
@@ -137,7 +150,7 @@ fi
 # 2) 백엔드 API
 if [ "$NEED_API" = "1" ]; then
   if is_online jongalab-be; then
-    pm2 restart jongalab-be >/dev/null 2>&1 && NOTES+=("✅ jongalab-be 재시작")
+    restart_app jongalab-be "jongalab-be 재시작"
   else
     NOTES+=("ℹ️ jongalab-be 변경됨(앱이 online 아님 — 재시작 생략)")
   fi
@@ -146,7 +159,7 @@ fi
 # 2-1) 키움 데이터 API (별도 서버)
 if [ "$NEED_KIWOOM" = "1" ]; then
   if is_online kiwoom-api; then
-    pm2 restart kiwoom-api >/dev/null 2>&1 && NOTES+=("✅ kiwoom-api 재시작")
+    restart_app kiwoom-api "kiwoom-api 재시작"
   else
     NOTES+=("ℹ️ kiwoom-api 변경됨(앱이 online 아님 — 재시작 생략)")
   fi
@@ -155,7 +168,7 @@ fi
 # 2-2) 트레이딩 집행 API (별도 서버)
 if [ "$NEED_TAPI" = "1" ]; then
   if is_online trading-api; then
-    pm2 restart trading-api >/dev/null 2>&1 && NOTES+=("✅ trading-api 재시작")
+    restart_app trading-api "trading-api 재시작"
   else
     NOTES+=("ℹ️ trading-api 변경됨(앱이 online 아님 — 재시작 생략)")
   fi
@@ -171,7 +184,7 @@ if [ "$NEED_TWEB" = "1" ]; then
     if [ $? -ne 0 ]; then
       BUILD_FAILED="${BUILD_FAILED}${BUILD_FAILED:+$'\n'}[trading-fe] $TBUILD_OUT"
     elif is_online trading-fe; then
-      pm2 restart trading-fe >/dev/null 2>&1 && NOTES+=("✅ trading-fe 빌드+재시작")
+      restart_app trading-fe "trading-fe 빌드+재시작"
     else
       NOTES+=("ℹ️ trading-fe 빌드 성공(앱이 online 아님 — 재시작 생략)")
     fi
@@ -181,7 +194,7 @@ fi
 # 3) 텔레그램 리스너(상시)
 if [ "$NEED_TG" = "1" ]; then
   if is_online jongalab-telegram; then
-    pm2 restart jongalab-telegram >/dev/null 2>&1 && NOTES+=("✅ jongalab-telegram 재시작")
+    restart_app jongalab-telegram "jongalab-telegram 재시작"
   else
     NOTES+=("ℹ️ jongalab-telegram 변경됨(앱이 online 아님 — 재시작 생략)")
   fi
@@ -190,7 +203,7 @@ fi
 # 3-1) 통합 잡 스케줄러(상시) — 잡 정의·core 변경 반영
 if [ "$NEED_SCHED" = "1" ]; then
   if is_online jongalab-scheduler; then
-    pm2 restart jongalab-scheduler >/dev/null 2>&1 && NOTES+=("✅ jongalab-scheduler 재시작")
+    restart_app jongalab-scheduler "jongalab-scheduler 재시작"
   else
     NOTES+=("ℹ️ jongalab-scheduler 변경됨(앱이 online 아님 — 재시작 생략)")
   fi

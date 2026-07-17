@@ -2,8 +2,12 @@
 
 규칙: 마감 시각이 지난 핵심 워커 중 완료 마커가 없는 것만 '미실행'으로 본다.
 마감 전 워커는(아직 돌 시간) 누락이어도 경보하지 않는다.
+scheduler_stale: jongalab 스케줄러 dead-man's switch — job_run 최신 기록이
+없거나(None) 임계 시간 이상 오래되면 중단으로 판정한다.
 """
-from workers.watchdog import missing_workers, CRITICAL_WORKERS
+from datetime import datetime, timedelta
+
+from workers.watchdog import missing_workers, scheduler_stale, CRITICAL_WORKERS
 
 CRIT = [
     ("settle:nxt",      (8, 5),  "NXT"),
@@ -57,3 +61,31 @@ def test_default_critical_list_shape():
     assert {"settle:nxt", "settle:krx", "monitor"} <= names
     for name, by, desc in CRITICAL_WORKERS:
         assert isinstance(name, str) and len(by) == 2 and isinstance(desc, str)
+
+
+NOW = datetime(2026, 7, 17, 9, 35)
+
+
+def test_scheduler_fresh_not_stale():
+    # 15분 전 잡 실행 기록 — 정상.
+    assert scheduler_stale(NOW, NOW - timedelta(minutes=15)) is False
+
+
+def test_scheduler_no_record_is_stale():
+    # 기록 자체가 없으면(테이블 비어있음) 중단으로 본다.
+    assert scheduler_stale(NOW, None) is True
+
+
+def test_scheduler_old_record_is_stale():
+    # 임계(기본 2시간) 이상 무기록 — 중단 판정 (2026-07-15 사고 시나리오).
+    assert scheduler_stale(NOW, NOW - timedelta(hours=2)) is True
+    assert scheduler_stale(NOW, NOW - timedelta(days=2)) is True
+
+
+def test_scheduler_just_under_threshold_not_stale():
+    assert scheduler_stale(NOW, NOW - timedelta(minutes=119)) is False
+
+
+def test_scheduler_custom_threshold():
+    assert scheduler_stale(NOW, NOW - timedelta(minutes=40), stale_hours=0.5) is True
+    assert scheduler_stale(NOW, NOW - timedelta(minutes=20), stale_hours=0.5) is False

@@ -44,6 +44,7 @@ trading/
 │   ├── futures_gate.py         # 선물 환경 게이트(KRX·NXT): 매수시점 NQ+코스피선물(KRX=주간/NXT=야간) 하락 시 섹터별 차등 감액(반도체·IT 더, 방어주 덜)
 │   ├── macro_gate.py           # 거시 이벤트 게이트: 보유 창(매수→익일 시가)에 sev3 예정 이벤트(FOMC·CPI·고용, jongalab macro_event)가 있으면 시드 keep 축소 + VIX·WTI·환율 프록시 관찰
 │   ├── news_veto.py            # 뉴스 베토 조회: jongalab news_veto_verdict(severe=1, 밤사이 중대 악재 판정) 읽기 전용 — monitor 가 해당 종목 개장 즉시 전량매도. 실패 시 미개입, 60s TTL 캐시
+│   ├── market_calendar.py      # 거래일 판별(jongalab 복제): XKRX 달력 + EXTRA_HOLIDAYS 수동 오버라이드. 모든 워커가 진입부에서 휴장일이면 exit 0 (2026-07-17 제헌절 휴장일 오실행 사고 재발 방지 — 달력에 없는 신규 공휴일은 jongalab 쪽과 함께 추가)
 │   ├── kiwoom_order_client.py  # 키움 REST 직접 호출(kt10000~3 주문, kt00018 잔고, ka10074~6)
 │   ├── kiwoom_data_client.py   # kiwoom 데이터 서버(:8001) 읽기(현재가·NXT·차트)
 │   ├── fill_sync.py            # 실거래 체결 동기화(ka10076 → fill/position)
@@ -61,7 +62,7 @@ trading/
 │       ├── blocklist.py        # 자동매매 제외 종목(수동 보유분)
 │       ├── audit_log.py        # 불변 append-only 이벤트 로그
 │       └── kiwoom_token.py     # 공유 토큰 읽기 전용
-├── workers/                    # PM2 cron (스케줄은 루트 ecosystem.config.js)
+├── workers/                    # PM2 cron (스케줄은 루트 ecosystem.config.js). 전 워커가 진입부에서 휴장일 차단(core/market_calendar)
 ├── frontend/                   # Next.js 대시보드(:3001)
 ├── sql/                        # trading DB 스키마
 └── tests/                      # 자금 경로 단위 테스트 (pytest, DB/네트워크 없이 fake 주입)
@@ -115,6 +116,10 @@ reconcile (20:00) · kt00018 잔고 vs 로컬 position 대조 → 드리프트 �
 않으므로(거래 없으면 조용히 끝남), 각 워커가 성공 완료 시 `audit_log` 에 `worker_done` 마커를 남긴다.
 `watchdog.py`(평일 09:35)가 핵심 워커(`settle:nxt`/`settle:krx_open`/`settle:krx`/`monitor`)의 마커 누락을 확인해 경보한다.
 마커 유무만 보므로 무거래일에도 오경보가 없다. 감시 대상 추가는 `watchdog.CRITICAL_WORKERS` 에 한 줄.
+휴장일에는 워커들이 진입부에서 스킵되어 마커가 안 남으므로 watchdog 도 같은 거래일 가드로 함께 스킵한다(오경보 방지).
+watchdog 은 **jongalab 통합 스케줄러의 dead-man's switch 도 겸한다**: jongalab `job_run` 의 최신
+`scheduled_at` 이 2시간(`SCHEDULER_STALE_HOURS`) 이상 오래되면 스케줄러 중단으로 보고 경보한다
+(youtube_collector 가 15분 주기라 살아있으면 항상 신선 — 2026-07-15 배포 훅 재시작 끊김으로 이틀 무감지 중단된 사고 재발 감지).
 
 ---
 
@@ -134,7 +139,7 @@ reconcile (20:00) · kt00018 잔고 vs 로컬 position 대조 → 드리프트 �
 | 거시 이벤트 게이트 | `macro_gate.py`, `signal_executor.py` | **보유 창(매수→다음 평일 09:00)의 '예정 이벤트 리스크'** — futures_gate 가 이미 실현된 선물 방향을 재는 것과 상보적(발표 전엔 선물이 보합이라 저건 못 잡음). jongalab DB `macro_event`(수동 시드 캘린더, `sql/18. migrate_macro_event.sql`, 2026 연말까지 시드)에서 창 안 이벤트를 조회해 **severity 3(FOMC·CPI·고용) 존재 시 시드 keep=MACRO_EVENT_KEEP(0.5)**, 아니면 1.0. 근거: 2026-07-15 백테스트(4/9~7/10 63거래일) — sev3 이벤트 밤 선정종목 일평균 −0.74% vs 평일 +1.04%(Welch t=−2.27, 혼재일 제외 t=−2.13, 음수일 62% vs 25%). **PPI(sev2)는 +3.6%로 감액 근거 없음 → 관찰 전용**(진단 기록만). 금통위(09:50)는 시가 매도 후라 자연히 창 밖. 적용: 선물 keep 과 곱한 뒤 `effective_keep` 결합 하한(SEED_COMBINED_MIN_MULT) 클램프. **관찰 축**: VIX 레벨(25~35 램프)·WTI 급등(+3~6%p)·원달러 급등(+1~2%p) — 호르무즈류 지정학 쇼크 프록시. keep 을 계산해 진단에만 기록, 감액 미적용(미검증). 축끼리 min 결합(같은 쇼크 이중 감액 방지) — 승격 시에도 futures_gate 와 곱이 아닌 min 으로 붙일 것. 캘린더 조회 실패 시 미개입(1.0). **매 판단(미개입 포함)을 `audit_log('macro_gate')`에 기록** → 모니터 탭 활동 피드 노출. `/buy-preview` 응답 `macro` 키로 동일 반영. 캘린더 고갈은 jongalab `macro_event_check` 잡(월 08:20)이 감시 |
 | 뉴스 베토(악재 강제청산) | `news_veto.py`, `monitor.py` + jongalab `news_guard` | 밤사이 중대 악재 판정(jongalab OpenAI, confidence≥85 게이트) 종목을 monitor 가 **개장 즉시·가격 무관 전량 매도**(tag=newsveto, 가장 이른 거래소 — NXT 가능 08시대 / 불가 종목은 09:00 KRX 개장 후). `execute_sell` 재사용이라 멱등키·paper/live 분기 동일, 매도는 리스크 게이트 미경유(탈출 허용). 판정 조회 실패·비활성 시 미개입 — 하드손절/스탑/09:28 데드라인 백스톱 불변. severe 는 jongalab upsert 에서 1→0 강등 금지. 매 발동을 `audit_log('monitor_newsveto')` 기록 → 모니터 탭 활동 피드 노출 |
 | 정합성 점검 | `reconcile.py` | 매일 브로커 잔고 vs 로컬 포지션 대조 |
-| 미실행 감시(dead-man's switch) | `watchdog.py` + `audit_log` worker_done 마커 | 핵심 워커가 완료 시 마커를 남기고, watchdog(평일 09:35)가 마커 누락 시 텔레그램 경보 |
+| 미실행 감시(dead-man's switch) | `watchdog.py` + `audit_log` worker_done 마커 | 핵심 워커가 완료 시 마커를 남기고, watchdog(평일 09:35)가 마커 누락 시 텔레그램 경보. jongalab `job_run` 신선도(2h)로 통합 스케줄러 중단도 함께 감시 |
 
 튜닝 파라미터(`config.py`): `BUY_PULLBACK_PCT`(되돌림 매수), `STOP_BUFFER_PCT`(갭다운 버퍼),
 `TRAIL_PCT`(트레일링), `HARD_STOP_LOSS_PCT`(하드 손절), `SEED_MAX_NAME_PCT`(종목당 시드 캡,

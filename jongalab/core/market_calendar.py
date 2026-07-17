@@ -9,20 +9,30 @@ KRX 개장 여부는 `exchange_calendars` 의 'XKRX' 달력으로 판단한다(�
 """
 import sys
 import logging
-from datetime import datetime
+from datetime import date, datetime
 
 logger = logging.getLogger(__name__)
 
 _XKRX = "XKRX"
 
+# XKRX 달력 데이터에 아직 반영되지 않은 휴장일 수동 오버라이드.
+# 새로 지정된 공휴일(예: 제헌절 재지정)은 exchange_calendars 릴리스가 따라오지
+# 못하므로 여기 먼저 추가한다. trading/core/market_calendar.py 에 동일 목록이
+# 복제되어 있다 — 수정 시 양쪽을 함께 갱신할 것.
+EXTRA_HOLIDAYS: set[date] = {
+    date(2026, 7, 17),  # 제헌절 (2026-07-17 휴장 확인 — 달력 4.13.2 미반영)
+}
+
 
 def is_trading_day(dt: datetime | None = None) -> bool:
     """KRX 개장일이면 True, 휴장일(주말·공휴일 등)이면 False.
 
-    XKRX 달력으로 정확히 판단하되, 라이브러리 로드/조회 실패 시
-    주말(토/일) 여부로만 폴백 판단한다.
+    `EXTRA_HOLIDAYS` 수동 오버라이드를 먼저 보고, 그 외에는 XKRX 달력으로
+    판단한다. 라이브러리 로드/조회 실패 시 주말(토/일) 여부로만 폴백 판단한다.
     """
     d = dt or datetime.now()
+    if d.date() in EXTRA_HOLIDAYS:
+        return False
     is_weekday = d.weekday() < 5  # 0=월 ... 4=금, 5=토, 6=일
     try:
         import exchange_calendars as xcals
