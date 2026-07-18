@@ -19,8 +19,8 @@ from core.trading_engine import (
 )
 from core.config import EDGE_SELECTION_MODE
 from core.edge_features import (
-    afternoon_ret, dist_prior_high_pct, is_bio, ma5_reclaim, prog_buy_days,
-    round_dist_pct, vol_ratio,
+    afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, is_bio, ma5_reclaim,
+    prog_buy_days, red_candle, round_dist_pct, vol_ratio,
 )
 from core.repository.stock_report import (
     save_stock_reports,
@@ -208,8 +208,8 @@ class ClosingBetStrategy:
 
     def _fetch_chart_features(self, code: str, current_price: int) -> dict:
         """일봉(ka10081) 1콜에서 차트 구조 피처를 굽는다 — vol_ratio(당일÷20일 평균 거래량)
-        + dist_prior_high_pct(250일 전고점 대비 거리) + ma5_reclaim(5일선 재탈환 반전).
-        실패 시 빈 dict(피처만 결측)."""
+        + dist_prior_high_pct(250일 전고점 대비 거리) + ma5_reclaim(5일선 재탈환 반전)
+        + red_candle(당일 음봉 여부, 수급 눌림/지속 축). 실패 시 빈 dict(피처만 결측)."""
         try:
             data = self.api.get_daily_chart(code)
             candles = data.get("stk_dt_pole_chart_qry", [])
@@ -234,6 +234,7 @@ class ClosingBetStrategy:
                 "vol_ratio": vol_ratio(vols, today),
                 "dist_prior_high_pct": dist_prior_high_pct(highs, today, current_price),
                 "ma5_reclaim": ma5_reclaim(ohlc, today, current_price),
+                "red_candle": red_candle(ohlc, today, current_price),
             }
         except Exception as e:
             logger.warning(f"차트 피처 조회 실패 [{code}]: {e}")
@@ -280,6 +281,9 @@ class ClosingBetStrategy:
             feat = self._feat.setdefault(c.code, {})
             feat["foreign_brokers_buying"] = 1 if supply.get("foreign_brokers_buying") else 0
             feat["prog_buy_days"] = prog_buy_days(c.supply_history)
+            feat["days_since_frgn_surge"] = days_since_frgn_surge(
+                c.supply_history, datetime.now().strftime("%Y-%m-%d")
+            )
             feat.update(self._fetch_chart_features(c.code, c.current_price))
             feat["round_dist_pct"] = round_dist_pct(c.current_price)
 
@@ -451,6 +455,8 @@ class ClosingBetStrategy:
                 "dist_prior_high_pct": feat.get("dist_prior_high_pct"),
                 "round_dist_pct": feat.get("round_dist_pct"),
                 "ma5_reclaim": feat.get("ma5_reclaim"),
+                "days_since_frgn_surge": feat.get("days_since_frgn_surge"),
+                "red_candle": feat.get("red_candle"),
                 "prog_buy_days": feat.get("prog_buy_days"),
                 "first_seen": (
                     (0 if code in recent_codes else 1) if recent_codes is not None else None

@@ -5,8 +5,8 @@
 import pytest
 
 from core.edge_features import (
-    afternoon_ret, dist_prior_high_pct, is_bio, ma5_reclaim, prog_buy_days,
-    round_dist_pct, vol_ratio,
+    afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, is_bio, ma5_reclaim,
+    prog_buy_days, red_candle, round_dist_pct, vol_ratio,
 )
 
 TODAY = "2026-07-03"
@@ -235,3 +235,92 @@ def test_round_dist_pct(price, expected):
 @pytest.mark.parametrize("price", [0, None, -100])
 def test_round_dist_pct_invalid_returns_none(price):
     assert round_dist_pct(price) is None
+
+
+# ── days_since_frgn_surge (외인 서지 후 경과, 2026-07-19) ──
+# supply_history: 최신→과거, 당일 잠정치 포함. 기본 임계 100억.
+
+EOK = 100_000_000
+
+
+_PRIOR_DATES = ("2026-07-02", "2026-07-01", "2026-06-30", "2026-06-29")
+
+
+def _supply(*frgn_eoks):
+    """당일(TODAY) + 직전 일들의 수급 이력. frgn_eoks[0]=당일, 이후 과거 순."""
+    rows = [{"date": TODAY, "frgn_net_buy": frgn_eoks[0] * EOK}]
+    rows += [
+        {"date": d, "frgn_net_buy": a * EOK}
+        for d, a in zip(_PRIOR_DATES, frgn_eoks[1:])
+    ]
+    return rows
+
+
+def test_days_since_frgn_surge_yesterday():
+    assert days_since_frgn_surge(_supply(10, 150, 5, 5, 5), TODAY) == 1
+
+
+def test_days_since_frgn_surge_two_days_ago():
+    assert days_since_frgn_surge(_supply(10, 5, 150, 5, 5), TODAY) == 2
+
+
+def test_days_since_frgn_surge_nearest_wins():
+    # 어제·그제 모두 서지면 가장 가까운 날(1)
+    assert days_since_frgn_surge(_supply(10, 150, 300, 5, 5), TODAY) == 1
+
+
+def test_days_since_frgn_surge_today_not_counted():
+    # 당일 대량 유입은 세지 않는다 — 축은 '유입 후 다음 날들'
+    assert days_since_frgn_surge(_supply(500, 5, 5, 5, 5), TODAY) is None
+
+
+def test_days_since_frgn_surge_below_threshold_returns_none():
+    assert days_since_frgn_surge(_supply(10, 99, 99, 99, 99), TODAY) is None
+
+
+def test_days_since_frgn_surge_without_today_row():
+    # 오전 실행 등으로 이력에 당일 행이 없어도 직전일 인덱스는 동일
+    rows = _supply(500, 150, 5, 5, 5)[1:]
+    assert days_since_frgn_surge(rows, TODAY) == 1
+
+
+def test_days_since_frgn_surge_empty_returns_none():
+    assert days_since_frgn_surge([], TODAY) is None
+
+
+# ── red_candle (당일 음봉 여부, 2026-07-19) ──
+# ma5_reclaim 과 같은 daily_ohlc 형식 재사용 — (dt, 시가, 종가) 최신순.
+
+TODAY_YMD_RC = "20260703"
+
+
+def _rc_ohlc(today_open):
+    return [(TODAY_YMD_RC, today_open, 0), ("20260702", 10000, 10000)]
+
+
+def test_red_candle_bearish():
+    assert red_candle(_rc_ohlc(10600), TODAY_YMD_RC, 10500) == 1
+
+
+def test_red_candle_bullish():
+    assert red_candle(_rc_ohlc(10400), TODAY_YMD_RC, 10500) == 0
+
+
+def test_red_candle_flat_is_not_red():
+    assert red_candle(_rc_ohlc(10500), TODAY_YMD_RC, 10500) == 0
+
+
+def test_red_candle_gap_up_fade_still_red():
+    # 갭업 후 밀림: 상승 마감(음전 아님)이어도 시가 아래면 음봉 — change_pct 와 다른 정보
+    assert red_candle([(TODAY_YMD_RC, 11000, 0), ("20260702", 9000, 10000)],
+                      TODAY_YMD_RC, 10500) == 1
+
+
+@pytest.mark.parametrize("rows,price", [
+    ([], 10500),                                    # 캔들 없음
+    (_rc_ohlc(10600), 0),                           # 현재가 0
+    (_rc_ohlc(0), 10500),                           # 당일 시가 결측
+    ([("20260702", 10000, 10000)], 10500),          # 첫 봉이 당일 아님(데이터 지연)
+])
+def test_red_candle_missing_returns_none(rows, price):
+    assert red_candle(rows, TODAY_YMD_RC, price) is None

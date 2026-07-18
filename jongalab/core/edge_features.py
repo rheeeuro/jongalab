@@ -141,6 +141,54 @@ def ma5_reclaim(
     )
 
 
+# ── 외인 서지 후 경과 피처 (수급 눌림/지속 축, 2026-07-19) ──
+
+# 외인 '대량' 순매수 기준(원). trading_engine._normalize_supply_amount 의 100억 구간 경계와
+# 같은 스케일 — PDF 통설 사례(외인 150만주≈105억)와도 부합. 임계 변경은 새 컬럼·rule
+# 재등록으로만 한다(사전 등록 원칙).
+FRGN_SURGE_THRESHOLD_WON = 10_000_000_000
+
+
+def days_since_frgn_surge(
+    supply_history: list, today: str,
+    threshold_won: int = FRGN_SURGE_THRESHOLD_WON,
+) -> int | None:
+    """직전 거래일 중 외인 대량 순매수(>= threshold_won) 서지가 있었던 가장 가까운 날의
+    경과 거래일 수(1=직전 거래일, 최대 4 — ka10059 5일 이력의 당일 제외분).
+
+    supply_history: analyze_supply_demand 형식(최신→과거, 당일 잠정치 포함 가능,
+    [{"date": "YYYY-MM-DD", "frgn_net_buy": int(원), ...}]). today 는 "YYYY-MM-DD".
+    당일 서지는 세지 않는다 — 눌림/지속 가설의 축은 '유입 후 다음 날들'이고, 당일 유입은
+    frgn_net_buy 컬럼이 이미 본다. 이력 없음/서지 없음 → None(predicate 매칭 실패).
+    """
+    if not supply_history:
+        return None
+    prior = [h for h in supply_history if h.get("date") != today]
+    for i, h in enumerate(prior, start=1):
+        if (h.get("frgn_net_buy") or 0) >= threshold_won:
+            return i
+    return None
+
+
+def red_candle(
+    daily_ohlc: list[tuple[str, int, int]], today: str, current_price: int,
+) -> int | None:
+    """당일 음봉 여부(현재가 < 당일 시가) — 1=음봉, 0=양봉/보합.
+
+    daily_ohlc: ma5_reclaim 과 같은 형식([(dt "YYYYMMDD", 시가, 종가), ...] 최신순, 당일 포함).
+    당일 종가 자리는 선정 시점 현재가를 쓴다. 음전(change_pct<0)과 다른 정보 —
+    갭업 후 밀린 날은 상승 마감이어도 음봉이다. 첫 봉이 당일이 아니거나 시가 결측이면 None.
+    """
+    if not current_price or current_price <= 0:
+        return None
+    if not daily_ohlc or daily_ohlc[0][0] != today:
+        return None
+    today_open = daily_ohlc[0][1]
+    if today_open <= 0:
+        return None
+    return int(current_price < today_open)
+
+
 def round_dist_pct(price: int | None) -> float | None:
     """가장 가까운 라운드피겨(1·2·5 × 10^k 원) 대비 부호 있는 거리(%).
 
