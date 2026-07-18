@@ -165,6 +165,9 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     frgn_exhaust_chg FLOAT DEFAULT NULL COMMENT '직전 리포트 거래일 대비 외인소진율 변화(%p)',
     is_bio TINYINT DEFAULT NULL COMMENT '바이오/제약 여부(선정 시점 파생 — core.edge_features.is_bio)',
     market VARCHAR(10) DEFAULT NULL COMMENT '시장 구분(코스피/코스닥 — ka10100 marketName, 거래소→코스피 정규화)',
+    dist_prior_high_pct FLOAT DEFAULT NULL COMMENT '250일 전고점(고가, 당일 제외) 대비 현재가 거리(%) — 음수=매물벽 아래, 양수=돌파',
+    round_dist_pct FLOAT DEFAULT NULL COMMENT '최근접 라운드피겨(1·2·5×10^k원) 대비 현재가 거리(%) — 음수=직하단',
+    ma5_reclaim TINYINT DEFAULT NULL COMMENT '5일선 재탈환(전일 5일선 아래 → 당일 5일선 위 양봉) — core.edge_features.ma5_reclaim',
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 

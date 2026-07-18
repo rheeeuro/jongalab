@@ -18,7 +18,10 @@ from core.trading_engine import (
     AnalysisEngine,
 )
 from core.config import EDGE_SELECTION_MODE
-from core.edge_features import afternoon_ret, is_bio, prog_buy_days, vol_ratio
+from core.edge_features import (
+    afternoon_ret, dist_prior_high_pct, is_bio, ma5_reclaim, prog_buy_days,
+    round_dist_pct, vol_ratio,
+)
 from core.repository.stock_report import (
     save_stock_reports,
     get_recent_report_codes,
@@ -203,19 +206,38 @@ class ClosingBetStrategy:
             self.engine.parse_float(fer) if fer else None
         )
 
-    def _fetch_vol_ratio(self, code: str) -> float | None:
-        """일봉(ka10081) 거래량으로 당일 ÷ 직전 20일 평균 배율. 실패 시 None(피처만 결측)."""
+    def _fetch_chart_features(self, code: str, current_price: int) -> dict:
+        """일봉(ka10081) 1콜에서 차트 구조 피처를 굽는다 — vol_ratio(당일÷20일 평균 거래량)
+        + dist_prior_high_pct(250일 전고점 대비 거리) + ma5_reclaim(5일선 재탈환 반전).
+        실패 시 빈 dict(피처만 결측)."""
         try:
             data = self.api.get_daily_chart(code)
             candles = data.get("stk_dt_pole_chart_qry", [])
+            today = datetime.now().strftime("%Y%m%d")
             vols = [
                 (cd.get("dt", ""), abs(self.engine.parse_price(cd.get("trde_qty", "0"))))
                 for cd in candles[:30]
             ]
-            return vol_ratio(vols, datetime.now().strftime("%Y%m%d"))
+            highs = [
+                (cd.get("dt", ""), abs(self.engine.parse_price(cd.get("high_pric", "0"))))
+                for cd in candles[:251]  # 당일 + 직전 250거래일
+            ]
+            ohlc = [
+                (
+                    cd.get("dt", ""),
+                    abs(self.engine.parse_price(cd.get("open_pric", "0"))),
+                    abs(self.engine.parse_price(cd.get("cur_prc", "0"))),
+                )
+                for cd in candles[:6]  # 당일 + 직전 5봉 (전일 MA5 계산분)
+            ]
+            return {
+                "vol_ratio": vol_ratio(vols, today),
+                "dist_prior_high_pct": dist_prior_high_pct(highs, today, current_price),
+                "ma5_reclaim": ma5_reclaim(ohlc, today, current_price),
+            }
         except Exception as e:
-            logger.warning(f"거래량 배율 조회 실패 [{code}]: {e}")
-            return None
+            logger.warning(f"차트 피처 조회 실패 [{code}]: {e}")
+            return {}
 
     def _fetch_trading_value(self, code: str) -> int:
         """일봉(ka10081) 최신 캔들의 거래대금(trde_prica, 단위 백만원)을 원 단위로 환산.
@@ -258,7 +280,8 @@ class ClosingBetStrategy:
             feat = self._feat.setdefault(c.code, {})
             feat["foreign_brokers_buying"] = 1 if supply.get("foreign_brokers_buying") else 0
             feat["prog_buy_days"] = prog_buy_days(c.supply_history)
-            feat["vol_ratio"] = self._fetch_vol_ratio(c.code)
+            feat.update(self._fetch_chart_features(c.code, c.current_price))
+            feat["round_dist_pct"] = round_dist_pct(c.current_price)
 
             # 프로그램 양매수(순매수 > 0)는 더 이상 필수 조건이 아니다.
             #   필터 대신 score_candidate()의 가산점(SCORE_PROGRAM_BUY_BONUS)으로 반영한다.
@@ -425,6 +448,9 @@ class ClosingBetStrategy:
                 "foreign_brokers_buying": feat.get("foreign_brokers_buying"),
                 "afternoon_ret": feat.get("afternoon_ret"),
                 "vol_ratio": feat.get("vol_ratio"),
+                "dist_prior_high_pct": feat.get("dist_prior_high_pct"),
+                "round_dist_pct": feat.get("round_dist_pct"),
+                "ma5_reclaim": feat.get("ma5_reclaim"),
                 "prog_buy_days": feat.get("prog_buy_days"),
                 "first_seen": (
                     (0 if code in recent_codes else 1) if recent_codes is not None else None

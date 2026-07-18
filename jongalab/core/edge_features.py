@@ -5,6 +5,7 @@ daily_stock_report 의 F5 수급 구조형 피처 스칼라를 굽는다. 관측
 결측·형식 이상은 전부 None 반환 — edge_predicate 가 NULL 을 매칭 실패로 처리하는
 보수적 계약과 맞물린다. tests/test_edge_features.py 가 계약을 고정한다.
 """
+import math
 
 
 def afternoon_ret(hourly_candles: list, current_price: int, today: str) -> float | None:
@@ -85,3 +86,75 @@ def vol_ratio(daily_volumes: list[tuple[str, int]], today: str, window: int = 20
     if today_vol <= 0:
         return None
     return round(today_vol / (sum(prior) / len(prior)), 2)
+
+
+# ── 차트 구조 피처 (전고점·라운드피겨, 2026-07-19) ──
+
+def dist_prior_high_pct(
+    daily_highs: list[tuple[str, int]], today: str, current_price: int,
+    lookback: int = 250, min_history: int = 20,
+) -> float | None:
+    """직전 lookback 거래일 전고점(고가 기준, **당일 제외**) 대비 현재가 부호 있는 거리(%).
+
+    daily_highs: [(dt "YYYYMMDD", 고가), ...] 최신순(일봉 응답 순서 그대로).
+    음수=전고점 아래(매물벽까지 남은 거리), 양수=전고점 돌파. 당일 봉을 포함하면 급등주는
+    항상 자기 자신이 전고점이 되어 매물벽 정보가 사라지므로 반드시 제외한다.
+    직전 이력이 min_history 미만(신규상장 등)이면 전고점이 노이즈라 None.
+    """
+    if not daily_highs or not current_price or current_price <= 0:
+        return None
+    prior = [h for dt, h in daily_highs if dt != today and h > 0][:lookback]
+    if len(prior) < min_history:
+        return None
+    prior_high = max(prior)
+    return round((current_price - prior_high) / prior_high * 100, 2)
+
+
+def ma5_reclaim(
+    daily_ohlc: list[tuple[str, int, int]], today: str, current_price: int,
+) -> int | None:
+    """5일선 재탈환 패턴 — 전일 5일선 아래 → 당일 5일선 위로 올라선 양봉.
+
+    daily_ohlc: [(dt "YYYYMMDD", 시가, 종가), ...] 최신순(일봉 응답 순서 그대로, 당일 포함).
+    당일 종가 자리는 선정 시점 현재가(current_price)를 쓴다. 모두 충족 시 1:
+      ① 전일 종가 < 전일 MA5(전일까지 5봉 평균)
+      ② 당일 양봉(현재가>당일 시가)  ③ 현재가 > 당일 MA5(현재가 포함 5봉 평균)
+    (전일 음봉 조건은 등록 당일(2026-07-19, 표본 축적 전) 사용자 정정으로 제거 —
+    이탈 '봉 색'이 아니라 이탈 '위치'가 가설의 본질.)
+    첫 봉이 당일이 아니거나(장 전·데이터 지연) 이력 6봉 미만·가격 결측이면 None.
+    """
+    if not current_price or current_price <= 0:
+        return None
+    if not daily_ohlc or daily_ohlc[0][0] != today or len(daily_ohlc) < 6:
+        return None
+    today_open = daily_ohlc[0][1]
+    prev_close = daily_ohlc[1][2]
+    prior_closes = [c for _, _, c in daily_ohlc[1:6]]  # 전일까지 5봉
+    if today_open <= 0 or any(c <= 0 for c in prior_closes):
+        return None
+    prev_ma5 = sum(prior_closes) / 5
+    today_ma5 = (current_price + sum(prior_closes[:4])) / 5
+    return int(
+        prev_close < prev_ma5               # ① 전일 5일선 아래
+        and current_price > today_open      # ② 당일 양봉
+        and current_price > today_ma5       # ③ 당일 5일선 재탈환
+    )
+
+
+def round_dist_pct(price: int | None) -> float | None:
+    """가장 가까운 라운드피겨(1·2·5 × 10^k 원) 대비 부호 있는 거리(%).
+
+    라운드피겨 = 호가창 심리 앵커(예: 5,000 / 10,000 / 20,000 / 50,000 / 100,000원).
+    음수=직하단(위에 지정가 매도벽), 양수=돌파 직후. 라운드피겨에서 먼 가격은 절대값이
+    커져 밴드 predicate([-2, 0] 등)에 자연히 안 걸린다 — 그 자체가 정보다.
+    """
+    if not price or price <= 0:
+        return None
+    scale = 10 ** math.floor(math.log10(price))
+    levels = [
+        m * base
+        for base in (scale // 10, scale, scale * 10) if base > 0
+        for m in (1, 2, 5)
+    ]
+    level = min(levels, key=lambda lv: abs(price - lv))
+    return round((price - level) / level * 100, 2)

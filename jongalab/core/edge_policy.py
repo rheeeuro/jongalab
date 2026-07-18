@@ -58,6 +58,8 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     "first_seen", "theme_strength", "frgn_exhaust_rate", "frgn_exhaust_chg",
     # F7 종목 리스크 속성 (2026-07-10) — 선정 시점 파생(edge_features.is_bio)·ka10100 캡처
     "is_bio", "market",
+    # 차트 구조 피처 (2026-07-19) — 일봉(기수집)·현재가 파생, 선정 시점 계산
+    "dist_prior_high_pct", "round_dist_pct", "ma5_reclaim",
 })
 
 _MARKET_PREFIX = "market."

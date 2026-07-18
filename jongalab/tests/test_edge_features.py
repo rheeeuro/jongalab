@@ -4,7 +4,10 @@
 """
 import pytest
 
-from core.edge_features import afternoon_ret, is_bio, prog_buy_days, vol_ratio
+from core.edge_features import (
+    afternoon_ret, dist_prior_high_pct, is_bio, ma5_reclaim, prog_buy_days,
+    round_dist_pct, vol_ratio,
+)
 
 TODAY = "2026-07-03"
 
@@ -122,3 +125,113 @@ def test_is_bio_negative():
     assert is_bio("105560", "KB금융", "금융") == 0
     assert is_bio("041830", "인바디", "의료/정밀기기") == 0     # 의료기기는 veto 대상 아님
     assert is_bio(None, None, None) == 0
+
+
+# ── dist_prior_high_pct (전고점 거리, 2026-07-19) ──
+
+def _highs(today_high, *prior):
+    """[(dt, 고가)] 최신순 — 오늘 봉 + 직전 봉들(직전은 최소 이력 20일을 채워 패딩)."""
+    rows = [(TODAY_YMD, today_high)]
+    prior = list(prior) + [5000] * max(0, 20 - len(prior))
+    rows += [(f"2026060{i % 10}", h) for i, h in enumerate(prior)]
+    return rows
+
+
+def test_dist_prior_high_below_wall():
+    # 직전 전고점 10,000 vs 현재가 9,500 → 매물벽 -5% 아래
+    assert dist_prior_high_pct(_highs(9600, 10000, 8000), TODAY_YMD, 9500) == -5.0
+
+
+def test_dist_prior_high_breakout_positive():
+    assert dist_prior_high_pct(_highs(10600, 10000, 9000), TODAY_YMD, 10500) == 5.0
+
+
+def test_dist_prior_high_excludes_today():
+    # 당일 고가 12,000 이 최고여도 전고점은 직전 봉 기준(10,000) — 당일 포함 시 급등주는
+    # 항상 자기 자신이 전고점이 되어 매물벽 정보가 사라진다
+    assert dist_prior_high_pct(_highs(12000, 10000, 9500), TODAY_YMD, 11000) == 10.0
+
+
+def test_dist_prior_high_short_history_returns_none():
+    # 직전 이력 20일 미만(신규상장) → 전고점이 노이즈라 None
+    rows = [(TODAY_YMD, 10000)] + [("20260601", 9000)] * 5
+    assert dist_prior_high_pct(rows, TODAY_YMD, 9500) is None
+
+
+@pytest.mark.parametrize("rows,price", [
+    ([], 10000),                       # 캔들 없음
+    ([("20260601", 10000)] * 30, 0),   # 현재가 0
+])
+def test_dist_prior_high_missing_returns_none(rows, price):
+    assert dist_prior_high_pct(rows, TODAY_YMD, price) is None
+
+
+# ── ma5_reclaim (5일선 재탈환, 2026-07-19 — 전일 음봉 조건은 당일 사용자 정정으로 제거) ──
+# 봉: (dt, 시가, 종가) 최신순. 전일까지 5봉 평균 = 전일 MA5.
+
+def _ohlc(today_open, *prev_bars):
+    """당일 봉(시가만, 종가는 current_price 인자) + 전일 이후 봉들."""
+    rows = [(TODAY_YMD, today_open, 0)]
+    rows += [(f"2026061{i}", o, c) for i, (o, c) in enumerate(prev_bars)]
+    return rows
+
+
+# 전일 종가 9800 < 전일 MA5=(9800+10000*4)/5=9960 (5일선 아래).
+PREV_BELOW = [(10200, 9800), (9900, 10000), (10100, 10000), (9900, 10000), (10100, 10000)]
+
+
+def test_ma5_reclaim_full_pattern():
+    # 당일 양봉(9900→10500), 당일 MA5=(10500+9800+10000*3)/5=10060 < 10500(재탈환)
+    assert ma5_reclaim(_ohlc(9900, *PREV_BELOW), TODAY_YMD, 10500) == 1
+
+
+def test_ma5_reclaim_prev_candle_color_irrelevant():
+    # 전일이 양봉(9700→9800)이어도 5일선 아래였으면 충족 — 이탈 '위치'만 보고 봉 색은 안 본다
+    bars = [(9700, 9800)] + PREV_BELOW[1:]
+    assert ma5_reclaim(_ohlc(9900, *bars), TODAY_YMD, 10500) == 1
+
+
+def test_ma5_reclaim_prev_above_ma5_fails():
+    # 전일 종가가 5일선 위(10100 > 폭락 포함 MA5=9620)면 '이탈 후 재탈환'이 아님
+    bars = [(10300, 10100), (9900, 10000), (10100, 10000), (9900, 10000), (10100, 8000)]
+    assert ma5_reclaim(_ohlc(10000, *bars), TODAY_YMD, 10500) == 0
+
+
+def test_ma5_reclaim_today_bearish_fails():
+    # 당일 음봉(시가 10600 > 현재가 10500)이면 불충족 — 5일선 위여도 '뚫는 양봉'이 아님
+    assert ma5_reclaim(_ohlc(10600, *PREV_BELOW), TODAY_YMD, 10500) == 0
+
+
+def test_ma5_reclaim_below_ma5_today_fails():
+    # 당일 양봉이어도 현재가가 5일선(9960 부근) 아래면 불충족
+    assert ma5_reclaim(_ohlc(9700, *PREV_BELOW), TODAY_YMD, 9800) == 0
+
+
+@pytest.mark.parametrize("rows,price", [
+    ([], 10000),                                   # 캔들 없음
+    (_ohlc(9900, *PREV_BELOW), 0),                 # 현재가 0
+    (_ohlc(9900, *PREV_BELOW[:3]), 10500),         # 이력 6봉 미만
+    ([("20260601", 9900, 9800)] * 6, 10500),       # 첫 봉이 당일 아님(데이터 지연)
+])
+def test_ma5_reclaim_missing_returns_none(rows, price):
+    assert ma5_reclaim(rows, TODAY_YMD, price) is None
+
+
+# ── round_dist_pct (라운드피겨 거리, 2026-07-19) ──
+
+@pytest.mark.parametrize("price,expected", [
+    (9870, -1.3),     # 10,000원 직하단
+    (10200, 2.0),     # 10,000원 돌파 직후
+    (49000, -2.0),    # 50,000원 직하단
+    (19800, -1.0),    # 20,000원 직하단
+    (987, -1.3),      # 1,000원 직하단 (저가주 스케일)
+    (5000, 0.0),      # 정확히 레벨 위
+    (12340, 23.4),    # 어느 레벨에서도 멂 — 밴드 predicate 에 안 걸리는 것이 정상
+])
+def test_round_dist_pct(price, expected):
+    assert round_dist_pct(price) == expected
+
+
+@pytest.mark.parametrize("price", [0, None, -100])
+def test_round_dist_pct_invalid_returns_none(price):
+    assert round_dist_pct(price) is None

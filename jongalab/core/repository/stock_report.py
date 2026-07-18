@@ -21,7 +21,7 @@ _ANALYSIS_COLS = (
     "score", "rank_no", "selected", "sector_rel_ret", "sector_leader_chg",
     "foreign_brokers_buying", "afternoon_ret", "vol_ratio", "prog_buy_days",
     "first_seen", "theme_strength", "frgn_exhaust_rate", "frgn_exhaust_chg",
-    "is_bio", "market",
+    "is_bio", "market", "dist_prior_high_pct", "round_dist_pct", "ma5_reclaim",
 )
 
 
@@ -104,6 +104,9 @@ def save_stock_reports(candidates: list[dict]):
                 "frgn_exhaust_chg": c.get("frgn_exhaust_chg"),
                 "is_bio": c.get("is_bio"),
                 "market": c.get("market"),
+                "dist_prior_high_pct": c.get("dist_prior_high_pct"),
+                "round_dist_pct": c.get("round_dist_pct"),
+                "ma5_reclaim": c.get("ma5_reclaim"),
             }
             cursor.execute(query, tuple(row[col] for col in _ANALYSIS_COLS))
         conn.commit()
