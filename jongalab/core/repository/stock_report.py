@@ -22,7 +22,7 @@ _ANALYSIS_COLS = (
     "foreign_brokers_buying", "afternoon_ret", "vol_ratio", "prog_buy_days",
     "first_seen", "theme_strength", "frgn_exhaust_rate", "frgn_exhaust_chg",
     "is_bio", "market", "dist_prior_high_pct", "round_dist_pct", "ma5_reclaim",
-    "days_since_frgn_surge", "red_candle",
+    "days_since_frgn_surge", "red_candle", "red_candle_streak",
 )
 
 
@@ -110,6 +110,7 @@ def save_stock_reports(candidates: list[dict]):
                 "ma5_reclaim": c.get("ma5_reclaim"),
                 "days_since_frgn_surge": c.get("days_since_frgn_surge"),
                 "red_candle": c.get("red_candle"),
+                "red_candle_streak": c.get("red_candle_streak"),
             }
             cursor.execute(query, tuple(row[col] for col in _ANALYSIS_COLS))
         conn.commit()

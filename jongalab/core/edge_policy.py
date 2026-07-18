@@ -60,8 +60,8 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     "is_bio", "market",
     # 차트 구조 피처 (2026-07-19) — 일봉(기수집)·현재가 파생, 선정 시점 계산
     "dist_prior_high_pct", "round_dist_pct", "ma5_reclaim",
-    # 외인 서지 후 눌림/지속 축 (2026-07-19, sql/23) — supply_history·일봉(기수집) 파생
-    "days_since_frgn_surge", "red_candle",
+    # 외인 서지 후 눌림/지속 축 (2026-07-19, sql/23·24) — supply_history·일봉(기수집) 파생
+    "days_since_frgn_surge", "red_candle", "red_candle_streak",
 })
 
 _MARKET_PREFIX = "market."

@@ -189,6 +189,33 @@ def red_candle(
     return int(current_price < today_open)
 
 
+def red_candle_streak(
+    daily_ohlc: list[tuple[str, int, int]], today: str, current_price: int,
+) -> int | None:
+    """당일 포함 연속 음봉 수(당일이 음봉이 아니면 0) — "수급 1음봉/2음봉" 구분용.
+
+    daily_ohlc: red_candle 과 같은 형식([(dt "YYYYMMDD", 시가, 종가), ...] 최신순, 당일 포함).
+    당일은 현재가<시가, 이전 봉들은 종가<시가로 거슬러 세고 양봉/보합에서 멈춘다.
+    이력 길이(closing_bet 은 6봉)만큼만 세므로 상한은 데이터 길이. 결측 가드는 red_candle 동일.
+    """
+    if not current_price or current_price <= 0:
+        return None
+    if not daily_ohlc or daily_ohlc[0][0] != today:
+        return None
+    today_open = daily_ohlc[0][1]
+    if today_open <= 0:
+        return None
+    if current_price >= today_open:
+        return 0
+    streak = 1
+    for _, o, c in daily_ohlc[1:]:
+        if o > 0 and c > 0 and c < o:
+            streak += 1
+        else:
+            break
+    return streak
+
+
 def round_dist_pct(price: int | None) -> float | None:
     """가장 가까운 라운드피겨(1·2·5 × 10^k 원) 대비 부호 있는 거리(%).
 

@@ -6,7 +6,7 @@ import pytest
 
 from core.edge_features import (
     afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, is_bio, ma5_reclaim,
-    prog_buy_days, red_candle, round_dist_pct, vol_ratio,
+    prog_buy_days, red_candle, red_candle_streak, round_dist_pct, vol_ratio,
 )
 
 TODAY = "2026-07-03"
@@ -324,3 +324,53 @@ def test_red_candle_gap_up_fade_still_red():
 ])
 def test_red_candle_missing_returns_none(rows, price):
     assert red_candle(rows, TODAY_YMD_RC, price) is None
+
+
+# ── red_candle_streak (당일 포함 연속 음봉 수, 2026-07-19 — 수급 1음봉/2음봉 구분) ──
+
+RED = (10500, 10000)    # 음봉(시가 10500 → 종가 10000)
+GREEN = (10000, 10500)  # 양봉
+
+
+def _streak_ohlc(today_open, *prev_bars):
+    rows = [(TODAY_YMD_RC, today_open, 0)]
+    rows += [(f"202606{28 - i:02d}", o, c) for i, (o, c) in enumerate(prev_bars)]
+    return rows
+
+
+def test_streak_today_green_is_zero():
+    assert red_candle_streak(_streak_ohlc(10400, RED, RED), TODAY_YMD_RC, 10500) == 0
+
+
+def test_streak_one_first_red_after_green():
+    # 당일 음봉 + 전일 양봉 → 1음봉
+    assert red_candle_streak(_streak_ohlc(10600, GREEN, RED), TODAY_YMD_RC, 10500) == 1
+
+
+def test_streak_two_consecutive_red():
+    # 당일·전일 연속 음봉 + 그 전 양봉 → 2음봉
+    assert red_candle_streak(_streak_ohlc(10600, RED, GREEN), TODAY_YMD_RC, 10500) == 2
+
+
+def test_streak_three():
+    assert red_candle_streak(_streak_ohlc(10600, RED, RED, GREEN), TODAY_YMD_RC, 10500) == 3
+
+
+def test_streak_stops_at_flat_candle():
+    # 보합봉(시가=종가)은 음봉이 아니므로 스트릭 중단
+    assert red_candle_streak(_streak_ohlc(10600, (10000, 10000), RED), TODAY_YMD_RC, 10500) == 1
+
+
+def test_streak_stops_at_missing_prior_price():
+    # 이전 봉 가격 결측(0)은 보수적으로 중단 — 과대 스트릭 방지
+    assert red_candle_streak(_streak_ohlc(10600, (0, 10000), RED), TODAY_YMD_RC, 10500) == 1
+
+
+@pytest.mark.parametrize("rows,price", [
+    ([], 10500),                                    # 캔들 없음
+    (_streak_ohlc(10600, RED), 0),                  # 현재가 0
+    (_streak_ohlc(0, RED), 10500),                  # 당일 시가 결측
+    ([("20260702", 10500, 10000)], 10500),          # 첫 봉이 당일 아님
+])
+def test_streak_missing_returns_none(rows, price):
+    assert red_candle_streak(rows, TODAY_YMD_RC, price) is None
