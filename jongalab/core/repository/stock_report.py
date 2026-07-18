@@ -23,7 +23,15 @@ _ANALYSIS_COLS = (
     "first_seen", "theme_strength", "frgn_exhaust_rate", "frgn_exhaust_chg",
     "is_bio", "market", "dist_prior_high_pct", "round_dist_pct", "ma5_reclaim",
     "days_since_frgn_surge", "red_candle", "red_candle_streak",
+    "overhead_vol_ratio", "poc_dist_pct", "prog_am_net", "prog_pm_net",
 )
+
+# 시간 창에서만 수집되는 스냅샷 캡처 컬럼의 upsert 정책 (2026-07-19, 프로그램 오전/오후 분해):
+#  · prog_am_net — 정오 창(12:00~12:45) 실행의 첫 캡처를 보존(first-write-wins).
+#    이후 실행(오후·저녁)은 None 을 보내며, 값이 이미 있으면 갱신하지 않는다.
+#  · prog_pm_net — 오후 창 실행이 갱신(last-write-wins)하되 창 밖 실행의 NULL 은 무시.
+_FIRST_WRITE_WINS = frozenset({"prog_am_net"})
+_PRESERVE_ON_NULL = frozenset({"prog_pm_net"})
 
 
 def save_stock_reports(candidates: list[dict]):
@@ -38,7 +46,12 @@ def save_stock_reports(candidates: list[dict]):
 
     cols = ", ".join(_ANALYSIS_COLS)
     placeholders = ", ".join(["%s"] * len(_ANALYSIS_COLS))
-    updates = ", ".join(f"{c} = VALUES({c})" for c in _ANALYSIS_COLS)
+    updates = ", ".join(
+        f"{c} = COALESCE({c}, VALUES({c}))" if c in _FIRST_WRITE_WINS
+        else f"{c} = COALESCE(VALUES({c}), {c})" if c in _PRESERVE_ON_NULL
+        else f"{c} = VALUES({c})"
+        for c in _ANALYSIS_COLS
+    )
     query = f"""
         INSERT INTO daily_stock_report (report_date, {cols})
         VALUES (CURDATE(), {placeholders})
@@ -111,6 +124,10 @@ def save_stock_reports(candidates: list[dict]):
                 "days_since_frgn_surge": c.get("days_since_frgn_surge"),
                 "red_candle": c.get("red_candle"),
                 "red_candle_streak": c.get("red_candle_streak"),
+                "overhead_vol_ratio": c.get("overhead_vol_ratio"),
+                "poc_dist_pct": c.get("poc_dist_pct"),
+                "prog_am_net": c.get("prog_am_net"),
+                "prog_pm_net": c.get("prog_pm_net"),
             }
             cursor.execute(query, tuple(row[col] for col in _ANALYSIS_COLS))
         conn.commit()
@@ -126,6 +143,19 @@ def get_recent_report_codes(days: int = 14) -> set[str]:
             (int(days),),
         )
         return {r["stock_code"] for r in cursor.fetchall()}
+
+
+def get_today_prog_am_map() -> dict[str, int]:
+    """당일 행에 저장된 종목코드 → 정오 프로그램 누적 순매수(prog_am_net) 맵.
+
+    closing_bet 오후 실행이 prog_pm_net(현재 누적 − 정오 누적) 차분에 사용한다.
+    정오 창 실행이 아직 안 돌았거나 그때 유니버스에 없던 종목은 맵에 없다(피처 결측)."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT stock_code, prog_am_net FROM daily_stock_report
+               WHERE report_date = CURDATE() AND prog_am_net IS NOT NULL"""
+        )
+        return {r["stock_code"]: int(r["prog_am_net"]) for r in cursor.fetchall()}
 
 
 def get_prev_frgn_exhaust_map() -> dict[str, float]:

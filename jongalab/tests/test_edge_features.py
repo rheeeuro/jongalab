@@ -6,7 +6,8 @@ import pytest
 
 from core.edge_features import (
     afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, is_bio, ma5_reclaim,
-    prog_buy_days, red_candle, red_candle_streak, round_dist_pct, vol_ratio,
+    overhead_vol_ratio, poc_dist_pct, prog_buy_days, prog_cum_net, red_candle,
+    red_candle_streak, round_dist_pct, vol_ratio,
 )
 
 TODAY = "2026-07-03"
@@ -374,3 +375,124 @@ def test_streak_stops_at_missing_prior_price():
 ])
 def test_streak_missing_returns_none(rows, price):
     assert red_candle_streak(rows, TODAY_YMD_RC, price) is None
+
+
+# ── overhead_vol_ratio / poc_dist_pct (매물대 볼륨프로파일, 2026-07-19) ──
+# 봉: (dt, 고가, 저가, 거래량) 최신순. 거래량은 저가~고가 균등 배분 근사.
+
+
+def _bars(*rows):
+    return [(f"202606{i:02d}", h, l, v) for i, (h, l, v) in enumerate(rows, 1)]
+
+
+# min_history=20 을 채우는 균일 이력(9,000~10,000 구간, 봉당 100)
+FLAT_20 = [(10000, 9000, 100)] * 20
+
+
+def test_overhead_all_volume_above():
+    # 전 이력이 현재가 위 → 1.0 (머리 위 매물 100%)
+    assert overhead_vol_ratio(_bars(*FLAT_20), 8000) == 1.0
+
+
+def test_overhead_all_volume_below():
+    # 전 이력이 현재가 아래 → 0.0 (신고가 상태)
+    assert overhead_vol_ratio(_bars(*FLAT_20), 11000) == 0.0
+
+
+def test_overhead_half_of_range():
+    # 현재가가 각 봉 구간 정중앙(9,500) → 균등 배분 근사로 절반
+    assert overhead_vol_ratio(_bars(*FLAT_20), 9500) == 0.5
+
+
+def test_overhead_flat_bar_counts_whole():
+    # 고가=저가 봉(l >= price)은 전량 위로 집계
+    bars = _bars((9000, 9000, 100), *FLAT_20)
+    r_below = overhead_vol_ratio(bars, 8000)   # 21봉 전부 위
+    assert r_below == 1.0
+
+
+@pytest.mark.parametrize("bars,price", [
+    ([], 10000),                                  # 이력 없음
+    (_bars(*FLAT_20), 0),                         # 현재가 0
+    (_bars(*FLAT_20[:10]), 9500),                 # 이력 20봉 미만
+    (_bars(*[(10000, 9000, 0)] * 20), 9500),      # 거래량 전부 0
+])
+def test_overhead_missing_returns_none(bars, price):
+    assert overhead_vol_ratio(bars, price) is None
+
+
+def test_poc_at_heavy_zone():
+    # 9,000~10,000 에 대량(봉당 1000), 14,000~15,000 에 소량(봉당 10)
+    bars = _bars(*[(10000, 9000, 1000)] * 15, *[(15000, 14000, 10)] * 15)
+    d = poc_dist_pct(bars, 9500)
+    # POC 는 9,000~10,000 구간 안 → 현재가 9,500과의 거리는 ±6% 이내
+    assert d is not None and abs(d) < 6
+
+
+def test_poc_negative_when_below_heavy_zone():
+    # 매물대(9,000~10,000) 아래 8,000 → 음수(위에 매물벽)
+    bars = _bars(*[(10000, 9000, 1000)] * 15, *[(15000, 14000, 10)] * 15)
+    assert poc_dist_pct(bars, 8000) < 0
+
+
+def test_poc_positive_when_above_heavy_zone():
+    bars = _bars(*[(10000, 9000, 1000)] * 15, *[(15000, 14000, 10)] * 15)
+    assert poc_dist_pct(bars, 14500) > 0
+
+
+def test_poc_single_price_history():
+    # 전 이력 고가=저가=10,000 → POC 10,000, 10,500 은 +5%
+    bars = _bars(*[(10000, 10000, 100)] * 20)
+    assert poc_dist_pct(bars, 10500) == 5.0
+
+
+@pytest.mark.parametrize("bars,price", [
+    ([], 10000),                                  # 이력 없음
+    (_bars(*FLAT_20), 0),                         # 현재가 0
+    (_bars(*FLAT_20[:10]), 9500),                 # 이력 20봉 미만
+])
+def test_poc_missing_returns_none(bars, price):
+    assert poc_dist_pct(bars, price) is None
+
+
+
+# ── prog_cum_net (프로그램 누적 순매수 스냅샷, 2026-07-19) ──
+# ka90008 최신 행 그대로 — tm "HHMMSS", prm_netprps_amt 당일 누적(백만원).
+# 틱 워킹이 비현실적(유동 종목 50페이지+)이라 30분 주기 실행의 2점 스냅샷 차분으로
+# 오전/오후를 분해한다 — 이 함수는 스냅샷 1점(최신 누적)만 읽는다.
+
+def _prog(*rows):
+    return [{"tm": tm, "prm_netprps_amt": amt} for tm, amt in rows]
+
+MIL = 1_000_000
+
+
+def test_prog_cum_basic():
+    assert prog_cum_net(_prog(("143000", "200"), ("142950", "180"))) == 200 * MIL
+
+
+def test_prog_cum_double_negative_parsing():
+    # 키움 이중부호("--") 정규화
+    assert prog_cum_net(_prog(("120500", "--154258"))) == -154258 * MIL
+
+
+def test_prog_cum_plus_sign_parsing():
+    assert prog_cum_net(_prog(("150000", "+300"))) == 300 * MIL
+
+
+def test_prog_cum_stale_day_guarded():
+    # 휴장/개장 전엔 키움이 최근 거래일을 폴백 반환(최신 행이 NXT 애프터 19:59) — 걸러냄
+    assert prog_cum_net(_prog(("195940", "900"))) is None
+
+
+def test_prog_cum_before_open_guarded():
+    assert prog_cum_net(_prog(("085900", "100"))) is None
+
+
+@pytest.mark.parametrize("rows", [
+    [],                            # 응답 없음
+    _prog(("143000", "")),         # 금액 결측
+    _prog(("143000", "-")),        # 형식 이상
+])
+def test_prog_cum_missing_returns_none(rows):
+    assert prog_cum_net(rows) is None

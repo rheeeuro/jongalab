@@ -72,6 +72,13 @@ class ProgramTrade(BaseModel):
     mrkt_tp: str = "P00101"
 
 
+class ProgramHourly(BaseModel):
+    stk_cd: str
+    date: str = ""          # 빈값=당일 (YYYYMMDD)
+    max_pages: int = 8      # 페이지당 200행 ≈ 25분
+    until_tm: str = ""      # "HHMMSS" — 이 시각 이전 행 도달 시 조기 중단
+
+
 class AfterCloseInvestor(BaseModel):
     mrkt_tp: str = "000"     # 000:전체, 001:코스피, 101:코스닥
     amt_qty_tp: str = "1"    # 1:금액(백만원), 2:수량
@@ -214,6 +221,13 @@ def program_trade_by_stock(b: ProgramTrade):
 @app.post("/program-trade/daily-trend")
 def program_trade_daily_trend(b: StkCd):
     return api().get_program_daily_trend(b.stk_cd)
+
+
+@app.post("/program-trade/hourly-trend")
+def program_trade_hourly_trend(b: ProgramHourly):
+    return api().get_program_trade_hourly(
+        b.stk_cd, date=b.date, max_pages=b.max_pages, until_tm=b.until_tm
+    )
 
 
 @app.post("/inst-foreign/consecutive")

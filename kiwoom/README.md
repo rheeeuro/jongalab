@@ -16,7 +16,7 @@
 
 ```
 kiwoom/
-├── api.py                       # FastAPI — 데이터 조회 엔드포인트 20종 + /, /health
+├── api.py                       # FastAPI — 데이터 조회 엔드포인트 21종 + /, /health
 ├── core/
 │   ├── config.py                # .env 로딩, kiwoom DB 설정 (DB키만 최소 복제)
 │   ├── db.py                    # 컨텍스트 매니저 get_db()
@@ -77,6 +77,7 @@ kiwoom/
 | `/market/after-close-investor` | ka10066 | 장마감후 확정 투자자별 순매수(연속조회 병합) |
 | `/program-trade/by-stock` | ka90004 | 종목별 프로그램 매매 현황 |
 | `/program-trade/daily-trend` | ka90013 | 종목 일별 프로그램 매매 추이 |
+| `/program-trade/hourly-trend` | ka90008 | 종목 당일 틱 프로그램 시계열(통합 SOR, 최신→과거, `until_tm` 조기중단·`max_pages`) — jongalab 프로그램 오전/오후 스냅샷용 |
 | `/inst-foreign/consecutive` | ka10131 | 기관·외국인 연속 매매 현황 |
 | `/theme/groups`, `/theme/stocks` | ka90001/ka90002 | 테마 그룹 / 구성 종목 |
 

@@ -1,4 +1,5 @@
 """시세 (/api/dostk/mrktpr, /api/dostk/mrkcond) — ka10063(대체: ka10059), ka90008, ka90013, ka10087, ka10066, ka10046, ka10047."""
+import time
 from datetime import datetime
 
 
@@ -10,17 +11,43 @@ class MarketMixin:
         """ka10059 — 종목별투자자기관별요청 (ka10063 대체)"""
         return self.get_investor_by_stock(stk_cd)
 
-    def get_program_trade_hourly(self, stk_cd: str) -> dict:
+    def get_program_trade_hourly(
+        self, stk_cd: str, date: str = "", max_pages: int = 8, until_tm: str = "",
+    ) -> dict:
         """
         ka90008 — 종목시간별프로그램매매추이요청
-        시간대별 프로그램 매매 추이 (외국인 프로그램 확인)
-        응답: stk_tm_prm_trde_trnsn (LIST)
+        당일 틱 단위 프로그램 매매 시계열 (최신→과거, 페이지당 200행 ≈ 25분).
+        (구 구현 버그: URL_MRKTPR 로 보내 1504 오류로 사실상 미사용 — 실제 지원 URI 는
+         URL_MRKCOND, 2026-07-19 수정. ka90013 처럼 통합 기준 → SOR 코드(_AL)로 조회.)
+        until_tm("HHMMSS")을 주면 그 시각 이전 행에 도달한 페이지에서 조기 중단 —
+        오전/오후 분해 피처가 12:00 경계까지만 필요할 때 페이지 낭비를 막는다.
+        응답: stk_tm_prm_trde_trnsn (LIST) — tm(HHMMSS), prm_netprps_amt(당일 누적
+              순매수, 백만원, 음수는 '--' 이중부호), prm_netprps_amt_irds(증감) 등
         """
-        return self._post(self.cfg.URL_MRKTPR, "ka90008", {
+        code = stk_cd if "_" in stk_cd else f"{stk_cd}_AL"
+        body = {
             "amt_qty_tp": "1",      # 1:금액, 2:수량
-            "stk_cd": stk_cd,
-            "date": datetime.now().strftime("%Y%m%d"),
-        })
+            "stk_cd": code,
+            "date": date or datetime.now().strftime("%Y%m%d"),
+        }
+        all_items: list = []
+        cont_yn = ""
+        next_key = ""
+        for _ in range(max_pages):
+            url = f"{self.base_url}{self.cfg.URL_MRKCOND}"
+            headers = self._headers("ka90008", cont_yn, next_key)
+            resp = self.session.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            items = resp.json().get("stk_tm_prm_trde_trnsn", [])
+            all_items.extend(items)
+            if until_tm and items and (items[-1].get("tm") or "999999") <= until_tm:
+                break
+            cont_yn = resp.headers.get("cont-yn", "N")
+            next_key = resp.headers.get("next-key", "")
+            if cont_yn != "Y" or not next_key:
+                break
+            time.sleep(0.3)
+        return {"stk_tm_prm_trde_trnsn": all_items}
 
     def get_after_hours_single_price(self, stk_cd: str) -> dict:
         """

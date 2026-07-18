@@ -62,6 +62,10 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     "dist_prior_high_pct", "round_dist_pct", "ma5_reclaim",
     # 외인 서지 후 눌림/지속 축 (2026-07-19, sql/23·24) — supply_history·일봉(기수집) 파생
     "days_since_frgn_surge", "red_candle", "red_candle_streak",
+    # 매물대 볼륨프로파일 (2026-07-19, sql/25) — 일봉(기수집) 파생, rule 은 레벨 축 판정 후
+    "overhead_vol_ratio", "poc_dist_pct",
+    # 프로그램 장중 오전/오후 분해 (2026-07-19, sql/26) — ka90008 선정 시점 수집
+    "prog_am_net", "prog_pm_net",
 })
 
 _MARKET_PREFIX = "market."

@@ -20,12 +20,14 @@ from core.trading_engine import (
 from core.config import EDGE_SELECTION_MODE
 from core.edge_features import (
     afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, is_bio, ma5_reclaim,
-    prog_buy_days, red_candle, red_candle_streak, round_dist_pct, vol_ratio,
+    overhead_vol_ratio, poc_dist_pct, prog_buy_days, prog_cum_net, red_candle,
+    red_candle_streak, round_dist_pct, vol_ratio,
 )
 from core.repository.stock_report import (
     save_stock_reports,
     get_recent_report_codes,
     get_prev_frgn_exhaust_map,
+    get_today_prog_am_map,
 )
 from core.repository.sector_report import save_sector_reports
 from core.repository.content import get_today_content_by_stock
@@ -65,6 +67,13 @@ class ClosingBetStrategy:
         # 종목코드 → 시장 구분(코스피/코스닥) — _find_sector 의 ka10100 응답에서 함께 캡처
         # (추가 API 콜 없음). veto_bio_kosdaq rule 이 daily_stock_report.market 으로 참조한다.
         self._market: dict[str, str] = {}
+        # 종목코드 → 정오 창 실행이 저장해 둔 프로그램 누적 순매수(prog_am_net) —
+        # 오후 실행이 prog_pm_net(현재 누적 − 정오 누적) 차분에 사용. 실패해도 피처만 결측.
+        try:
+            self._prog_am_map: dict[str, int] = get_today_prog_am_map()
+        except Exception as e:
+            logger.warning(f"정오 프로그램 스냅샷 로드 실패: {e}")
+            self._prog_am_map = {}
         # 거래대금 순위 API에서 시장별 TOP_N_BY_VALUE 안에 들어온 종목.
         # 테마 보너스는 이 유동성 상위권과 교차할 때만 부여한다.
         self._top_value_codes: set[str] = set()
@@ -209,7 +218,9 @@ class ClosingBetStrategy:
     def _fetch_chart_features(self, code: str, current_price: int) -> dict:
         """일봉(ka10081) 1콜에서 차트 구조 피처를 굽는다 — vol_ratio(당일÷20일 평균 거래량)
         + dist_prior_high_pct(250일 전고점 대비 거리) + ma5_reclaim(5일선 재탈환 반전)
-        + red_candle(당일 음봉 여부, 수급 눌림/지속 축). 실패 시 빈 dict(피처만 결측)."""
+        + red_candle/red_candle_streak(당일 음봉·연속 음봉, 수급 눌림/지속 축)
+        + overhead_vol_ratio/poc_dist_pct(매물대 볼륨프로파일 — 두터움·POC 거리).
+        실패 시 빈 dict(피처만 결측)."""
         try:
             data = self.api.get_daily_chart(code)
             candles = data.get("stk_dt_pole_chart_qry", [])
@@ -230,12 +241,23 @@ class ClosingBetStrategy:
                 )
                 for cd in candles[:6]  # 당일 + 직전 5봉 (전일 MA5 계산분)
             ]
+            hlv_bars = [
+                (
+                    cd.get("dt", ""),
+                    abs(self.engine.parse_price(cd.get("high_pric", "0"))),
+                    abs(self.engine.parse_price(cd.get("low_pric", "0"))),
+                    abs(self.engine.parse_price(cd.get("trde_qty", "0"))),
+                )
+                for cd in candles[:251]  # 볼륨프로파일(당일 포함 250봉)
+            ]
             return {
                 "vol_ratio": vol_ratio(vols, today),
                 "dist_prior_high_pct": dist_prior_high_pct(highs, today, current_price),
                 "ma5_reclaim": ma5_reclaim(ohlc, today, current_price),
                 "red_candle": red_candle(ohlc, today, current_price),
                 "red_candle_streak": red_candle_streak(ohlc, today, current_price),
+                "overhead_vol_ratio": overhead_vol_ratio(hlv_bars, current_price),
+                "poc_dist_pct": poc_dist_pct(hlv_bars, current_price),
             }
         except Exception as e:
             logger.warning(f"차트 피처 조회 실패 [{code}]: {e}")
@@ -298,6 +320,34 @@ class ClosingBetStrategy:
             feat["afternoon_ret"] = afternoon_ret(
                 c.hourly_candles, c.current_price, datetime.now().strftime("%Y-%m-%d")
             )
+
+            # 프로그램 오전/오후 분해 (ka90008 스냅샷 2회 차분, 2026-07-19) —
+            # "오전 프로그램 매도 → 오후 매수 전환" 통설 축. 틱 워킹은 유동 종목에서
+            # 50페이지+ 라 비현실적(실측) → 30분 주기 재실행을 이용한 2점 스냅샷:
+            #  · 정오 창(12:00~12:45) 실행: 현재 누적(1페이지)을 prog_am_net 으로 저장
+            #    (repository 가 첫 기록 보존 — 12:30 재실행이 덮어쓰지 않음)
+            #  · 오후 창(12:45~15:35) 실행: prog_pm_net = 현재 누적 − 저장된 정오 누적
+            # 창 밖 실행은 스킵(키움이 당일 데이터 없으면 최근 거래일 폴백 → 오염 방지),
+            # NULL 은 repository 가 기존값 보존.
+            now_hms = datetime.now().strftime("%H%M%S")
+            cum = None
+            if "120000" <= now_hms <= "153500":
+                try:
+                    rows = self.api.get_program_trade_hourly(
+                        c.code, max_pages=1
+                    ).get("stk_tm_prm_trde_trnsn", [])
+                    cum = prog_cum_net(rows)
+                except Exception as e:
+                    logger.warning(f"프로그램 시간별 조회 실패 [{c.code}]: {e}")
+            if now_hms <= "124500":
+                feat["prog_am_net"] = cum
+                feat["prog_pm_net"] = None
+            else:
+                am = self._prog_am_map.get(c.code.split("_")[0])
+                feat["prog_am_net"] = None  # 정오 캡처 보존(first-write-wins)
+                feat["prog_pm_net"] = (
+                    cum - am if cum is not None and am is not None else None
+                )
 
             filtered.append(c)
             time.sleep(0.5)
@@ -459,6 +509,10 @@ class ClosingBetStrategy:
                 "days_since_frgn_surge": feat.get("days_since_frgn_surge"),
                 "red_candle": feat.get("red_candle"),
                 "red_candle_streak": feat.get("red_candle_streak"),
+                "overhead_vol_ratio": feat.get("overhead_vol_ratio"),
+                "poc_dist_pct": feat.get("poc_dist_pct"),
+                "prog_am_net": feat.get("prog_am_net"),
+                "prog_pm_net": feat.get("prog_pm_net"),
                 "prog_buy_days": feat.get("prog_buy_days"),
                 "first_seen": (
                     (0 if code in recent_codes else 1) if recent_codes is not None else None

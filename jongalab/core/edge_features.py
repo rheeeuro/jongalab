@@ -141,6 +141,123 @@ def ma5_reclaim(
     )
 
 
+# ── 프로그램 장중 오전/오후 분해 (2026-07-19 — "오전 프로그램 매도→오후 매수 전환" 통설) ──
+
+def _parse_prog_amt(s) -> int | None:
+    """ka90008 누적 순매수 금액(백만원, 음수는 '--' 이중부호) → 원. 결측/형식 이상은 None."""
+    if s is None:
+        return None
+    s = str(s).strip().replace("--", "-").lstrip("+")
+    if not s or s == "-":
+        return None
+    try:
+        return int(s) * 1_000_000
+    except ValueError:
+        return None
+
+
+def prog_cum_net(prog_rows: list, min_tm: str = "090000", max_tm: str = "153500") -> int | None:
+    """ka90008 최신 행의 당일 프로그램 누적 순매수(원). 스냅샷 캡처용.
+
+    prog_rows: ka90008 응답(stk_tm_prm_trde_trnsn) 그대로 — 최신→과거, tm "HHMMSS",
+    prm_netprps_amt 당일 누적(백만원). 최신 행 tm 이 [min_tm, max_tm] 밖이면 None —
+    키움이 당일 데이터 없을 때 최근 거래일을 폴백 반환하는 것과 NXT 애프터 틱을 걸러낸다.
+
+    사용처(오전/오후 분해): 틱 시계열은 유동 종목에서 12:00 도달에 50페이지+ 가 필요해
+    (2026-07-19 실측, 삼성전자 12:00~14:30 구간만 11,256틱) 페이지 워킹이 비현실적이다.
+    대신 30분 주기 closing_bet 의 정오 창 실행이 이 스냅샷(1페이지)을 prog_am_net 으로
+    저장하고, 오후 실행이 (현재 스냅샷 − 저장된 정오값)으로 prog_pm_net 을 계산한다.
+    """
+    if not prog_rows:
+        return None
+    tm = prog_rows[0].get("tm") or ""
+    if not (min_tm <= tm <= max_tm):
+        return None
+    return _parse_prog_amt(prog_rows[0].get("prm_netprps_amt"))
+
+
+# ── 매물대(볼륨프로파일) 피처 (2026-07-19 — 일봉 근사, rule 은 레벨 축 판정 후 등록) ──
+# dist_prior_high_pct 는 전고점의 '위치'만 본다 — 그 고점이 스파이크로 스친 얇은 고점인지
+# 수개월 횡보로 다져진 두터운 벽인지 구분하지 못한다. 아래 둘이 '물량'을 본다.
+# 각 일봉의 거래량을 저가~고가 구간에 균등 배분하는 근사(분봉 없이 1콜 재사용).
+
+def overhead_vol_ratio(
+    daily_bars: list[tuple[str, int, int, int]], current_price: int,
+    lookback: int = 250, min_history: int = 20,
+) -> float | None:
+    """직전 lookback 거래일(당일 포함) 거래량 중 현재가 '위'에서 거래된 비중(0~1).
+
+    daily_bars: [(dt "YYYYMMDD", 고가, 저가, 거래량), ...] 최신순(일봉 응답 순서 그대로).
+    비중이 클수록 현재가 위에 물린 물량(잠재 본전 매도 압력)이 두텁다 — 0에 가까우면
+    "머리 위 매물 없음"(신고가 논리)의 정량판. 당일 봉 포함 — 당일 고가 부근 매수자도
+    현재가 아래로 밀렸다면 실재하는 매물이다. 이력 min_history 미만·거래량 0이면 None.
+    """
+    if not current_price or current_price <= 0:
+        return None
+    bars = [
+        (h, l, v) for _, h, l, v in daily_bars[:lookback]
+        if h > 0 and l > 0 and h >= l and v > 0
+    ]
+    if len(bars) < min_history:
+        return None
+    total = 0.0
+    above = 0.0
+    for h, l, v in bars:
+        total += v
+        if l >= current_price:
+            above += v
+        elif h > current_price:
+            above += v * (h - current_price) / (h - l)
+    if total <= 0:
+        return None
+    return round(above / total, 4)
+
+
+def poc_dist_pct(
+    daily_bars: list[tuple[str, int, int, int]], current_price: int,
+    lookback: int = 250, min_history: int = 20, bins: int = 40,
+) -> float | None:
+    """최대 거래 집중 가격대(POC, Point of Control) 대비 현재가 부호 있는 거리(%).
+
+    daily_bars: overhead_vol_ratio 와 같은 형식. lookback 저가~고가 전 범위를 bins 등분해
+    각 봉 거래량을 겹치는 구간에 균등 배분한 히스토그램의 최대 구간 중심이 POC.
+    양수=매물대 위(하락 시 지지 후보), 음수=아래(상승 시 저항 후보), 0 부근=매물대 한복판.
+    이력 min_history 미만이면 None.
+    """
+    if not current_price or current_price <= 0:
+        return None
+    bars = [
+        (h, l, v) for _, h, l, v in daily_bars[:lookback]
+        if h > 0 and l > 0 and h >= l and v > 0
+    ]
+    if len(bars) < min_history:
+        return None
+    lo = min(l for _, l, _ in bars)
+    hi = max(h for h, _, _ in bars)
+    if hi <= lo:
+        poc = float(hi)
+    else:
+        width = (hi - lo) / bins
+        hist = [0.0] * bins
+        for h, l, v in bars:
+            if h == l:
+                idx = min(int((h - lo) / width), bins - 1)
+                hist[idx] += v
+                continue
+            density = v / (h - l)
+            for i in range(bins):
+                b_lo = lo + i * width
+                b_hi = b_lo + width
+                overlap = min(h, b_hi) - max(l, b_lo)
+                if overlap > 0:
+                    hist[i] += density * overlap
+        best = max(range(bins), key=lambda i: hist[i])
+        poc = lo + (best + 0.5) * width
+    if poc <= 0:
+        return None
+    return round((current_price - poc) / poc * 100, 2)
+
+
 # ── 외인 서지 후 경과 피처 (수급 눌림/지속 축, 2026-07-19) ──
 
 # 외인 '대량' 순매수 기준(원). trading_engine._normalize_supply_amount 의 100억 구간 경계와

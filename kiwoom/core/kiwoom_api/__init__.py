@@ -23,7 +23,7 @@ trading 도메인(core.kiwoom_order_client)이 키움 REST 를 직접 호출해 
   ka10013  신용매매동향요청        POST /api/dostk/stkinfo
   ka10014  공매도추이요청          POST /api/dostk/shsa
   ka20068  대차거래추이(종목별)    POST /api/dostk/slb
-  ka90008  종목시간별프로그램매매  POST /api/dostk/mrktpr
+  ka90008  종목시간별프로그램매매  POST /api/dostk/mrkcond
   ka10087  시간외단일가요청        POST /api/dostk/mrkcond
   ka10066  장마감후투자자별매매    POST /api/dostk/mrkcond
   ka10046  체결강도추이시간별요청  POST /api/dostk/mrkcond

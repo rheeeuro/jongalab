@@ -58,6 +58,14 @@ class KiwoomRestClient:
     def get_program_daily_trend(self, stk_cd: str) -> dict:
         return self._post("/program-trade/daily-trend", {"stk_cd": stk_cd})
 
+    def get_program_trade_hourly(
+        self, stk_cd: str, until_tm: str = "", max_pages: int = 8,
+    ) -> dict:
+        """ka90008 당일 틱 프로그램 시계열(최신→과거). until_tm 도달 시 서버가 조기 중단."""
+        return self._post("/program-trade/hourly-trend", {
+            "stk_cd": stk_cd, "until_tm": until_tm, "max_pages": max_pages,
+        })
+
     def get_inst_foreign_consecutive(self, mrkt_tp: str = "001") -> dict:
         return self._post("/inst-foreign/consecutive", {"mrkt_tp": mrkt_tp})
 
