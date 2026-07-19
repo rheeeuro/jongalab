@@ -294,8 +294,8 @@ function Cell({
         </span>
       </span>
 
-      {/* 데스크탑: 전체 내용 */}
-      <span className="hidden w-full flex-col gap-1 sm:flex">
+      {/* 데스크탑: 전체 내용 (flex-1 로 셀 높이를 채워야 아래 mt-auto 바닥 정렬이 동작) */}
+      <span className="hidden w-full flex-col gap-1 sm:flex sm:flex-1">
         <span className="flex items-center justify-between">
           <DayBadge day={cell.day} isToday={cell.isToday} />
           {hasGap && (
@@ -313,7 +313,8 @@ function Cell({
           </span>
         )}
 
-        <span className="flex flex-col gap-0.5">
+        {/* 매수종목 + 테마를 하나로 묶어 바닥 정렬 — 이벤트(일정) 유무에 상관없이 항상 같은 높이 */}
+        <span className="mt-auto flex flex-col gap-0.5">
           {cell.buyStock && (
             <span className="flex items-center gap-1">
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" />
@@ -322,9 +323,6 @@ function Cell({
               </span>
             </span>
           )}
-        </span>
-
-        <span className="mt-auto flex flex-col gap-0.5">
           {cell.themes.map((t) => (
             <span
               key={t}
