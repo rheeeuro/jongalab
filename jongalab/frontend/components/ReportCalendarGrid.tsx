@@ -226,39 +226,49 @@ function Cell({
       </span>
     );
 
-    // 이벤트만 있는 날(주로 미래) — 마커·칩을 보여주고 모바일은 탭으로 상세를 연다
+    // 모바일: 날짜 + 이벤트 점 슬롯(이벤트가 없어도 같은 높이를 예약해 날짜 정렬을 맞춘다)
+    const mobileInner = (
+      <span className="flex h-full w-full flex-col items-center justify-center gap-1 sm:hidden">
+        {dayEl}
+        <span className="flex h-1 items-center gap-0.5">
+          {hasEvents && (
+            <span className={`h-1 w-1 rounded-full ${eventDotTone(cell.events)}`} />
+          )}
+        </span>
+      </span>
+    );
+    // 데스크탑: 날짜 상단 정렬 + (있으면) 이벤트 칩
+    const desktopInner = (
+      <span className="hidden w-full flex-col gap-1 sm:flex">
+        {dayEl}
+        {hasEvents && (
+          <span className="flex flex-col gap-0.5">
+            {cell.events.map((ev) => (
+              <EventChip key={`${ev.time}${ev.name}`} ev={ev} />
+            ))}
+          </span>
+        )}
+      </span>
+    );
+
+    const shellClass = `flex min-h-[44px] flex-col rounded-lg border border-dashed p-1 text-left sm:min-h-[132px] sm:gap-1 sm:rounded-xl sm:p-2 ${border} ${
+      selected ? "ring-2 ring-indigo-500" : ""
+    }`;
+
+    // 이벤트만 있는 날(주로 미래)은 탭으로 상세를 연다 — 없으면 정적 셀
     if (hasEvents) {
       return (
-        <button
-          type="button"
-          onClick={() => onSelect(cell)}
-          className={`flex min-h-[44px] flex-col rounded-lg border border-dashed p-1 text-left sm:min-h-[132px] sm:gap-1 sm:rounded-xl sm:p-2 ${border} ${
-            selected ? "ring-2 ring-indigo-500" : ""
-          }`}
-        >
-          {/* 모바일: 날짜 + 이벤트 점 */}
-          <span className="flex h-full w-full flex-col items-center justify-center gap-1 sm:hidden">
-            {dayEl}
-            <span className={`h-1 w-1 rounded-full ${eventDotTone(cell.events)}`} />
-          </span>
-          {/* 데스크탑: 날짜 + 이벤트 칩 */}
-          <span className="hidden w-full flex-col gap-1 sm:flex">
-            {dayEl}
-            <span className="flex flex-col gap-0.5">
-              {cell.events.map((ev) => (
-                <EventChip key={`${ev.time}${ev.name}`} ev={ev} />
-              ))}
-            </span>
-          </span>
+        <button type="button" onClick={() => onSelect(cell)} className={shellClass}>
+          {mobileInner}
+          {desktopInner}
         </button>
       );
     }
 
     return (
-      <div
-        className={`flex min-h-[44px] items-center justify-center rounded-lg border border-dashed p-1 sm:min-h-[132px] sm:items-start sm:justify-start sm:rounded-xl sm:p-2 ${border}`}
-      >
-        {dayEl}
+      <div className={shellClass}>
+        {mobileInner}
+        {desktopInner}
       </div>
     );
   }
