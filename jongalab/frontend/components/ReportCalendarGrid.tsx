@@ -29,9 +29,12 @@ function eventDotTone(events: CalendarEvent[]): string {
 }
 
 function EventChip({ ev, withTime }: { ev: CalendarEvent; withTime?: boolean }) {
+  // withTime(데스크탑·상세) 은 시간까지 풀어서 — 잘리지 않게 줄바꿈 허용(단어 중간 안 끊음)
   return (
     <span
-      className={`truncate rounded px-1 py-px text-[10px] font-bold ${
+      className={`rounded px-1 py-px text-[10px] font-bold leading-tight ${
+        withTime ? "whitespace-normal break-keep" : "truncate"
+      } ${
         ev.severity >= 3
           ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
           : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
@@ -244,7 +247,7 @@ function Cell({
         {hasEvents && (
           <span className="flex flex-col gap-0.5">
             {cell.events.map((ev) => (
-              <EventChip key={`${ev.time}${ev.name}`} ev={ev} />
+              <EventChip key={`${ev.time}${ev.name}`} ev={ev} withTime />
             ))}
           </span>
         )}
@@ -308,7 +311,7 @@ function Cell({
         {hasEvents && (
           <span className="flex flex-col gap-0.5">
             {cell.events.map((ev) => (
-              <EventChip key={`${ev.time}${ev.name}`} ev={ev} />
+              <EventChip key={`${ev.time}${ev.name}`} ev={ev} withTime />
             ))}
           </span>
         )}
