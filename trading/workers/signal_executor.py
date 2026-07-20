@@ -1,16 +1,18 @@
-"""종가베팅 매수 집행 워커 (거래소별 2회, 윈도우 눌림 매수).
+"""종가베팅 매수 집행 워커 (거래소별 2회, 종가 매수).
 
-종목의 NXT 상장 여부(ka10100 nxtEnable)에 따라 각 거래소의 종가 직전 윈도우에 매수한다:
-  --venue krx (15:00~15:20)  → NXT 불가 종목을 KRX 종가 직전 정규장에 매수
-  --venue nxt (19:30~19:50)  → NXT 가능 종목을 NXT 종가 직전에 매수
+종목의 NXT 상장 여부(ka10100 nxtEnable)에 따라 각 거래소의 종가에 매수한다:
+  --venue krx (15:00~15:20)  → NXT 불가 종목을 KRX 종가(15:20 동시호가)에 매수
+  --venue nxt (19:30~19:50)  → NXT 가능 종목을 NXT 종가(19:50)에 매수
 
-매수 타이밍(눌림 추종): 윈도우 시작에 시드를 한 번 배분해 종목별 매수 수량을 확정한 뒤,
-15초마다 폴링하며 종목별 장중 고점(윈도우 시작 후 갱신)을 추종한다. 현재가가 고점 대비
-BUY_PULLBACK_PCT% 만큼 눌리면 그 자리에서 즉시 시장가/IOC 로 매수한다(매도 트레일링 스탑의 매수 버전).
-끝까지 안 눌린 종목은 데드라인(15:20/19:50)에 시장가로 매수해 추세 종목을 놓치지 않는다.
+매수 타이밍(종가 단일 매수): 윈도우 시작에 시드를 한 번 배분해 종목별 매수 수량을 확정한 뒤,
+데드라인(15:20/19:50)에 전 종목을 시장가/IOC 로 매수한다. 윈도우 동안은 하트비트만 남긴다
+(대시보드 가동 표시). closing_bet 엣지가 종가→익일시가로 측정·검증되므로 진입가를 종가에 맞춘다.
+  · 과거 '눌림 추종'(고점 대비 -BUY_PULLBACK_PCT% 조기 매수)을 썼으나, 2026-07-20 실거래
+    표본 분석에서 데드라인 대비 평균 -0.27%(KRX -0.44%) 손해로 나와 종가 단일 매수로 회귀.
+    빠지는 종목만 조기 확정하는 구조적 비대칭이 원인. 데드라인 폴백이 이미 추세 종목을 확보한다.
 
-배분: 종가랩 시드배분기 로직(점수 가중 비례 + 잔여 그리디 재투입)으로, 해당 거래소 대상 후보
-전체에 가용현금(시드)을 윈도우 시작 시점에 한 번에 배분한다(이후 가격이 눌려도 수량은 고정).
+배분: 종가랩 시드배분기 로직(등가중 + 잔여 그리디 재투입)으로, 해당 거래소 대상 후보
+전체에 가용현금(시드)을 윈도우 시작 시점에 한 번에 배분한다(수량은 이후 고정).
 멱등성 키로 중복 방지(워커 재기동 안전), 윈도우 가드로 오실행 방지, blocklist 제외.
 """
 import sys
@@ -19,7 +21,6 @@ import argparse
 import logging
 from datetime import datetime, timedelta
 
-from core.config import BUY_PULLBACK_PCT
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.seed_allocator import allocate
@@ -36,7 +37,7 @@ from core.repository import audit_log
 setup_logging()
 logger = logging.getLogger("SignalExecutor")
 
-POLL_SEC = 15  # closing_bet 완료 대기 / 눌림 매수 폴링 공통 주기
+POLL_SEC = 15  # closing_bet 완료 대기 / 데드라인 대기 하트비트 공통 주기
 NXT_PARTIAL_RETRY_MAX = 2
 NXT_PARTIAL_RETRY_WAIT_SEC = 3
 
@@ -228,13 +229,11 @@ def main() -> int:
         return 0
 
     trade_date = now.strftime("%Y%m%d")
-    logger.info("매수 집행 시작 [%s] 거래소=%s 윈도우 %02d:%02d~%02d:%02d 눌림 -%.2f%% (거래일 %s)",
-                args.venue.upper(), cfg["exchange"], *cfg["start"], *cfg["deadline"],
-                BUY_PULLBACK_PCT, trade_date)
+    logger.info("매수 집행 시작 [%s] 거래소=%s 윈도우 %02d:%02d~%02d:%02d 종가 매수 (거래일 %s)",
+                args.venue.upper(), cfg["exchange"], *cfg["start"], *cfg["deadline"], trade_date)
     audit_log.append("buy_start", None, {
         "venue": args.venue, "exchange": cfg["exchange"],
-        "window": f"{cfg['start'][0]:02d}:{cfg['start'][1]:02d}~{cfg['deadline'][0]:02d}:{cfg['deadline'][1]:02d}",
-        "pullback_pct": BUY_PULLBACK_PCT})
+        "window": f"{cfg['start'][0]:02d}:{cfg['start'][1]:02d}~{cfg['deadline'][0]:02d}:{cfg['deadline'][1]:02d}"})
 
     # 0) closing_bet(같은 분 동시 기동) 완료 대기 — 윈도우 시작 이후 갱신된 시그널이 보일 때까지.
     #    이 회차 closing_bet 가 종목 추천을 마친 뒤의 최신 시그널로 매수하기 위함.
@@ -308,14 +307,12 @@ def main() -> int:
                      {"venue": args.venue, "multiplier": mult,
                       "seed_before": before, "seed_after": seed, **regime})
 
-    # 3) 윈도우 시작 시점 현재가로 시드 배분 → 종목별 매수 수량 확정 (이후 눌려도 수량 고정)
+    # 3) 윈도우 시작 시점 현재가로 시드 배분 → 종목별 매수 수량 확정 (이후 수량 고정)
     cands: list[dict] = [
         {"sig": sig, "stk_cd": stk, "score": score,
-         "price": engine.data.get_market_price(stk), "high": 0, "bought": False}
+         "price": engine.data.get_market_price(stk), "bought": False}
         for sig, stk, score in venue_items
     ]
-    for c in cands:
-        c["high"] = c["price"]  # 장중 고점 초기값 = 윈도우 시작가
     allocate(seed, cands)
 
     # 거시 이벤트 게이트 — 보유 창(매수→익일 시가)에 sev3 예정 이벤트(FOMC·CPI·고용)가 걸려 있으면
@@ -357,44 +354,23 @@ def main() -> int:
                 "reason": "배분 0주", "score": c["score"], "price": c["price"]})
             c["bought"] = True  # 루프 대상에서 제외
 
-    # 4) 윈도우 폴링 — 종목별 고점 추종, 고점 대비 BUY_PULLBACK_PCT% 눌리면 즉시 매수
+    # 4) 데드라인까지 대기 — 종가 매수라 트리거 없이 하트비트만 남긴다(대시보드 가동 표시).
     while _hm(datetime.now()) < cfg["deadline"]:
-        for c in cands:
-            if c["bought"]:
-                continue
-            try:
-                cur = engine.data.get_market_price(c["stk_cd"])
-            except Exception as e:
-                logger.warning("현재가 조회 실패 [%s]: %s", c["stk_cd"], e)
-                continue
-            if cur <= 0:
-                continue
-            if cur > c["high"]:
-                c["high"] = cur
-            trigger = round(c["high"] * (1 - BUY_PULLBACK_PCT / 100))
-            if cur <= trigger:
-                c["price"] = cur  # 체결 기록용 참고가(실주문은 시장가/IOC)
-                _buy_candidate(engine, trade_date, c, cfg["exchange"],
-                               f"눌림 매수 현재가 {cur} <= 고점 {c['high']} -{BUY_PULLBACK_PCT}%",
-                               cfg["deadline"])
-        if all(c["bought"] for c in cands):
-            logger.info("전 종목 매수 완료 — 데드라인 전 종료")
-            break
         _beat({"venue": args.venue, "phase": "poll",
                "pending": sum(1 for c in cands if not c["bought"])})
         time.sleep(POLL_SEC)
 
-    # 5) 데드라인 — 끝까지 안 눌린 잔여 후보는 시장가로 매수해 추세 종목 확보
+    # 5) 데드라인 — 잔여 후보 전량 종가(KRX 동시호가 / NXT IOC) 매수
     for c in cands:
         if c["bought"]:
             continue
         try:
             cur = engine.data.get_market_price(c["stk_cd"])
             if cur > 0:
-                c["price"] = cur
+                c["price"] = cur  # 체결 기록용 참고가(실주문은 시장가/IOC)
         except Exception as e:
             logger.warning("데드라인 현재가 조회 실패 [%s]: %s", c["stk_cd"], e)
-        _buy_candidate(engine, trade_date, c, cfg["exchange"], "데드라인 시장가 매수(미눌림)",
+        _buy_candidate(engine, trade_date, c, cfg["exchange"], "종가 매수(마감 데드라인)",
                        cfg["deadline"])
 
     # 6) 관리자 알림은 체결 직후 fills_sync 워커가 실체결가로 전송한다

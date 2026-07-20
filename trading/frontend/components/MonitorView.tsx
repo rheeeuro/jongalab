@@ -120,7 +120,7 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
     ? phaseLabel ? `${phaseLabel} 중` : "폴링 가동 중"
     : data.in_window ? "신호 없음" : "모니터 대기";
   const activeDesc = isBuyPhase
-    ? `${data.poll_sec}초마다 매수 후보를 점검 중이에요. 고점 대비 −${data.pullback_pct}% 눌리면 매수해요.`
+    ? `매수 후보를 확정하고 마감(종가)에 매수해요.`
     : `${data.poll_sec}초마다 보유 종목을 점검 중이에요. 손절 −${data.hard_stop_pct}% · 트레일링 −${data.trail_pct}%.`;
 
   return (

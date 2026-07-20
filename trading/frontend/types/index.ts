@@ -255,7 +255,6 @@ export interface MonitorState {
   poll_sec: number; // 폴링 주기(초)
   hard_stop_pct: number; // 하드 손절 임계 %
   trail_pct: number; // 트레일링 되돌림 %
-  pullback_pct: number; // 매수 눌림 임계 %
   positions: MonitorPosition[];
   orders: Order[];
   events: MonitorEvent[];

@@ -70,11 +70,9 @@ export function eventDetail(event: string, payload: any): string {
     case "monitor_hardstop":
       return `현재가 ${num(p.cur)} ≤ 손절 ${num(p.hard_stop)} · ${p.sent ? "매도 전송" : "전송 안 됨"}`;
     case "buy_start":
-      return `${(p.exchange ?? p.venue ?? "").toString().toUpperCase()} ${p.window ?? ""} · 눌림 −${p.pullback_pct ?? "?"}%`;
+      return `${(p.exchange ?? p.venue ?? "").toString().toUpperCase()} ${p.window ?? ""} · 종가 매수`;
     case "buy_exec":
-      return `${num(p.shares)}주 @${num(p.price)} · ${p.sent ? "매수 전송" : p.error ? "실패" : "전송 안 됨"}${
-        p.reason && String(p.reason).includes("데드라인") ? " (데드라인)" : ""
-      }`;
+      return `${num(p.shares)}주 @${num(p.price)} · ${p.sent ? "매수 전송" : p.error ? "실패" : "전송 안 됨"}`;
     case "buy_intended":
     case "buy_retry_intended":
       return `${num(p.qty)}주 @${num(p.price)} 주문`;

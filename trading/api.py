@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from pydantic import BaseModel
 
 from core.config import (  # noqa: F401  (import 시 루트 .env 로드)
-    DB_CONFIG, TRADING_MODE, ADMIN_PASSWORD, HARD_STOP_LOSS_PCT, TRAIL_PCT, BUY_PULLBACK_PCT,
+    DB_CONFIG, TRADING_MODE, ADMIN_PASSWORD, HARD_STOP_LOSS_PCT, TRAIL_PCT,
 )
 from core.logging_setup import setup_logging
 from core.repository import kiwoom_token as token_repo
@@ -156,8 +156,8 @@ def _monitor_phase(now: datetime):
     """현재 시각이 어느 폴링 단계인지 — (phase, in_window). 평일만 가동.
 
     sell  = 매도 모니터(monitor 워커)   08:00~09:30
-    buy_krx = KRX 눌림 매수(signal_executor --venue krx)  15:00~15:20
-    buy_nxt = NXT 눌림 매수(signal_executor --venue nxt)  19:30~19:50
+    buy_krx = KRX 종가 매수(signal_executor --venue krx)  15:00~15:20
+    buy_nxt = NXT 종가 매수(signal_executor --venue nxt)  19:30~19:50
     """
     if now.weekday() >= 5:
         return None, False
@@ -215,7 +215,6 @@ def monitor():
         "poll_sec": 15,
         "hard_stop_pct": HARD_STOP_LOSS_PCT,
         "trail_pct": TRAIL_PCT,
-        "pullback_pct": BUY_PULLBACK_PCT,
         "positions": positions,
         # 주문 로그·활동 로그 모두 오늘 날짜만 (최신순) — 모니터 탭은 당일 폴링 활동을 본다
         "orders": list(reversed(order_repo.list_by_date(today_dash))),

@@ -13,7 +13,6 @@ const FALLBACK: MonitorState = {
   poll_sec: 15,
   hard_stop_pct: 2,
   trail_pct: 1,
-  pullback_pct: 0.5,
   positions: [],
   orders: [],
   events: [],

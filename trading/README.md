@@ -79,11 +79,11 @@ trading/
         │
 signal_executor (KRX 15:00 / NXT 19:30)
   · 블록리스트 제외 → 거래소 분류 → 시드 산정 → **regime_gate(역전 레짐)로 총 시드 축소** → seed_allocator 등가중 배분 → **futures_gate(선물 하락 시 섹터별 수량 감액, KRX·NXT) × macro_gate(보유 창 sev3 예정 이벤트 시 공통 감액)**
-  · 15초 폴링으로 장중 고점 추적, 고점 대비 되돌림(BUY_PULLBACK_PCT) 시 매수(IOC)
+  · 매수 타이밍은 **종가 단일 매수** — 윈도우 시작에 수량을 확정하고 데드라인(15:20 KRX 동시호가 / 19:50 NXT IOC)에 전 종목 매수. 윈도우 동안은 하트비트만(대시보드 가동 표시). closing_bet 엣지가 종가→익일시가로 측정·검증되므로 진입가를 종가에 맞춘다(과거 '눌림 추종'은 2026-07-20 실거래 표본에서 데드라인 대비 평균 −0.27%·KRX −0.44% 손해로 제거)
   · NXT 는 최유리 IOC 특성상 부분체결 가능 — 주문 직후 ka10076 체결내역으로 목표 수량 대비 체결량을 확인하고,
     체결 row 가 확인된 부분체결이면 19:50 전 잔량을 최대 2회 별도 멱등키(`:partial:N`)로 재시도한다
     (체결내역이 아직 안 보이면 과매수 방지를 위해 재시도하지 않고 19:55 fills_sync/알림에서 미체결로 드러나게 둔다)
-  · 마감 시각에 잔여분 시장가 집행 → 신호 status 갱신(done/skipped/rejected)
+  · 마감 시각(데드라인)에 전 종목 시장가/IOC 집행 → 신호 status 갱신(done/skipped/rejected)
   · 주문 직전 live 주문가능금액(100stk_ord_alow_amt) 재조회로 수량 보정 — 시드는 윈도우 시작
     1회 스냅샷이라, 앞선 종목 체결·증거금 선반영으로 줄어든 현금에 마지막 종목이 '증거금
     부족'으로 통째 거부되지 않도록 살 수 있는 최대 수량으로 축소(0이면 스킵)한다(execution_engine).
@@ -141,7 +141,7 @@ watchdog 은 **jongalab 통합 스케줄러의 dead-man's switch 도 겸한다**
 | 정합성 점검 | `reconcile.py` | 매일 브로커 잔고 vs 로컬 포지션 대조 |
 | 미실행 감시(dead-man's switch) | `watchdog.py` + `audit_log` worker_done 마커 | 핵심 워커가 완료 시 마커를 남기고, watchdog(평일 09:35)가 마커 누락 시 텔레그램 경보. jongalab `job_run` 신선도(2h)로 통합 스케줄러 중단도 함께 감시 |
 
-튜닝 파라미터(`config.py`): `BUY_PULLBACK_PCT`(되돌림 매수), `STOP_BUFFER_PCT`(갭다운 버퍼),
+튜닝 파라미터(`config.py`): `STOP_BUFFER_PCT`(갭다운 버퍼),
 `TRAIL_PCT`(트레일링), `HARD_STOP_LOSS_PCT`(하드 손절), `SEED_MAX_NAME_PCT`(종목당 시드 캡,
 기본 0.25 — 하한가에선 손절이 물리적으로 불가하므로 단일 종목 최악 손실은 이 캡으로만 봉쇄된다).
 
