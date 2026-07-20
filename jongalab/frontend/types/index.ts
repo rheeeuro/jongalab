@@ -292,7 +292,8 @@ export interface EdgeRuleStats {
   ci_low: number | null;        // 단측 95% 신뢰구간 하한 — 승격 게이트(>0)
   worst_low_ret: number | null; // 매칭 종목 익일 저가 최악값(꼬리)
   updated_through: string | null;
-  recent_n?: number;
+  recent_n?: number;            // 강등 감시 최근 창(최근 10거래일) 표본 수
+  recent_n_days?: number;       // 강등 감시 최근 창의 거래일 수
   recent_mean_net?: number | null;
   // 승격 게이트(core/edge_policy.check_promotion) 통과 여부 — 평가기가 계산해 저장.
   // 프론트는 이 값을 렌더링만 한다(조건을 프론트에서 재계산하지 않음 — 단일 소스).

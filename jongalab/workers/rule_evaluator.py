@@ -14,7 +14,9 @@
      (라우터 승격 게이트와 **동일 단일 소스**)으로 자격 판정 → stats.promo_eligible 저장
      (프론트 '승격후보' 배지가 이 값을 렌더링) → 텔레그램 알림:
        승격 후보(게이트 전체 충족) / 집행 설계 필요(통계는 충족, 선정 시점 실행 불가 피처) /
-       강등 검토(live, 최근 30표본 mean_net<0). 실제 전이는 관리자 API 수동 승인.
+       강등 검토(live 비대조군, 최근 10거래일 창 n≥20·거래일≥5·mean_net<0 — benchmark 는
+       제외: live 대조군이 사라지면 승격 게이트가 fail-closed 로 전 후보를 막는다).
+     실제 전이는 관리자 API 수동 승인.
 """
 import logging
 import math
@@ -40,8 +42,9 @@ setup_logging()
 logger = logging.getLogger("RuleEvaluator")
 
 _CI_Z = 1.64                     # 단측 95% 정규 근사
-_RECENT_WINDOW = 30              # 강등 감시: 최근 표본 창(종목-일)
-_DEMOTE_MIN_N = 20               # 강등 감시 최소 표본
+_RECENT_DAYS = 10                # 강등 감시: 최근 창(거래일 수)
+_DEMOTE_MIN_N = 20               # 강등 감시 최소 표본(종목-일)
+_DEMOTE_MIN_DAYS = 5             # 강등 감시 최소 거래일 — 하루 시장 무브가 창을 뒤집는 오탐 방지
 _LABEL_RETRY_DEADLINE_DAYS = 14  # 결과 라벨 미도래 재시도 마감 — 초과 시 n=0 sentinel 로 종결
 
 
@@ -99,9 +102,11 @@ def _recompute_stats(daily_rows: list[dict]) -> dict:
     std = (sum((x - mean_net) ** 2 for x in nets) / (n - 1)) ** 0.5 if n >= 2 else 0.0
     ci_low = mean_net - _CI_Z * std / math.sqrt(n)
 
-    # 강등 감시용 최근 창 평균(최신순 30 종목-일)
-    dated.sort(key=lambda t: t[0])
-    recent = [net for _, net in dated[-_RECENT_WINDOW:]]
+    # 강등 감시용 최근 창 — 최근 _RECENT_DAYS 거래일의 표본. 종목-일 30개 창은 광역 rule
+    # (일 10종목 매칭)에서 거래일 3일에 불과해, 하루 시장 무브가 평균을 통째로 뒤집는
+    # 오탐 강등 알림을 냈다(2026-07-20 control_legacy_top10 사례).
+    recent_dates = set(sorted({d for d, _ in dated})[-_RECENT_DAYS:])
+    recent = [net for d, net in dated if d in recent_dates]
     recent_mean = sum(recent) / len(recent) if recent else None
 
     return {
@@ -116,6 +121,7 @@ def _recompute_stats(daily_rows: list[dict]) -> dict:
         "worst_low_ret": round(min(lows), 3) if lows else None,
         "updated_through": updated_through,
         "recent_n": len(recent),
+        "recent_n_days": len(recent_dates),
         "recent_mean_net": round(recent_mean, 3) if recent_mean is not None else None,
     }
 
@@ -244,7 +250,14 @@ def run():
                 # 집행 설계(선정 시점 이동 등) 검토 대상. 표본 미달엔 알리지 않는다(매일 스팸 방지).
                 exec_pending.append({**row, "reason": gate["exec_reasons"][0]})
         elif rule["status"] == "live":
-            if (stats.get("recent_n") or 0) >= _DEMOTE_MIN_N and (stats.get("recent_mean_net") or 0) < 0:
+            # 대조군(benchmark)은 강등 감시 제외 — 페이퍼 기준선이라 유지 비용이 없고,
+            # live 대조군이 사라지면 승격 게이트(대조군 우위)가 fail-closed 로 전 후보를 막는다.
+            if (
+                rule_role(rule) != "benchmark"
+                and (stats.get("recent_n") or 0) >= _DEMOTE_MIN_N
+                and (stats.get("recent_n_days") or 0) >= _DEMOTE_MIN_DAYS
+                and (stats.get("recent_mean_net") or 0) < 0
+            ):
                 demotions.append({
                     "name": rule["name"], "family": rule["family"],
                     "n": stats["recent_n"], "mean_net": stats["recent_mean_net"],
