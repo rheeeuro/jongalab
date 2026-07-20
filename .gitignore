@@ -29,6 +29,7 @@ stock_session.*
 .claude/settings.local.json
 # 턴 동안 누적되는 변경 파일 목록(Stop 훅이 소비) — 추적 불필요
 .claude/.pending-changes
+.codex/.pending-changes
 
 # 핵심 로직
 jongalab/core/trading_engine.py

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Check"
+  short_description: "프론트·Python 변경을 한 번에 검증하는 품질 게이트"
+  default_prompt: "Use $check to validate all changed frontend and Python files before completion."

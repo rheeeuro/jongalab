@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run Web"
+  short_description: "Next.js 개발 서버를 기동하고 모바일 중심 라우트 동작 확인"
+  default_prompt: "Use $run-web to start the Next.js app and verify the affected route."

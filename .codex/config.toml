@@ -1,0 +1,3 @@
+# Generated from .agent-config/manifest.json; do not edit directly.
+[features]
+hooks = true

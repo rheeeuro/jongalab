@@ -13,6 +13,11 @@ except Exception:
 ' 2>/dev/null || echo "")
 
 case "$FILE" in
+  */.claude/settings.json|*/.claude/skills/*|*/.claude/agents/*|*/.agents/skills/*|*/.codex/config.toml|*/.codex/hooks.json|*/.codex/agents/*|*/.codex/rules/*)
+    echo "🚫 $FILE 는 .agent-config/에서 생성되는 파일입니다." >&2
+    echo "   스킬·에이전트·공유 설정은 .agent-config/ 원본을 수정하세요." >&2
+    exit 2
+    ;;
   *core/trading_engine.py|*core/prompts.py)
     echo "🚫 $FILE 는 git 미추적 민감 로직입니다. 변경은 복구·공유 불가합니다." >&2
     echo "   수정이 정말 필요하면 사용자에게 명시적으로 확인받은 뒤, 변경 내용을 설명하고 진행하세요." >&2

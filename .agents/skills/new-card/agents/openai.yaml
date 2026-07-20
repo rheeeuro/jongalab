@@ -1,0 +1,4 @@
+interface:
+  display_name: "New Card"
+  short_description: "모바일 우선 원칙을 지키는 대시보드 카드 컴포넌트 생성"
+  default_prompt: "Use $new-card to scaffold a mobile-first dashboard card component."

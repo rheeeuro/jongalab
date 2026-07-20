@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run API"
+  short_description: "FastAPI 서버를 기동하고 엔드포인트 상태와 응답 구조 확인"
+  default_prompt: "Use $run-api to start the FastAPI service and verify an endpoint."

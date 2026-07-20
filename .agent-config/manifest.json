@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "hooks": {
+    "sync_on_session_start": true,
+    "sync_after_edit": true,
+    "guard_sensitive": true,
+    "quality_after_edit": true,
+    "deploy_on_stop": true
+  },
+  "claude_permissions": {
+    "allow": [
+      "Bash(uv run :*)",
+      "Bash(cd jongalab/frontend && npx tsc --noEmit)",
+      "Bash(cd jongalab/frontend && npm run lint)",
+      "Bash(cd jongalab/frontend && npm run dev)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npm run lint)",
+      "Bash(pm2 logs :*)",
+      "Bash(pm2 status)",
+      "Bash(pm2 jlist)",
+      "Bash(pm2 restart :*)",
+      "Bash(cd jongalab/frontend && npm run build)",
+      "Bash(docker exec :*)",
+      "Bash(docker ps :*)",
+      "Bash(curl -s http://127.0.0.1:* :*)",
+      "Bash(curl -s -o /dev/null -w :*)",
+      "Bash(grep :*)",
+      "Bash(rg :*)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(npx tsc *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./**/*.session)",
+      "Read(./**/*.session-journal)",
+      "Read(./mariadb_data/**)",
+      "Read(./ollama_data/**)"
+    ]
+  },
+  "codex_rules": [
+    {
+      "pattern": ["uv", "run"],
+      "decision": "allow",
+      "justification": "프로젝트 Python 실행과 검증"
+    },
+    {
+      "pattern": ["npm", "run"],
+      "decision": "allow",
+      "justification": "프로젝트 프론트엔드 스크립트"
+    },
+    {
+      "pattern": ["npx", "tsc"],
+      "decision": "allow",
+      "justification": "TypeScript 정적 검사"
+    },
+    {
+      "pattern": ["pm2", "logs"],
+      "decision": "allow",
+      "justification": "PM2 로그 확인"
+    },
+    {
+      "pattern": ["pm2", "status"],
+      "decision": "allow",
+      "justification": "PM2 상태 확인"
+    },
+    {
+      "pattern": ["pm2", "jlist"],
+      "decision": "allow",
+      "justification": "PM2 상태 JSON 확인"
+    },
+    {
+      "pattern": ["pm2", "restart"],
+      "decision": "allow",
+      "justification": "변경된 PM2 앱 재시작"
+    },
+    {
+      "pattern": ["docker", "ps"],
+      "decision": "allow",
+      "justification": "로컬 컨테이너 상태 확인"
+    },
+    {
+      "pattern": ["docker", "exec"],
+      "decision": "allow",
+      "justification": "프로젝트 컨테이너 내 명령 실행"
+    },
+    {
+      "pattern": ["rg"],
+      "decision": "allow",
+      "justification": "저장소 텍스트 검색"
+    }
+  ]
+}

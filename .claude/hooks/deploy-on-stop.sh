@@ -11,7 +11,7 @@
 set -uo pipefail
 
 ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-PENDING="$ROOT/.claude/.pending-changes"
+PENDING="${AGENT_PENDING_CHANGES:-$ROOT/.claude/.pending-changes}"
 
 # 무한 루프 방지: 이미 stop 훅으로 재진입한 상태면 block 하지 않는다.
 STOP_ACTIVE=$(python3 -c '
@@ -227,7 +227,11 @@ if [ -n "$BUILD_FAILED" ]; then
     exit 0
   fi
   REASON=$(printf '프론트 빌드(npm run build) 실패로 jongalab-fe 을 재시작하지 못했습니다. 아래 오류를 고치세요:\n%s' "$(echo "$BUILD_FAILED" | tail -30)")
-  python3 -c 'import json,sys; print(json.dumps({"decision":"block","reason":sys.argv[1]}))' "$REASON"
+  if [ "${CODEX_HOOK:-0}" = "1" ]; then
+    python3 -c 'import json,sys; print(json.dumps({"continue":False,"stopReason":sys.argv[1]}))' "$REASON"
+  else
+    python3 -c 'import json,sys; print(json.dumps({"decision":"block","reason":sys.argv[1]}))' "$REASON"
+  fi
   exit 0
 fi
 

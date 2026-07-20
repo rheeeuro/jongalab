@@ -106,6 +106,15 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
 실패가 있으면 수정 후 다시 통과시킨 뒤에만 완료로 보고한다. 추측 금지 — 실행 결과로 보고한다.
 
 ## 도구별 하네스 메모
+- **공통 AI 설정 원본**: `.agent-config/`가 Claude와 Codex 설정의 single source of truth다.
+  - 에이전트·스킬·권한·훅을 변경하기 전에 `.agent-config/AGENTS.md`의 주의사항을 반드시 읽는다.
+  - 스킬은 `.agent-config/skills/`, 전문 에이전트는 `.agent-config/agents/`, 공유 권한·훅 토글·Codex 명령
+    규칙은 `.agent-config/manifest.json`에서 수정한다.
+  - `.claude/skills/`, `.claude/agents/`, `.claude/settings.json`, `.agents/skills/`, `.codex/agents/`,
+    `.codex/{config.toml,hooks.json,rules/default.rules}`는 생성물이며 편집 가드가 직접 수정을 차단한다.
+  - `python3 .agent-config/sync.py`로 양쪽을 생성하고, `python3 .agent-config/sync.py --check`로 드리프트를
+    검사한다. Claude/Codex 세션 시작과 파일 편집 후 훅이 자동 동기화한다.
+  - `.claude/settings.local.json`은 개인·기기별 권한이므로 공통 원본과 동기화하지 않는다.
 - **Claude Code**: `.claude/` 에 자동화 레이어가 있다 — 편집 후 위 검증을 자동 실행하는 훅,
   민감 파일 편집 차단 훅, 슬래시 커맨드(`/check` `/run-api` `/run-web` `/db` `/new-card` `/new-worker`),
   전문 서브에이전트(backend/frontend/verify). 위 "검증" 단계가 훅으로 강제된다.
@@ -126,6 +135,10 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
     실행되고 이후 스케줄대로 spawn 된다. 이미 등록된 앱은 건드리지 않는다(필요 시 위 분류대로 재시작).
     → 새 워커/서비스는 `ecosystem.config.js` 에만 추가하면 별도 pm2 명령 없이 등록·기동된다.
   - 해당 PM2 앱이 `online` 이 아니거나 pm2 가 없으면 조용히 건너뛴다.
-- **Codex** (및 기타): 위 자동화가 없으므로 **검증 단계를 직접 실행**해야 한다. 가드레일(민감 파일,
-  비밀키)도 사람이 지키듯 스스로 지킨다. 설정은 글로벌 `~/.codex/config.toml`,
-  승인/샌드박스는 실행 플래그로 조절한다.
+- **Codex**: 프로젝트 로컬 `.codex/`와 `.agents/skills/`에 Claude 설정의 대응 구성이 있다.
+  - `.codex/hooks.json`은 민감 파일 편집 차단, 편집 후 `tsc`/`py_compile`, 턴 종료 시 선택적 빌드·PM2
+    반영을 수행한다. 배포 분류는 `.claude/hooks/deploy-on-stop.sh`를 공용 실행부로 재사용한다.
+  - `.codex/agents/`에는 backend/frontend/verify 전문 에이전트, `.agents/skills/`에는 반복 작업 스킬이 있다.
+  - 프로젝트를 신뢰한 뒤 `/hooks`에서 로컬 훅을 검토·승인해야 실행된다. 훅이 비활성화된 환경에서는
+    위 "검증" 단계를 직접 수행하고 가드레일을 스스로 지킨다.
+  - 개인 설정은 글로벌 `~/.codex/config.toml`, 승인/샌드박스는 실행 플래그나 권한 UI로 조절한다.

@@ -1,0 +1,61 @@
+# Generated from .agent-config/manifest.json; do not edit directly.
+
+prefix_rule(
+    pattern = ["uv", "run"],
+    decision = "allow",
+    justification = "프로젝트 Python 실행과 검증",
+)
+
+prefix_rule(
+    pattern = ["npm", "run"],
+    decision = "allow",
+    justification = "프로젝트 프론트엔드 스크립트",
+)
+
+prefix_rule(
+    pattern = ["npx", "tsc"],
+    decision = "allow",
+    justification = "TypeScript 정적 검사",
+)
+
+prefix_rule(
+    pattern = ["pm2", "logs"],
+    decision = "allow",
+    justification = "PM2 로그 확인",
+)
+
+prefix_rule(
+    pattern = ["pm2", "status"],
+    decision = "allow",
+    justification = "PM2 상태 확인",
+)
+
+prefix_rule(
+    pattern = ["pm2", "jlist"],
+    decision = "allow",
+    justification = "PM2 상태 JSON 확인",
+)
+
+prefix_rule(
+    pattern = ["pm2", "restart"],
+    decision = "allow",
+    justification = "변경된 PM2 앱 재시작",
+)
+
+prefix_rule(
+    pattern = ["docker", "ps"],
+    decision = "allow",
+    justification = "로컬 컨테이너 상태 확인",
+)
+
+prefix_rule(
+    pattern = ["docker", "exec"],
+    decision = "allow",
+    justification = "프로젝트 컨테이너 내 명령 실행",
+)
+
+prefix_rule(
+    pattern = ["rg"],
+    decision = "allow",
+    justification = "저장소 텍스트 검색",
+)
