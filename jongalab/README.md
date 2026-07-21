@@ -78,9 +78,12 @@ jongalab/
   — `uv` 부모만 죽이면 python 자식이 고아로 남아 중복 실행·DB 중복키 충돌을 일으킨다(2026-07-15 사건).
   수동 1회 실행: `uv run workers/scheduler.py --once <잡>`.
   잡 코드 변경은 다음 실행에 자동 반영(매 실행 새 프로세스), **`scheduler.py` 자체 변경은 재시작 필요**(배포 훅이 수행).
-  **중단 감시**: 스케줄러 자신은 죽어도 알리지 못하므로 trading watchdog(평일 09:35)이 `job_run`
-  최신 기록이 2시간 이상 오래되면 경보한다(2026-07-15 배포 훅 재시작 끊김 → 이틀 무감지 중단 사고 재발 방지.
-  배포 훅도 재시작 후 online 검증·재시도를 하도록 보강).
+  **중단 감시**(2단계, 스케줄러 자신은 죽으면 알리지 못하므로 모두 스케줄러 밖에서 돈다):
+  ① trading watchdog(평일 09:35)이 `job_run` 최신 기록이 2시간 이상 오래되면 경보(2026-07-15 배포 훅
+  재시작 끊김 → 이틀 무감지 중단 사고 재발 방지. 배포 훅도 재시작 후 online 검증·재시도를 하도록 보강).
+  ② `scheduler_watchdog`(PM2 cron `jongalab-scheduler-watchdog`, 5분마다)이 `pm2 jlist` 로 프로세스
+  상태를 확인해 online/launching 이 아니면 **자동 재기동 + 관리자 경보**(2026-07-21 PM2 데몬 전체 재시작 후
+  scheduler 만 resurrect 실패로 3시간여 방치된 사고 대응). ①은 지연 감지(잡 이력 기반), ②는 즉시 자동복구(프로세스 기반).
 - **PM2 cron**(스케줄은 루트 `ecosystem.config.js`) — 나머지: 상시(telegram)·창 민감/자금 인접
   잡(gap_check·closing_bet·night_futures·token-refresh)과 trading 도메인 전체. 스케줄러 검증 후 단계 이관 예정.
 
