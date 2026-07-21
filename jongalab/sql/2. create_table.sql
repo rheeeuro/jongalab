@@ -168,6 +168,17 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     dist_prior_high_pct FLOAT DEFAULT NULL COMMENT '250일 전고점(고가, 당일 제외) 대비 현재가 거리(%) — 음수=매물벽 아래, 양수=돌파',
     round_dist_pct FLOAT DEFAULT NULL COMMENT '최근접 라운드피겨(1·2·5×10^k원) 대비 현재가 거리(%) — 음수=직하단',
     ma5_reclaim TINYINT DEFAULT NULL COMMENT '5일선 재탈환(전일 5일선 아래 → 당일 5일선 위 양봉) — core.edge_features.ma5_reclaim',
+    --   재무 스냅샷(2026-07-22): closing_bet 선정 시점 ka10001 응답 재사용(추가 콜 없음). 분기 저속 데이터,
+    --   매일 같은 값 중복 저장 가능(연구용 무해). 점수 무영향. 부채비율은 ka10001 미제공이라 제외.
+    fin_per FLOAT DEFAULT NULL COMMENT 'PER(배) — ka10001 per',
+    fin_pbr FLOAT DEFAULT NULL COMMENT 'PBR(배) — ka10001 pbr',
+    fin_ev FLOAT DEFAULT NULL COMMENT 'EV/EBITDA(배) — ka10001 ev',
+    fin_roe FLOAT DEFAULT NULL COMMENT 'ROE(%) — ka10001 roe',
+    fin_eps INT DEFAULT NULL COMMENT 'EPS 주당순이익(원) — ka10001 eps',
+    fin_bps INT DEFAULT NULL COMMENT 'BPS 주당순자산(원) — ka10001 bps',
+    fin_sales BIGINT DEFAULT NULL COMMENT '매출액(억원) — ka10001 sale_amt',
+    fin_op_profit BIGINT DEFAULT NULL COMMENT '영업이익(억원) — ka10001 bus_pro',
+    fin_net_income BIGINT DEFAULT NULL COMMENT '당기순이익(억원) — ka10001 cup_nga',
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 

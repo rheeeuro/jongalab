@@ -52,6 +52,56 @@ _BIO_CODES = frozenset({
 })
 
 
+# ── 재무 스냅샷 (2026-07-22) — ka10001 응답 재사용, 추가 API 콜 없음 ──
+# closing_bet 이 선정 시점(13~15시)에 후보마다 이미 호출하는 주식기본정보(ka10001) 응답에
+# per/pbr/ev/roe/eps/bps/매출·영업이익·순이익이 실려온다(현재는 시가총액·외인소진율만 사용).
+# 분기 저속 데이터라 매일 같은 값이 중복 저장될 수 있으나 연구용으로 무해하다. 점수 무영향.
+# 부채비율은 ka10001 에 없어 제외한다(별도 재무제표 TR 필요).
+
+
+def _parse_fin_num(s) -> float | None:
+    """ka10001 재무 문자열 → 숫자. 부호 접두(+/-)·천단위 콤마 처리, 공란/파싱불가는 None."""
+    if s is None:
+        return None
+    t = str(s).strip().replace(",", "")
+    if t in ("", "-", "+"):
+        return None
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def _fin_int(s) -> int | None:
+    """정수 재무 필드(원·억원 단위) 파싱 — _parse_fin_num 후 int 절사."""
+    v = _parse_fin_num(s)
+    return int(v) if v is not None else None
+
+
+def financials(info: dict) -> dict:
+    """ka10001(주식기본정보) 응답에서 재무 스냅샷 피처를 추출한다(관측·연구용, 점수 무영향).
+
+    반환 키(전부 결측 시 None):
+      fin_per / fin_pbr / fin_ev   — 밸류에이션(배)
+      fin_roe                      — 자기자본이익률(%)
+      fin_eps / fin_bps            — 주당순이익·주당순자산(원)
+      fin_sales / fin_op_profit / fin_net_income — 매출액·영업이익·당기순이익(억원)
+    """
+    if not info:
+        return {}
+    return {
+        "fin_per": _parse_fin_num(info.get("per")),
+        "fin_pbr": _parse_fin_num(info.get("pbr")),
+        "fin_ev": _parse_fin_num(info.get("ev")),
+        "fin_roe": _parse_fin_num(info.get("roe")),
+        "fin_eps": _fin_int(info.get("eps")),
+        "fin_bps": _fin_int(info.get("bps")),
+        "fin_sales": _fin_int(info.get("sale_amt")),
+        "fin_op_profit": _fin_int(info.get("bus_pro")),
+        "fin_net_income": _fin_int(info.get("cup_nga")),
+    }
+
+
 def is_bio(code: str | None, name: str | None, sector: str | None) -> int:
     """바이오/제약(임상·허가 등 오버나이트 바이너리 이벤트 리스크) 종목이면 1, 아니면 0.
 

@@ -24,6 +24,8 @@ _ANALYSIS_COLS = (
     "is_bio", "market", "dist_prior_high_pct", "round_dist_pct", "ma5_reclaim",
     "days_since_frgn_surge", "red_candle", "red_candle_streak",
     "overhead_vol_ratio", "poc_dist_pct", "prog_am_net", "prog_pm_net",
+    "fin_per", "fin_pbr", "fin_ev", "fin_roe", "fin_eps", "fin_bps",
+    "fin_sales", "fin_op_profit", "fin_net_income",
 )
 
 # 시간 창에서만 수집되는 스냅샷 캡처 컬럼의 upsert 정책 (2026-07-19, 프로그램 오전/오후 분해):
@@ -128,6 +130,15 @@ def save_stock_reports(candidates: list[dict]):
                 "poc_dist_pct": c.get("poc_dist_pct"),
                 "prog_am_net": c.get("prog_am_net"),
                 "prog_pm_net": c.get("prog_pm_net"),
+                "fin_per": c.get("fin_per"),
+                "fin_pbr": c.get("fin_pbr"),
+                "fin_ev": c.get("fin_ev"),
+                "fin_roe": c.get("fin_roe"),
+                "fin_eps": c.get("fin_eps"),
+                "fin_bps": c.get("fin_bps"),
+                "fin_sales": c.get("fin_sales"),
+                "fin_op_profit": c.get("fin_op_profit"),
+                "fin_net_income": c.get("fin_net_income"),
             }
             cursor.execute(query, tuple(row[col] for col in _ANALYSIS_COLS))
         conn.commit()

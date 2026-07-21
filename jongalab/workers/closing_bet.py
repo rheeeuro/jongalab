@@ -19,9 +19,9 @@ from core.trading_engine import (
 )
 from core.config import EDGE_SELECTION_MODE
 from core.edge_features import (
-    afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, is_bio, ma5_reclaim,
-    overhead_vol_ratio, poc_dist_pct, prog_buy_days, prog_cum_net, red_candle,
-    red_candle_streak, round_dist_pct, vol_ratio,
+    afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, financials, is_bio,
+    ma5_reclaim, overhead_vol_ratio, poc_dist_pct, prog_buy_days, prog_cum_net,
+    red_candle, red_candle_streak, round_dist_pct, vol_ratio,
 )
 from core.repository.stock_report import (
     save_stock_reports,
@@ -209,11 +209,15 @@ class ClosingBetStrategy:
         return candidates
 
     def _capture_basic_features(self, code: str, info: dict):
-        """기본정보(ka10001) 응답에서 F5 연구 피처를 캡처 — 외인소진율(for_exh_rt)."""
+        """기본정보(ka10001) 응답에서 연구 피처를 캡처 — 외인소진율(for_exh_rt) + 재무 스냅샷.
+
+        재무(per/pbr/ev/roe/eps/bps/매출·영업이익·순이익)는 같은 응답에서 파생하므로
+        추가 API 콜이 없다. 관측·기록 전용(점수 무영향).
+        """
         fer = info.get("for_exh_rt")
-        self._feat.setdefault(code, {})["frgn_exhaust_rate"] = (
-            self.engine.parse_float(fer) if fer else None
-        )
+        feat = self._feat.setdefault(code, {})
+        feat["frgn_exhaust_rate"] = self.engine.parse_float(fer) if fer else None
+        feat.update(financials(info))
 
     def _fetch_chart_features(self, code: str, current_price: int) -> dict:
         """일봉(ka10081) 1콜에서 차트 구조 피처를 굽는다 — vol_ratio(당일÷20일 평균 거래량)
@@ -526,6 +530,16 @@ class ClosingBetStrategy:
                 # F7 종목 리스크 속성 — veto_bio 계열 rule 이 선정 직전 이 컬럼들로 제외한다.
                 "is_bio": is_bio(code, c.name, c.sector),
                 "market": self._market.get(code),  # 코스피/코스닥 (미확인 시 NULL=veto 미적용)
+                # 재무 스냅샷 (ka10001 재사용) — 관측·연구용, 점수 무영향
+                "fin_per": feat.get("fin_per"),
+                "fin_pbr": feat.get("fin_pbr"),
+                "fin_ev": feat.get("fin_ev"),
+                "fin_roe": feat.get("fin_roe"),
+                "fin_eps": feat.get("fin_eps"),
+                "fin_bps": feat.get("fin_bps"),
+                "fin_sales": feat.get("fin_sales"),
+                "fin_op_profit": feat.get("fin_op_profit"),
+                "fin_net_income": feat.get("fin_net_income"),
             })
 
         # 선정 전 매매 후보 풀(음전 제외)에 뉴스 LLM 라벨을 붙여 veto 가 활용할 수 있게 한다.

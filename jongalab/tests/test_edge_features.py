@@ -5,9 +5,9 @@
 import pytest
 
 from core.edge_features import (
-    afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, is_bio, ma5_reclaim,
-    overhead_vol_ratio, poc_dist_pct, prog_buy_days, prog_cum_net, red_candle,
-    red_candle_streak, round_dist_pct, vol_ratio,
+    afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, financials, is_bio,
+    ma5_reclaim, overhead_vol_ratio, poc_dist_pct, prog_buy_days, prog_cum_net,
+    red_candle, red_candle_streak, round_dist_pct, vol_ratio,
 )
 
 TODAY = "2026-07-03"
@@ -496,3 +496,47 @@ def test_prog_cum_before_open_guarded():
 ])
 def test_prog_cum_missing_returns_none(rows):
     assert prog_cum_net(rows) is None
+
+
+# ── financials (ka10001 재무 스냅샷) ──
+
+def test_financials_real_ka10001_sample():
+    # 삼성전자(005930) 실측 응답 일부 — 파싱 결과·단위 계약 고정
+    info = {
+        "per": "39.46", "pbr": "4.05", "ev": "15.61", "roe": "10.9",
+        "eps": "6564", "bps": "63976",
+        "sale_amt": "3336059", "bus_pro": "436011", "cup_nga": "452068",
+    }
+    assert financials(info) == {
+        "fin_per": 39.46, "fin_pbr": 4.05, "fin_ev": 15.61, "fin_roe": 10.9,
+        "fin_eps": 6564, "fin_bps": 63976,
+        "fin_sales": 3336059, "fin_op_profit": 436011, "fin_net_income": 452068,
+    }
+
+
+def test_financials_sign_prefix_and_negative():
+    # 적자기업: 영업이익·순이익 음수, 부호 접두 처리
+    out = financials({"eps": "-1234", "bus_pro": "-5000", "per": "+12.3"})
+    assert out["fin_eps"] == -1234
+    assert out["fin_op_profit"] == -5000
+    assert out["fin_per"] == 12.3
+
+
+def test_financials_blank_and_dash_become_none():
+    out = financials({"per": "", "pbr": "-", "roe": "  ", "eps": None})
+    assert out["fin_per"] is None
+    assert out["fin_pbr"] is None
+    assert out["fin_roe"] is None
+    assert out["fin_eps"] is None
+
+
+def test_financials_missing_keys_default_none():
+    out = financials({"per": "10.0"})
+    assert out["fin_per"] == 10.0
+    assert out["fin_bps"] is None
+    assert out["fin_sales"] is None
+
+
+def test_financials_empty_info_returns_empty():
+    assert financials({}) == {}
+    assert financials(None) == {}

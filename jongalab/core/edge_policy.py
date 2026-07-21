@@ -66,6 +66,9 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     "overhead_vol_ratio", "poc_dist_pct",
     # 프로그램 장중 오전/오후 분해 (2026-07-19, sql/26) — ka90008 선정 시점 수집
     "prog_am_net", "prog_pm_net",
+    # 재무 스냅샷 (2026-07-22, sql/32) — ka10001 선정 시점 수집(추가 콜 없음). 분기 저속 데이터.
+    "fin_per", "fin_pbr", "fin_ev", "fin_roe", "fin_eps", "fin_bps",
+    "fin_sales", "fin_op_profit", "fin_net_income",
 })
 
 _MARKET_PREFIX = "market."
