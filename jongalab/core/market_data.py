@@ -116,9 +116,11 @@ MARKET_INDICES = {
         {"symbol": "DX-Y.NYB", "name": "달러 인덱스"},
     ],
     # 코스피/코스닥은 KIS REST(아래 KIS_INDICES)에서 조회해 그룹 앞에 합류.
-    # 환율만 yfinance.
+    # 환율·EWY·KORU는 yfinance(미국 상장 한국 ETF, 전날 미국장 반응 참고용).
     "KR": [
         {"symbol": "USDKRW=X", "name": "원/달러 환율"},
+        {"symbol": "EWY", "name": "MSCI 한국 ETF (EWY)"},
+        {"symbol": "KORU", "name": "한국 3배 레버리지 ETF (KORU)"},
     ],
     "COMMODITIES": [
         {"symbol": "GC=F", "name": "금"},
