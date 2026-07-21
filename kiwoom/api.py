@@ -136,6 +136,11 @@ def stock_detail_info(b: StkCd):
     return api().get_stock_detail_info(b.stk_cd)
 
 
+@app.post("/stock/order-book")
+def stock_order_book(b: StkCd):
+    return api().get_stock_order_book(b.stk_cd)
+
+
 @app.post("/stock/broker")
 def stock_broker(b: StkCd):
     return api().get_stock_broker(b.stk_cd)

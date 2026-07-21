@@ -69,6 +69,8 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     # 재무 스냅샷 (2026-07-22, sql/32) — ka10001 선정 시점 수집(추가 콜 없음). 분기 저속 데이터.
     "fin_per", "fin_pbr", "fin_ev", "fin_roe", "fin_eps", "fin_bps",
     "fin_sales", "fin_op_profit", "fin_net_income",
+    # 호가 미시구조 스냅샷 (2026-07-22, sql/33) — ka10004 선정 시점 수집. 연속장 중만 유효.
+    "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct",
 })
 
 _MARKET_PREFIX = "market."

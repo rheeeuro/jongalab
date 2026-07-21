@@ -20,8 +20,8 @@ from core.trading_engine import (
 from core.config import EDGE_SELECTION_MODE
 from core.edge_features import (
     afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, financials, is_bio,
-    ma5_reclaim, overhead_vol_ratio, poc_dist_pct, prog_buy_days, prog_cum_net,
-    red_candle, red_candle_streak, round_dist_pct, vol_ratio,
+    ma5_reclaim, order_book_features, overhead_vol_ratio, poc_dist_pct, prog_buy_days,
+    prog_cum_net, red_candle, red_candle_streak, round_dist_pct, vol_ratio,
 )
 from core.repository.stock_report import (
     save_stock_reports,
@@ -325,6 +325,15 @@ class ClosingBetStrategy:
                 c.hourly_candles, c.current_price, datetime.now().strftime("%Y-%m-%d")
             )
 
+            # 호가 미시구조 스냅샷 (ka10004) — 선정 시점 호가 불균형/스프레드. 연속장 밖엔
+            # 잔량 0 → 파생값 None, repository 가 마지막 세션 스냅샷 보존(PRESERVE_ON_NULL).
+            # 매수는 종가라 종가 직전 마지막 세션 실행(~15시)이 근사치가 된다.
+            try:
+                ob = self.api.get_stock_order_book(c.code)
+                feat.update(order_book_features(ob, c.current_price))
+            except Exception as e:
+                logger.warning(f"호가 조회 실패 [{c.code}]: {e}")
+
             # 프로그램 오전/오후 분해 (ka90008 스냅샷 2회 차분, 2026-07-19) —
             # "오전 프로그램 매도 → 오후 매수 전환" 통설 축. 틱 워킹은 유동 종목에서
             # 50페이지+ 라 비현실적(실측) → 30분 주기 재실행을 이용한 2점 스냅샷:
@@ -540,6 +549,10 @@ class ClosingBetStrategy:
                 "fin_sales": feat.get("fin_sales"),
                 "fin_op_profit": feat.get("fin_op_profit"),
                 "fin_net_income": feat.get("fin_net_income"),
+                # 호가 미시구조 스냅샷 (ka10004) — 관측·연구용, 점수 무영향
+                "ob_imbalance": feat.get("ob_imbalance"),
+                "ob_fpr_imbalance": feat.get("ob_fpr_imbalance"),
+                "ob_spread_pct": feat.get("ob_spread_pct"),
             })
 
         # 선정 전 매매 후보 풀(음전 제외)에 뉴스 LLM 라벨을 붙여 veto 가 활용할 수 있게 한다.

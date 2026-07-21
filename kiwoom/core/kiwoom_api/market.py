@@ -61,6 +61,19 @@ class MarketMixin:
             "stk_cd": stk_cd,
         })
 
+    def get_stock_order_book(self, stk_cd: str) -> dict:
+        """
+        ka10004 — 주식호가요청
+        10호가 매도/매수 잔량·호가 스냅샷(호가 미시구조 연구용). 연속장 중에만
+        유효 — 장 종료·개장 전엔 잔량이 전부 0 으로 온다(소비자가 결측 처리).
+        핵심 필드: sel_fpr_bid/sel_fpr_req(매도최우선 호가/잔량),
+                  buy_fpr_bid/buy_fpr_req(매수최우선 호가/잔량),
+                  tot_sel_req(총매도잔량), tot_buy_req(총매수잔량), 10호가 sel/buy_*
+        """
+        return self._post(self.cfg.URL_MRKCOND, "ka10004", {
+            "stk_cd": stk_cd,
+        })
+
     def get_after_close_investor(
         self, mrkt_tp: str = "000", amt_qty_tp: str = "1",
         trde_tp: str = "0", stex_tp: str = "3", max_pages: int = 5,

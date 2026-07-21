@@ -179,6 +179,11 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     fin_sales BIGINT DEFAULT NULL COMMENT '매출액(억원) — ka10001 sale_amt',
     fin_op_profit BIGINT DEFAULT NULL COMMENT '영업이익(억원) — ka10001 bus_pro',
     fin_net_income BIGINT DEFAULT NULL COMMENT '당기순이익(억원) — ka10001 cup_nga',
+    --   호가 미시구조 스냅샷(2026-07-22): closing_bet 선정 시점 ka10004 파생. 연속장 중만 유효
+    --   (장 종료 후 잔량 0→NULL, PRESERVE_ON_NULL 로 종가 직전 마지막 세션값 보존). 점수 무영향.
+    ob_imbalance FLOAT DEFAULT NULL COMMENT '총매수잔량÷총매도잔량(>1 매수우위) — core.edge_features.order_book_features',
+    ob_fpr_imbalance FLOAT DEFAULT NULL COMMENT '매수최우선잔량÷매도최우선잔량(1호가 압력)',
+    ob_spread_pct FLOAT DEFAULT NULL COMMENT '(매도1호가−매수1호가)÷현재가 %(체결비용·유동성)',
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 

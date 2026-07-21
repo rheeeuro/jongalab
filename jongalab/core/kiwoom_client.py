@@ -39,6 +39,9 @@ class KiwoomRestClient:
     def get_stock_detail_info(self, stk_cd: str) -> dict:
         return self._post("/stock/detail-info", {"stk_cd": stk_cd})
 
+    def get_stock_order_book(self, stk_cd: str) -> dict:
+        return self._post("/stock/order-book", {"stk_cd": stk_cd})
+
     def get_stock_broker(self, stk_cd: str) -> dict:
         return self._post("/stock/broker", {"stk_cd": stk_cd})
 

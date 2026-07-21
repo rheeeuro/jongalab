@@ -6,8 +6,8 @@ import pytest
 
 from core.edge_features import (
     afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, financials, is_bio,
-    ma5_reclaim, overhead_vol_ratio, poc_dist_pct, prog_buy_days, prog_cum_net,
-    red_candle, red_candle_streak, round_dist_pct, vol_ratio,
+    ma5_reclaim, order_book_features, overhead_vol_ratio, poc_dist_pct, prog_buy_days,
+    prog_cum_net, red_candle, red_candle_streak, round_dist_pct, vol_ratio,
 )
 
 TODAY = "2026-07-03"
@@ -540,3 +540,49 @@ def test_financials_missing_keys_default_none():
 def test_financials_empty_info_returns_empty():
     assert financials({}) == {}
     assert financials(None) == {}
+
+
+# ── order_book_features (ka10004 호가 미시구조) ──
+
+def test_order_book_features_basic():
+    ob = {
+        "tot_sel_req": "10000", "tot_buy_req": "25000",
+        "sel_fpr_req": "500", "buy_fpr_req": "1500",
+        "sel_fpr_bid": "+10100", "buy_fpr_bid": "+10000",
+    }
+    out = order_book_features(ob, 10000)
+    assert out["ob_imbalance"] == 2.5          # 25000/10000
+    assert out["ob_fpr_imbalance"] == 3.0      # 1500/500
+    assert out["ob_spread_pct"] == 1.0         # (10100-10000)/10000*100
+
+
+def test_order_book_features_after_hours_zeros_return_none():
+    # 장 종료·개장 전엔 잔량이 전부 0 → 분모 0 가드로 None(세션 밖=결측)
+    ob = {
+        "tot_sel_req": "0", "tot_buy_req": "0",
+        "sel_fpr_req": "0", "buy_fpr_req": "0",
+        "sel_fpr_bid": "0", "buy_fpr_bid": "0",
+    }
+    out = order_book_features(ob, 10000)
+    assert out == {"ob_imbalance": None, "ob_fpr_imbalance": None, "ob_spread_pct": None}
+
+
+def test_order_book_features_sign_prefix_stripped():
+    # 호가는 부호(전일대비 방향) 포함 — 절대값으로 스프레드 계산
+    ob = {"sel_fpr_bid": "-243000", "buy_fpr_bid": "-242000",
+          "tot_sel_req": "100", "tot_buy_req": "100"}
+    out = order_book_features(ob, 242000)
+    assert out["ob_spread_pct"] == round(1000 / 242000 * 100, 3)
+
+
+def test_order_book_features_missing_current_price_no_spread():
+    ob = {"sel_fpr_bid": "10100", "buy_fpr_bid": "10000",
+          "tot_sel_req": "100", "tot_buy_req": "200"}
+    out = order_book_features(ob, 0)
+    assert out["ob_spread_pct"] is None
+    assert out["ob_imbalance"] == 2.0
+
+
+def test_order_book_features_empty_returns_empty():
+    assert order_book_features({}, 10000) == {}
+    assert order_book_features(None, 10000) == {}

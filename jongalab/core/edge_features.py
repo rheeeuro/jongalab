@@ -102,6 +102,62 @@ def financials(info: dict) -> dict:
     }
 
 
+# ── 호가 미시구조 스냅샷 (2026-07-22) — ka10004 주식호가요청 파생 ──
+# 선정 시점(closing_bet 13~15시) 호가창의 잔량 불균형·스프레드. 오버나이트 갭 방향의
+# 단기 미시구조 신호. 연속장 밖(장 종료·개장 전)엔 잔량이 전부 0 으로 와서 분모 0 가드로
+# 자연스럽게 None → repository PRESERVE_ON_NULL 이 마지막 세션 스냅샷을 보존한다.
+# 실제 매수는 종가라 ~15시 스냅샷은 근사치임을 라벨 해석 시 감안.
+
+
+def _ob_num(s) -> float | None:
+    """ka10004 호가 문자열 → 크기(부호·콤마 제거 후 절대값). 공란/파싱불가는 None."""
+    if s is None:
+        return None
+    t = str(s).strip().replace(",", "")
+    if t in ("", "-", "--", "+"):
+        return None
+    try:
+        return abs(float(t))
+    except ValueError:
+        return None
+
+
+def order_book_features(ob: dict, current_price: int | None) -> dict:
+    """ka10004(주식호가) 응답 → 호가 미시구조 파생 스칼라(관측·연구용, 점수 무영향).
+
+    반환 키(분모 0/결측 시 None):
+      ob_imbalance     — 총매수잔량 ÷ 총매도잔량(>1 이면 매수 우위)
+      ob_fpr_imbalance — 매수최우선잔량 ÷ 매도최우선잔량(1호가 압력)
+      ob_spread_pct    — (매도최우선호가 − 매수최우선호가) ÷ 현재가 × 100(체결비용·유동성)
+    """
+    if not ob:
+        return {}
+    tot_sel = _ob_num(ob.get("tot_sel_req"))
+    tot_buy = _ob_num(ob.get("tot_buy_req"))
+    sel_fpr_req = _ob_num(ob.get("sel_fpr_req"))
+    buy_fpr_req = _ob_num(ob.get("buy_fpr_req"))
+    sel_fpr_bid = _ob_num(ob.get("sel_fpr_bid"))
+    buy_fpr_bid = _ob_num(ob.get("buy_fpr_bid"))
+
+    imbalance = (
+        round(tot_buy / tot_sel, 4)
+        if tot_sel and tot_buy is not None else None
+    )
+    fpr_imbalance = (
+        round(buy_fpr_req / sel_fpr_req, 4)
+        if sel_fpr_req and buy_fpr_req is not None else None
+    )
+    spread_pct = (
+        round((sel_fpr_bid - buy_fpr_bid) / current_price * 100, 3)
+        if current_price and current_price > 0 and sel_fpr_bid and buy_fpr_bid else None
+    )
+    return {
+        "ob_imbalance": imbalance,
+        "ob_fpr_imbalance": fpr_imbalance,
+        "ob_spread_pct": spread_pct,
+    }
+
+
 def is_bio(code: str | None, name: str | None, sector: str | None) -> int:
     """바이오/제약(임상·허가 등 오버나이트 바이너리 이벤트 리스크) 종목이면 1, 아니면 0.
 

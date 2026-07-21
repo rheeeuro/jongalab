@@ -26,6 +26,7 @@ _ANALYSIS_COLS = (
     "overhead_vol_ratio", "poc_dist_pct", "prog_am_net", "prog_pm_net",
     "fin_per", "fin_pbr", "fin_ev", "fin_roe", "fin_eps", "fin_bps",
     "fin_sales", "fin_op_profit", "fin_net_income",
+    "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct",
 )
 
 # 시간 창에서만 수집되는 스냅샷 캡처 컬럼의 upsert 정책 (2026-07-19, 프로그램 오전/오후 분해):
@@ -33,7 +34,10 @@ _ANALYSIS_COLS = (
 #    이후 실행(오후·저녁)은 None 을 보내며, 값이 이미 있으면 갱신하지 않는다.
 #  · prog_pm_net — 오후 창 실행이 갱신(last-write-wins)하되 창 밖 실행의 NULL 은 무시.
 _FIRST_WRITE_WINS = frozenset({"prog_am_net"})
-_PRESERVE_ON_NULL = frozenset({"prog_pm_net"})
+#  · ob_* — 호가 미시구조는 연속장 중에만 유효(장 종료 후 잔량 0→파생값 None). 세션 중
+#    마지막 실행(종가 직전 ~15시)이 last-write-wins 로 남고, 장 종료 후 재실행의 NULL 은
+#    무시해 근사 '매수 당시' 스냅샷을 보존한다.
+_PRESERVE_ON_NULL = frozenset({"prog_pm_net", "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct"})
 
 
 def save_stock_reports(candidates: list[dict]):
@@ -139,6 +143,9 @@ def save_stock_reports(candidates: list[dict]):
                 "fin_sales": c.get("fin_sales"),
                 "fin_op_profit": c.get("fin_op_profit"),
                 "fin_net_income": c.get("fin_net_income"),
+                "ob_imbalance": c.get("ob_imbalance"),
+                "ob_fpr_imbalance": c.get("ob_fpr_imbalance"),
+                "ob_spread_pct": c.get("ob_spread_pct"),
             }
             cursor.execute(query, tuple(row[col] for col in _ANALYSIS_COLS))
         conn.commit()
