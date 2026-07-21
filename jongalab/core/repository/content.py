@@ -133,6 +133,29 @@ def mark_content_skipped(
         conn.commit()
 
 
+def bump_analysis_timeout(external_id: str, platform: str = "youtube") -> int:
+    """LLM 분석 타임아웃 1회를 기록하고 누적 횟수를 반환한다.
+
+    연속 N회 초과 시 호출부가 mark_content_skipped(reason='analysis_timeout') 로 확정 스킵해
+    "느린 독성 콘텐츠"의 매 주기 재분석 루프를 끊는다. 타임아웃만 세고 연결·파싱 실패는 세지
+    않는다(일시적 인프라 장애가 정상 콘텐츠를 영구 스킵시키지 않게). 상세는 sql/31 참고.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "INSERT INTO content_analysis_fail (external_id, platform, timeout_count) "
+            "VALUES (%s, %s, 1) "
+            "ON DUPLICATE KEY UPDATE timeout_count = timeout_count + 1",
+            (external_id, platform),
+        )
+        conn.commit()
+        cursor.execute(
+            "SELECT timeout_count FROM content_analysis_fail WHERE external_id = %s",
+            (external_id,),
+        )
+        row = cursor.fetchone()
+        return row["timeout_count"] if row else 1
+
+
 def save_content_analysis(
     external_id: str,
     source_name: str,
@@ -233,6 +256,22 @@ def delete_old_content_skips(months: int = 3) -> int:
     with get_db() as (conn, cursor):
         cursor.execute(
             "DELETE FROM content_skip WHERE created_at < NOW() - INTERVAL %s MONTH",
+            (months,),
+        )
+        deleted = cursor.rowcount
+        conn.commit()
+    return deleted
+
+
+def delete_old_analysis_fails(months: int = 3) -> int:
+    """N개월 이전 분석 타임아웃 카운터를 삭제한다 (cleanup_content 워커에서 호출).
+
+    성공/확정 스킵된 콘텐츠의 카운터 행은 재진입하지 않아 방치돼 있을 뿐이므로 안전하게 정리한다.
+    삭제된 행 수를 반환한다.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "DELETE FROM content_analysis_fail WHERE updated_at < NOW() - INTERVAL %s MONTH",
             (months,),
         )
         deleted = cursor.rowcount

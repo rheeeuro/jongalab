@@ -10,6 +10,7 @@ from core.repository.content import (
     get_contents_by_ticker,
     is_content_processed,
     mark_content_skipped,
+    bump_analysis_timeout,
     save_content_analysis,
     get_recent_analyses,
     get_today_content_by_stock,
@@ -17,6 +18,7 @@ from core.repository.content import (
     get_mention_stats,
     delete_old_content_analysis,
     delete_old_content_skips,
+    delete_old_analysis_fails,
 )
 
 from core.repository.news import (

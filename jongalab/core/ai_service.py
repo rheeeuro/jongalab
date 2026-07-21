@@ -3,10 +3,22 @@ AI 분석 서비스 모듈 - AI 클라이언트와 콘텐츠 분석 파이프라
 """
 import logging
 from dataclasses import dataclass, field
+
+import httpx
 from ollama import Client
 
-from core.config import OLLAMA_HOST, OLLAMA_MODEL, OPENAI_API_KEY, OPENAI_MODEL
+from core.config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_TIMEOUT, OPENAI_API_KEY, OPENAI_MODEL
 from core.ai_utils import parse_ai_json
+
+
+class AnalysisTimeout(Exception):
+    """Ollama 호출이 OLLAMA_TIMEOUT 을 넘겨 읽기 타임아웃난 경우.
+
+    호출부가 `raise_on_timeout=True` 로 옵트인했을 때만 던진다(기본은 다른 실패와
+    동일하게 None 반환). 연결 실패(ConnectionError)·파싱 실패와 구분해, "느린 특정
+    콘텐츠"만 재시도 상한 카운트 대상으로 삼기 위한 신호다.
+    """
+
 
 
 @dataclass
@@ -67,7 +79,7 @@ def build_analysis_markdown(tldr: str, summary: list, stocks: list, strategy: st
     return "\n\n".join(parts)
 
 
-_client = Client(host=OLLAMA_HOST)
+_client = Client(host=OLLAMA_HOST, timeout=OLLAMA_TIMEOUT)
 
 
 def get_ai_client() -> Client:
@@ -75,7 +87,8 @@ def get_ai_client() -> Client:
     return _client
 
 
-def analyze_content(prompt: str, model: str | None = None, **chat_options) -> AnalysisResult | None:
+def analyze_content(prompt: str, model: str | None = None,
+                    raise_on_timeout: bool = False, **chat_options) -> AnalysisResult | None:
     """
     프롬프트를 AI에 전달하고 파싱된 분석 결과를 반환.
 
@@ -83,6 +96,8 @@ def analyze_content(prompt: str, model: str | None = None, **chat_options) -> An
     - 파싱 실패·LLM 오류(일시적, 재시도 가치 있음) → None
     - AI가 주식 무관으로 판단(확정 판정, 재시도 무의미) → sentiment_score=-1 인 AnalysisResult
       호출부는 `result.sentiment_score == -1` 이면 저장/알림 없이 스킵해야 한다.
+    - raise_on_timeout=True 이고 호출이 OLLAMA_TIMEOUT 을 넘겨 타임아웃나면 AnalysisTimeout
+      을 던진다(기본 False 는 다른 실패와 동일하게 None). 재시도 상한 카운트용 옵트인.
     """
     model = model or OLLAMA_MODEL
     try:
@@ -133,6 +148,12 @@ def analyze_content(prompt: str, model: str | None = None, **chat_options) -> An
         )
         return result
 
+    except httpx.TimeoutException as e:
+        # 느린 콘텐츠로 인한 읽기 타임아웃 — 연결 실패(ConnectionError)·파싱 실패와 구분한다.
+        logging.warning(f"AI 분석 타임아웃({OLLAMA_TIMEOUT}s): {e}")
+        if raise_on_timeout:
+            raise AnalysisTimeout() from e
+        return None
     except KeyError as e:
         logging.error(f"AI 분석 에러: 응답에 필수 키 누락 - {e}")
         return None

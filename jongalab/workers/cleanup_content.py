@@ -10,6 +10,7 @@ from core.logging_setup import setup_logging
 from core.repository import (
     delete_old_content_analysis,
     delete_old_content_skips,
+    delete_old_analysis_fails,
     delete_old_news_mentions,
 )
 
@@ -40,6 +41,12 @@ def main() -> int:
         logger.info(f"스킵 기록 정리 완료: {RETENTION_MONTHS}개월 이전 {skip_deleted}건 삭제")
     except Exception as e:
         logger.error(f"스킵 기록 정리 실패: {e}")
+        rc = 1
+    try:
+        fail_deleted = delete_old_analysis_fails(RETENTION_MONTHS)
+        logger.info(f"분석 타임아웃 카운터 정리 완료: {RETENTION_MONTHS}개월 이전 {fail_deleted}건 삭제")
+    except Exception as e:
+        logger.error(f"분석 타임아웃 카운터 정리 실패: {e}")
         rc = 1
     return rc
 

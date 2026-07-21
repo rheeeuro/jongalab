@@ -89,7 +89,7 @@ jongalab/
 
 | 워커 | 스케줄 | 역할 |
 |---|---|---|
-| ⏰ `youtube_collector` | 15분 | 채널 RSS → 자막 → Ollama 분석 → `content_analysis`. 분석까지 갔지만 저장 안 하기로 **확정된** 영상(무관/기업없음/환각/티커없음)은 `content_skip` 에 기록해 재분석 방지(2026-07-15 — 미기록 시 15분마다 같은 영상을 Ollama 재분석해 잡 타임아웃). 일시적 실패(자막 미생성·LLM 오류)는 기록하지 않아 다음 주기 재시도 |
+| ⏰ `youtube_collector` | 15분 | 채널 RSS → 자막 → Ollama 분석 → `content_analysis`. 분석까지 갔지만 저장 안 하기로 **확정된** 영상(무관/기업없음/환각/티커없음)은 `content_skip` 에 기록해 재분석 방지(2026-07-15 — 미기록 시 15분마다 같은 영상을 Ollama 재분석해 잡 타임아웃). 일시적 실패(자막 미생성·LLM 오류)는 기록하지 않아 다음 주기 재시도. **잡 타임아웃 방어 3중(2026-07-21)**: ① 소프트 데드라인 `RUN_BUDGET_SEC=300` — 경과 300s 초과 시 새 채널 처리를 멈추고 clean 종료(남은 영상은 다음 주기가 이어받음, 유실 없음). ② LLM 호출 상한 `OLLAMA_TIMEOUT=480s`(core/config) — 분석 1건이 무한정 늘어져 잡 전체를 죽이는 것을 차단(300+480<840 이라 SIGKILL 원천 불가). ③ 같은 영상이 연속 `MAX_ANALYSIS_TIMEOUTS=3`회 LLM 타임아웃나면 `content_skip(reason='analysis_timeout')` 확정 스킵해 재분석 루프를 끊음. 타임아웃(`AnalysisTimeout`)만 카운트(`content_analysis_fail`, sql/31) — 연결 실패(Ollama 다운)·파싱 실패는 세지 않아 인프라 장애가 정상 영상을 영구 스킵시키지 않음 |
 | `telegram_listener` | 상시 | Telethon 감시. **일반 채널**(platform=telegram)→ LLM 분석 → `content_analysis`. **뉴스 채널**(platform=news, 고빈도)→ LLM 없이 사전매칭 → `news_mention` |
 | `news_guard` | 평일 07:00~09:25 (5분 폴링, PM2 — 자금 인접이라 스케줄러 비이관) | **뉴스 베토 감시** — 보유 종목(trading.position 읽기 전용) × 전거래일 15:00 이후 `news_mention` 을 OpenAI(`news_veto_judge`)로 판정해 `news_veto_verdict` upsert + severe 확정 시 관리자 텔레그램. trading monitor 가 severe=1 을 읽어 개장 즉시(NXT 08시대/KRX 09:00) **전량 매도**. 이미 severe 확정·신규 헤드라인 없음은 스킵(LLM 호출 아침당 0~10회), 보유 0 이면 자체 종료. LLM/DB 실패 시 기록 없이 다음 폴링 재시도(판정 없음 = trading 미개입, settle 09:28 백스톱 유지). 수동 검증 `--once` |
 | ⏰ `news_ticker_seed` | 일 07:30 (등록 시 1회) | 키움 ka10099(코스피/코스닥) → `ticker_dictionary` ACTIVE 업서트. 뉴스 사전매칭 커버리지용 |

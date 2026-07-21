@@ -35,6 +35,10 @@ TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')
 # AI 모델 설정 (Ollama)
 OLLAMA_HOST = 'http://127.0.0.1:11434'
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'exaone3.5:7.8b')
+# Ollama 호출 상한(초). 콘텐츠 1건 분석이 이 시간을 넘기면 httpx 가 읽기 타임아웃을 던진다
+# (무한정 늘어지는 분석이 잡 전체를 타임아웃시키는 것을 막는 백스톱). 관측 최대 ~435s 위 + 잡
+# 타임아웃(840s) 아래로 잡는다 — youtube_collector 소프트 데드라인과 합쳐 하드킬을 원천 차단.
+OLLAMA_TIMEOUT = int(os.getenv('OLLAMA_TIMEOUT', '480'))
 
 # OpenAI 설정 (일간 리포트용)
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
