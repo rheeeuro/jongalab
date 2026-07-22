@@ -33,6 +33,7 @@ from core.repository import trade_signal as signal_repo
 from core.repository import order as order_repo
 from core.repository import blocklist as blocklist_repo
 from core.repository import risk_config as risk_config_repo
+from core.repository import leverage_map as leverage_map_repo
 from core.repository import audit_log
 
 setup_logging()
@@ -41,6 +42,24 @@ logger = logging.getLogger("SignalExecutor")
 POLL_SEC = 15  # closing_bet 완료 대기 / 데드라인 대기 하트비트 공통 주기
 NXT_PARTIAL_RETRY_MAX = 2
 NXT_PARTIAL_RETRY_WAIT_SEC = 3
+
+
+def resolve_leverage_target(sig: dict, lev_map: dict) -> tuple[dict, dict | None]:
+    """레버리지 ETF 대체매수 치환.
+
+    lev_map: {원종목코드: {"etf_cd", "etf_nm"}} (leverage_map.get_active_map()).
+    신호 종목이 매핑에 있으면 종목코드/이름을 ETF 로 바꾼 새 sig 를 돌려준다. 신호 id 는 그대로라
+    상태 갱신은 원신호 행에 남고(종가랩엔 원종목), 사이징·주문·포지션·청산은 ETF 로 흐른다.
+    치환은 is_nxt_enabled 조회 '전'에 하므로 거래소 라우팅도 ETF 기준(원종목이 NXT 가능이어도
+    ETF 가 NXT 불가면 KRX 종가로 매수). 반환: (sig_or_swapped, swap_info|None).
+    """
+    src = sig["stk_cd"]
+    m = lev_map.get(src)
+    if not m or not m.get("etf_cd"):
+        return sig, None
+    swapped = {**sig, "stk_cd": m["etf_cd"], "stk_nm": m.get("etf_nm") or m["etf_cd"]}
+    return swapped, {"src_cd": src, "src_nm": sig.get("stk_nm"),
+                     "etf_cd": m["etf_cd"], "etf_nm": m.get("etf_nm")}
 
 
 def _beat(payload: dict) -> None:
@@ -259,19 +278,30 @@ def main() -> int:
         return 0
 
     block = blocklist_repo.get_codes()
+    # 레버리지 ETF 대체매수 매핑 (토글 off 면 빈 dict → 현행 동작 그대로).
+    lev_map = (leverage_map_repo.get_active_map()
+               if risk_config_repo.get_risk_config().get("LEVERAGE_ENABLED", 0) else {})
     engine = ExecutionEngine()
     want_nxt = args.venue == "nxt"
 
-    # 1) 전체 pending 후보의 거래소·점수 분류 (blocklist 제외)
+    # 1) 전체 pending 후보의 거래소·점수 분류 (blocklist 제외, 레버리지 치환)
     #    다른 거래소 몫의 현금을 예약하려면 전체 점수합이 필요하다.
     classified = []  # (sig, stk, score, is_nxt)
     for sig in signals:
         stk = sig["stk_cd"]
+        # blocklist 는 원종목 기준으로 검사(레버리지 치환 전) — 수동 보유분 자동매수 차단 의미.
         if stk in block:
             logger.info("blocklist 제외 — signal %s [%s]", sig["id"], stk)
             signal_repo.update_status(sig["id"], "skipped", note="blocklist")
             audit_log.append("buy_skip", stk, {"reason": "blocklist"})
             continue
+        # 레버리지 치환: is_nxt_enabled 조회 전에 하므로 거래소 라우팅도 ETF 기준.
+        if lev_map:
+            sig, swap = resolve_leverage_target(sig, lev_map)
+            if swap:
+                logger.info("레버리지 치환 [%s→%s] signal %s", swap["src_cd"], swap["etf_cd"], sig["id"])
+                audit_log.append("leverage_swap", swap["src_cd"], {"signal_id": sig["id"], **swap})
+                stk = sig["stk_cd"]
         classified.append((sig, stk, max(float(sig.get("score") or 0), 0),
                            engine.data.is_nxt_enabled(stk)))
     if not classified:

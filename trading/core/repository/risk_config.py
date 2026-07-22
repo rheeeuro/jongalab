@@ -16,6 +16,8 @@ _DEFAULTS = {
     "MAX_POSITIONS": 5,                # 동시 보유 종목수
     "SEED_INIT_MULT": 1.0,             # 최초 시드 배율 — base 시드(가용현금×점수비율)에 곱해
                                        # 레짐/거시/선물 감액보다 먼저 적용(0.0~1.0, 축소 전용)
+    "LEVERAGE_ENABLED": 0,             # 레버리지 ETF 대체매수 토글(0/1) — 1이면 signal_executor 가
+                                       # leverage_map 원종목을 매핑된 레버리지 ETF 로 치환해 매수
 }
 
 # float 로 다루는 키 (나머지는 int). SEED_INIT_MULT 는 0.0~1.0 로 클램프.

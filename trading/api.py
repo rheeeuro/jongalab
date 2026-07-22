@@ -24,6 +24,7 @@ from core.repository import order as order_repo
 from core.repository import fill as fill_repo
 from core.repository import audit_log
 from core.repository import blocklist as blocklist_repo
+from core.repository import leverage_map as leverage_map_repo
 from core.repository import settle_plan as settle_plan_repo
 from core.kiwoom_data_client import KiwoomDataClient, to_int
 from core.kiwoom_order_client import KiwoomOrderClient
@@ -74,6 +75,7 @@ class RiskConfigBody(BaseModel):
     MAX_DAILY_LOSS: int = 3_000_000
     MAX_POSITIONS: int = 5
     SEED_INIT_MULT: float = 1.0  # 최초 시드 배율(0.0~1.0, 게이트 감액보다 먼저 적용)
+    LEVERAGE_ENABLED: int = 0    # 레버리지 ETF 대체매수 토글(0/1)
 
 
 class BlocklistItem(BaseModel):
@@ -83,6 +85,17 @@ class BlocklistItem(BaseModel):
 
 class BlocklistBody(BaseModel):
     items: list[BlocklistItem]
+
+
+class LeverageItem(BaseModel):
+    src_stk_cd: str
+    src_stk_nm: str | None = None
+    etf_stk_cd: str
+    etf_stk_nm: str | None = None
+
+
+class LeverageMapBody(BaseModel):
+    items: list[LeverageItem]
 
 
 # ── 헬스 ──
@@ -248,6 +261,9 @@ def buy_preview(date: str | None = None):
     trade_date = date or datetime.now().strftime("%Y%m%d")
     signals = signal_repo.get_pending_signals(trade_date)
     block = blocklist_repo.get_codes()
+    # 레버리지 대체매수 — 대시보드는 실제 매수 대상인 ETF 로 미리보기 표시(executor 와 동일 치환).
+    lev_map = (leverage_map_repo.get_active_map()
+               if risk_config_repo.get_risk_config().get("LEVERAGE_ENABLED", 0) else {})
 
     # 1) blocklist 제외 후 거래소·점수·현재가 분류 (executor 와 동일)
     dc = KiwoomDataClient()
@@ -256,6 +272,10 @@ def buy_preview(date: str | None = None):
         stk = sig["stk_cd"]
         if stk in block:
             continue
+        m = lev_map.get(stk)
+        if m and m.get("etf_cd"):
+            sig = {**sig, "stk_cd": m["etf_cd"], "stk_nm": m.get("etf_nm") or m["etf_cd"]}
+            stk = sig["stk_cd"]
         try:
             price = dc.get_market_price(stk)
         except Exception as e:
@@ -608,6 +628,19 @@ def get_blocklist():
 def put_blocklist(b: BlocklistBody):
     """매수 제외 목록 전체 교체. 다음 매수 집행부터 적용."""
     return blocklist_repo.replace_all([i.model_dump() for i in b.items])
+
+
+# ── 레버리지 ETF 대체매수 매핑 ──
+@app.get("/leverage-map")
+def get_leverage_map():
+    """레버리지 ETF 대체매수 매핑 목록(원종목→ETF)."""
+    return leverage_map_repo.get_all()
+
+
+@app.put("/leverage-map")
+def put_leverage_map(b: LeverageMapBody):
+    """매핑 전체 교체. LEVERAGE_ENABLED=1 이면 다음 매수 집행부터 치환 적용."""
+    return leverage_map_repo.replace_all([i.model_dump() for i in b.items])
 
 
 # ── 제어 (수동) ──

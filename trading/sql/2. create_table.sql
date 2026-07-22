@@ -108,6 +108,17 @@ CREATE TABLE IF NOT EXISTS blocklist (
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 레버리지 ETF 대체매수 매핑 — 레버리지 사용(risk_config LEVERAGE_ENABLED=1) 시
+-- signal_executor 가 매수 직전 원종목(src_stk_cd)을 매핑된 레버리지 ETF(etf_stk_cd)로 치환.
+-- 원종목 신호 상태는 그대로 갱신되고 실제 주문·포지션·청산은 ETF 로 흐른다.
+CREATE TABLE IF NOT EXISTS leverage_map (
+    src_stk_cd  VARCHAR(20) PRIMARY KEY,
+    src_stk_nm  VARCHAR(64),
+    etf_stk_cd  VARCHAR(20) NOT NULL,
+    etf_stk_nm  VARCHAR(64),
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 리스크 한도 설정 단일행 (id=1) — 대시보드에서 수정, RiskConfig 가 로드
 -- config JSON: MAX_ORDERS_PER_DAY / MAX_NOTIONAL_PER_NAME / MAX_DAILY_LOSS / MAX_POSITIONS
 CREATE TABLE IF NOT EXISTS risk_config (
