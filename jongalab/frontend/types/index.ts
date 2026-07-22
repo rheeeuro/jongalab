@@ -60,6 +60,12 @@ export interface MarketIndices {
   FUTURES: MarketIndex[];
 }
 
+export interface MarketIndexHistory {
+  symbol: string;
+  name: string;
+  candles: HourlyCandleItem[];
+}
+
 export interface Source {
   id: number;
   platform: string;

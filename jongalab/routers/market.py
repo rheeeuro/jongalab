@@ -10,6 +10,8 @@ from core.market_data import (
     fetch_stock_history,
     fetch_stock_name,
     fetch_market_indices,
+    fetch_index_ohlc,
+    resolve_index_name,
 )
 
 router = APIRouter(prefix="/api", tags=["market"])
@@ -43,6 +45,17 @@ def get_stock_history(ticker: str):
 def get_market_indices():
     """주요 시장 지수 일괄 조회"""
     return fetch_market_indices()
+
+
+@router.get("/market-index-history/{symbol}")
+def get_market_index_history(symbol: str, range: str = "6m"):
+    """시장 지수/심볼의 OHLCV 캔들 시계열 (상세 페이지 차트용, yfinance).
+
+    range: 1m·3m·6m·1y. 커스텀 선물 심볼은 candles=[] (yfinance 미제공).
+    """
+    period = {"1m": "1mo", "3m": "3mo", "6m": "6mo", "1y": "1y"}.get(range, "6mo")
+    candles = fetch_index_ohlc(symbol, period=period)
+    return {"symbol": symbol, "name": resolve_index_name(symbol), "candles": candles}
 
 
 @router.get("/macro-events")

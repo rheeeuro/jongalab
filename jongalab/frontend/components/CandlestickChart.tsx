@@ -30,7 +30,13 @@ function toTimestamp(timeStr: string): UTCTimestamp {
   return (Date.UTC(year, month - 1, day, hour, minute, 0) / 1000) as UTCTimestamp;
 }
 
-export function CandlestickChart({ data }: { data: CandleData[] }) {
+export function CandlestickChart({
+  data,
+  initialRangeDays = 7,
+}: {
+  data: CandleData[];
+  initialRangeDays?: number;
+}) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
 
@@ -136,11 +142,11 @@ export function CandlestickChart({ data }: { data: CandleData[] }) {
       maSeries.setData(maData);
     });
 
-    // 최근 1주일치 데이터만 보이도록 초기 줌 설정
+    // 초기 줌: 최근 initialRangeDays 일치만 보이도록 (기본 7일)
     const lastTime = candleData[candleData.length - 1].time;
-    const oneWeekAgo = lastTime - 7 * 24 * 60 * 60;
+    const rangeStart = lastTime - initialRangeDays * 24 * 60 * 60;
     chart.timeScale().setVisibleRange({
-      from: oneWeekAgo as UTCTimestamp,
+      from: rangeStart as UTCTimestamp,
       to: lastTime as UTCTimestamp,
     });
 
@@ -159,7 +165,7 @@ export function CandlestickChart({ data }: { data: CandleData[] }) {
         chartRef.current = null;
       }
     };
-  }, [data]);
+  }, [data, initialRangeDays]);
 
   if (!data.length) {
     return (

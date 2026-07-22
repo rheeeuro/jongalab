@@ -119,6 +119,7 @@ MARKET_INDICES = {
     # 환율·EWY·KORU는 yfinance(미국 상장 한국 ETF, 전날 미국장 반응 참고용).
     "KR": [
         {"symbol": "USDKRW=X", "name": "원/달러 환율"},
+        {"symbol": "SKHY", "name": "SK하이닉스 ADR (SKHY)"},
         {"symbol": "EWY", "name": "MSCI 한국 ETF (EWY)"},
         {"symbol": "KORU", "name": "한국 3배 레버리지 ETF (KORU)"},
     ],
@@ -142,6 +143,19 @@ KIS_INDICES = [
 
 # yfinance에 시계열이 없는 커스텀 심볼(코스피200 선물) — 배경 스파크라인 미제공.
 _NO_SPARKLINE_SYMBOLS = {"K200NF", "K200DF"}
+
+# 심볼 → 표시명 (상세 페이지·히스토리 응답에서 사용). 커스텀 선물명도 포함.
+_INDEX_NAMES = {
+    **{it["symbol"]: it["name"] for group in MARKET_INDICES.values() for it in group},
+    **{it["symbol"]: it["name"] for it in KIS_INDICES},
+    "K200NF": "코스피200 야간선물",
+    "K200DF": "코스피200 주간선물",
+}
+
+
+def resolve_index_name(symbol: str) -> str:
+    """지수/심볼 표시명. 정의에 없으면 심볼 그대로 반환."""
+    return _INDEX_NAMES.get(symbol, symbol)
 
 
 def _kis_index_quote(item: dict) -> dict:
@@ -191,6 +205,36 @@ def _fetch_sparkline(symbol: str) -> list[float] | None:
         return _closes_to_sparkline(hist)
     except Exception:
         return None
+
+
+def fetch_index_ohlc(symbol: str, period: str = "6mo", interval: str = "1d") -> list[dict]:
+    """시장 지수/심볼의 OHLCV 시계열 (yfinance). 상세 페이지 캔들 차트용.
+
+    반환: [{time:"YYYY-MM-DDTHH:MM", open, high, low, close, volume}, ...] (오름차순).
+    코스피/코스닥(^KS11/^KQ11)도 yfinance 시계열을 그대로 쓴다(카드 라이브값은 KIS).
+    yfinance에 없는 커스텀 심볼(코스피200 주/야간선물)이나 조회 실패 시 []."""
+    if symbol in _NO_SPARKLINE_SYMBOLS:
+        return []
+    try:
+        hist = yf.Ticker(symbol).history(period=period, interval=interval)
+    except Exception:
+        return []
+    if hist is None or hist.empty:
+        return []
+    candles: list[dict] = []
+    for idx, row in hist.iterrows():
+        o = _safe_float(row.get("Open"))
+        h = _safe_float(row.get("High"))
+        low = _safe_float(row.get("Low"))
+        c = _safe_float(row.get("Close"))
+        if None in (o, h, low, c):
+            continue
+        candles.append({
+            "time": idx.strftime("%Y-%m-%dT%H:%M"),
+            "open": o, "high": h, "low": low, "close": c,
+            "volume": _safe_float(row.get("Volume")) or 0.0,
+        })
+    return candles
 
 
 def _fetch_quote(item: dict) -> dict:

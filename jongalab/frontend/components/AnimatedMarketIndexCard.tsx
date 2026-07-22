@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { MarketIndex } from "@/types";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { SlotNumber } from "./SlotNumber";
@@ -22,12 +23,17 @@ export function AnimatedMarketIndexCard({
   item: MarketIndex;
   animate: boolean;
 }) {
+  const href = `/market/${encodeURIComponent(item.symbol)}`;
+
   if (item.price === null) {
     return (
-      <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/40">
+      <Link
+        href={href}
+        className="block rounded-2xl bg-slate-50 p-4 transition-all hover:-translate-y-0.5 dark:bg-slate-800/40"
+      >
         <p className="text-sm font-bold text-slate-500 dark:text-slate-400">{item.name}</p>
         <p className="mt-1 text-xs text-slate-400">데이터 없음</p>
-      </div>
+      </Link>
     );
   }
 
@@ -49,7 +55,10 @@ export function AnimatedMarketIndexCard({
   const hasSpark = (item.sparkline?.length ?? 0) >= 2;
 
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-slate-50 p-4 transition-all hover:-translate-y-0.5 dark:bg-slate-800/40">
+    <Link
+      href={href}
+      className="relative block overflow-hidden rounded-2xl bg-slate-50 p-4 transition-all hover:-translate-y-0.5 dark:bg-slate-800/40"
+    >
       {hasSpark && (
         <Sparkline
           data={item.sparkline!}
@@ -74,6 +83,6 @@ export function AnimatedMarketIndexCard({
           <SlotNumber value={pctStr} animate={animate} />
         </div>
       </div>
-    </div>
+    </Link>
   );
 }

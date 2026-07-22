@@ -34,7 +34,7 @@ jongalab/
 | `prompts.py` | 콘텐츠 분석 프롬프트 ⚠️민감/가드. 구조화 출력(sentiment_score·tldr·tags·summary·stocks[방향/확신/시간축]·strategy·related_companies) |
 | `kiwoom_client.py` | 키움 데이터 서버(`:8001`) HTTP 클라이언트 — 기본/상세/수급/차트/주도주 |
 | `kis_client.py` | 한국투자증권(KIS) Open API — 코스피200 야간선물 시세, WebSocket 키 |
-| `market_data.py` | 통합 시세 조회(국내→키움, 선물→KIS, 지수/원자재/환율→yfinance). `fetch_edge_market_snapshot()` 은 표시용 경로를 재사용해 시장 스냅샷 1행(코스피/코스닥·NQ·SPX·SOX·VIX·환율·K200 주야간선물)을 조립 |
+| `market_data.py` | 통합 시세 조회(국내→키움, 선물→KIS, 지수/원자재/환율→yfinance). `fetch_index_ohlc(symbol)` 은 지수/심볼의 OHLCV 캔들 시계열(yfinance, 시장 카드 클릭→상세 차트용, 커스텀 K200 선물은 빈 배열)을 반환. `fetch_edge_market_snapshot()` 은 표시용 경로를 재사용해 시장 스냅샷 1행(코스피/코스닥·NQ·SPX·SOX·VIX·환율·K200 주야간선물)을 조립 |
 | `sector_resolver.py` | 티커→섹터 해석(ticker_dictionary 캐시, TTL 1년) |
 | `ticker.py` | 기업명↔티커 변환, 신규 티커 등록, 콘텐츠 본문 기업명 추출 |
 | `news_matcher.py` | 뉴스 헤드라인 → 종목 사전매칭(LLM 없음). ticker_dictionary(ACTIVE) 인메모리 매처, 경계 룩어라운드 + 발행처 대괄호([]·【】) 제거로 오탐 억제 |
@@ -62,7 +62,7 @@ jongalab/
 `trading_position`(trading DB `position` 읽기 전용 — news_guard 의 보유 종목 집합 조회 전용, 쓰기 금지).
 
 ### `routers/` — 엔드포인트
-`admin`(인증) · `contents`(콘텐츠) · `news`(뉴스 재료 히트 `/api/news/heat` + 종목별 당일 헤드라인 `/api/news/{ticker}` — 종목 상세 페이지용) · `market`(주가/지수 + 거시 이벤트 `/api/macro-events` — macro_event 캘린더: 기본 `?days=`(향후, 마켓 카드·메인 '오늘 밤' 배너) / `?month=YYYY-MM`(그 달 전체·과거 포함, 리포트 캘린더 셀 마커·범례), 실패 시 빈 목록) · `stock_report`(리포트·갭) ·
+`admin`(인증) · `contents`(콘텐츠) · `news`(뉴스 재료 히트 `/api/news/heat` + 종목별 당일 헤드라인 `/api/news/{ticker}` — 종목 상세 페이지용) · `market`(주가/지수 + 지수 캔들 히스토리 `/api/market-index-history/{symbol}?range=1m|3m|6m|1y` — 시장 카드 클릭 시 `/market/{symbol}` 상세 차트용 + 거시 이벤트 `/api/macro-events` — macro_event 캘린더: 기본 `?days=`(향후, 마켓 카드·메인 '오늘 밤' 배너) / `?month=YYYY-MM`(그 달 전체·과거 포함, 리포트 캘린더 셀 마커·범례), 실패 시 빈 목록) · `stock_report`(리포트·갭) ·
 `source`·`strategy_config`·`weight_tuning`·`telegram_user`·`job_runs`(스케줄러 잡 실행 이력 `/api/job-runs` — admin '워커 현황' 페이지용)(admin 전용) · `ticker`(조회 공개/수정 admin) ·
 `edge_rule`(가설 원장 — GET 스코어보드 공개(daily 는 matched 제외 스칼라만+최신 매칭 1일치 별도, `/{id}/matched?days=`(≤90)로 날짜별 매칭 종목 이력을 별도 제공 — 종목별 change_pct·selected 를 리포트에서 조인해 복기 맥락 포함), POST 등록/승격/강등만 admin. 등록 시 `title`(한글 카드 제목)·`description`(인과 근거) 필수, `family`(도메인)·`role`(selector/veto/benchmark, 기본 selector)은 edge_policy 레지스트리로 검증 — 같은 family 가설이 늘며 카드 구분이 안 되던 문제로 2026-07-06 title 컬럼 추가(NULL 이면 프론트가 name 슬러그 폴백). 승격 게이트는 `core/edge_policy.check_promotion` 단일 소스 — 미충족 시 409+사유, force 없음, 대조군 부재 시 fail-closed. 라우터는 월 승격 상한(2개)만 추가 검사).
 새 라우터는 `routers/` 에 만들고 `api.py` 의 `include_router` 로 등록한다.
