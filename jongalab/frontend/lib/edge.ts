@@ -32,6 +32,7 @@ export const FAMILY_META: Record<string, { label: string; hint: string }> = {
   f4_laggard: { label: '후발주 전략', hint: '섹터 1등이 급등한 뒤 아직 덜 오른 동종 종목을 노립니다' },
   f5_supply: { label: '수급 전략', hint: '기관·외국인 매수 흐름과 차트 구조에서 익일 연속성을 노립니다' },
   f6_ah: { label: '시간외 전략', hint: '장 마감 후 시간외단일가 반응에서 익일 연속성을 노립니다' },
+  f8_value: { label: '가치·재무 전략', hint: '영업이익·밸류에이션 등 기업 재무 체력으로 종목을 거릅니다' },
   control: { label: '기준선', hint: '현행 점수 방식 — 새 전략이 이겨야 할 비교 기준입니다' },
   veto: { label: '위험 회피', hint: '수익용이 아니라 위험한 종목을 매수에서 빼는 용도입니다' }, // 구 데이터 폴백
 };

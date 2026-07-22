@@ -58,7 +58,7 @@ trading/
 │       ├── position.py         # 보유 포지션(평단·실현손익)
 │       ├── settle_plan.py      # 청산 계획(stop_price, 트레일링)
 │       ├── risk_state.py       # 일자별 상태(주문수·실현손익·브레이커)
-│       ├── risk_config.py      # 리스크 한도(JSON, 대시보드 편집)
+│       ├── risk_config.py      # 리스크 한도 + 최초 시드 배율(SEED_INIT_MULT, JSON, 대시보드 편집)
 │       ├── blocklist.py        # 자동매매 제외 종목(수동 보유분)
 │       ├── audit_log.py        # 불변 append-only 이벤트 로그
 │       └── kiwoom_token.py     # 공유 토큰 읽기 전용
@@ -78,7 +78,7 @@ trading/
 [jongalab closing_bet] → trade_signal(pending)
         │
 signal_executor (KRX 15:00 / NXT 19:30)
-  · 블록리스트 제외 → 거래소 분류 → 시드 산정 → **regime_gate(역전 레짐)로 총 시드 축소** → seed_allocator 등가중 배분 → **futures_gate(선물 하락 시 섹터별 수량 감액, KRX·NXT) × macro_gate(보유 창 sev3 예정 이벤트 시 공통 감액)**
+  · 블록리스트 제외 → 거래소 분류 → 시드 산정 → **최초 시드 배율(risk_config `SEED_INIT_MULT`, 게이트보다 먼저)** → **regime_gate(역전 레짐)로 총 시드 축소** → seed_allocator 등가중 배분 → **futures_gate(선물 하락 시 섹터별 수량 감액, KRX·NXT) × macro_gate(보유 창 sev3 예정 이벤트 시 공통 감액)**
   · 매수 타이밍은 **종가 단일 매수** — 윈도우 시작에 수량을 확정하고 데드라인(15:20 KRX 동시호가 / 19:50 NXT IOC)에 전 종목 매수. 윈도우 동안은 하트비트만(대시보드 가동 표시). closing_bet 엣지가 종가→익일시가로 측정·검증되므로 진입가를 종가에 맞춘다(과거 '눌림 추종'은 2026-07-20 실거래 표본에서 데드라인 대비 평균 −0.27%·KRX −0.44% 손해로 제거)
   · NXT 는 최유리 IOC 특성상 부분체결 가능 — 주문 직후 ka10076 체결내역으로 목표 수량 대비 체결량을 확인하고,
     체결 row 가 확인된 부분체결이면 19:50 전 잔량을 최대 2회 별도 멱등키(`:partial:N`)로 재시도한다

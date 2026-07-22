@@ -20,8 +20,8 @@ from core.trading_engine import (
 from core.config import EDGE_SELECTION_MODE
 from core.edge_features import (
     afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, financials, is_bio,
-    ma5_reclaim, order_book_features, overhead_vol_ratio, poc_dist_pct, prog_buy_days,
-    prog_cum_net, red_candle, red_candle_streak, round_dist_pct, vol_ratio,
+    ma5_reclaim, op_earnings_yield, order_book_features, overhead_vol_ratio, poc_dist_pct,
+    prog_buy_days, prog_cum_net, red_candle, red_candle_streak, round_dist_pct, vol_ratio,
 )
 from core.repository.stock_report import (
     save_stock_reports,
@@ -549,6 +549,9 @@ class ClosingBetStrategy:
                 "fin_sales": feat.get("fin_sales"),
                 "fin_op_profit": feat.get("fin_op_profit"),
                 "fin_net_income": feat.get("fin_net_income"),
+                # 파생: 영업이익÷시총(≥0.1 = "영업이익이 시총 1/10"). predicate 는 컬럼-상수만
+                # 되므로 비율을 선정 시점에 미리 구움. 관측·연구용(candidate rule), 점수 무영향.
+                "op_earnings_yield": op_earnings_yield(feat.get("fin_op_profit"), c.market_cap),
                 # 호가 미시구조 스냅샷 (ka10004) — 관측·연구용, 점수 무영향
                 "ob_imbalance": feat.get("ob_imbalance"),
                 "ob_fpr_imbalance": feat.get("ob_fpr_imbalance"),

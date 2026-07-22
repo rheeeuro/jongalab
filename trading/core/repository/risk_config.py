@@ -14,7 +14,12 @@ _DEFAULTS = {
     "MAX_NOTIONAL_PER_NAME": 5_000_000,  # 종목당 최대 명목금액(원)
     "MAX_DAILY_LOSS": 3_000_000,       # 일일 최대 손실(원) → 초과 시 서킷브레이커
     "MAX_POSITIONS": 5,                # 동시 보유 종목수
+    "SEED_INIT_MULT": 1.0,             # 최초 시드 배율 — base 시드(가용현금×점수비율)에 곱해
+                                       # 레짐/거시/선물 감액보다 먼저 적용(0.0~1.0, 축소 전용)
 }
+
+# float 로 다루는 키 (나머지는 int). SEED_INIT_MULT 는 0.0~1.0 로 클램프.
+_FLOAT_KEYS = {"SEED_INIT_MULT"}
 
 
 def get_risk_config() -> dict:
@@ -30,7 +35,14 @@ def get_risk_config() -> dict:
 
 def update_risk_config(config: dict) -> dict:
     """리스크 설정 저장 (UPSERT). 알 수 없는 키는 차단."""
-    filtered = {k: int(v) for k, v in config.items() if k in _DEFAULTS}
+    filtered: dict = {}
+    for k, v in config.items():
+        if k not in _DEFAULTS:
+            continue
+        if k in _FLOAT_KEYS:
+            filtered[k] = max(0.0, min(1.0, float(v)))  # 축소 전용: 0.0~1.0 클램프
+        else:
+            filtered[k] = int(v)
     config_json = json.dumps(filtered, ensure_ascii=False)
     with get_db() as (conn, cursor):
         cursor.execute(

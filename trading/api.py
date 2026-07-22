@@ -73,6 +73,7 @@ class RiskConfigBody(BaseModel):
     MAX_NOTIONAL_PER_NAME: int = 5_000_000
     MAX_DAILY_LOSS: int = 3_000_000
     MAX_POSITIONS: int = 5
+    SEED_INIT_MULT: float = 1.0  # 최초 시드 배율(0.0~1.0, 게이트 감액보다 먼저 적용)
 
 
 class BlocklistItem(BaseModel):
@@ -279,6 +280,8 @@ def buy_preview(date: str | None = None):
         logger.warning("buy-preview 가용현금 조회 실패: %s", e)
         cash = 0
 
+    # 최초 시드 배율 — base 시드에 곱해 게이트 감액보다 먼저 적용(executor 와 동일, 대시보드 설정).
+    seed_init_mult = risk_config_repo.get_risk_config().get("SEED_INIT_MULT", 1.0)
     # 롤링 엣지 게이트(레짐) 배수 — 두 거래소 시드에 공통 적용(executor 와 동일).
     regime_mult, regime_diag = seed_multiplier()
 
@@ -293,6 +296,8 @@ def buy_preview(date: str | None = None):
         items = [c for c in classified if c["is_nxt"] == want_nxt]
         venue_score = sum(c["score"] for c in items)
         seed_base = int(cash * venue_score / total_score) if total_score > 0 else 0
+        if seed_init_mult < 1.0:
+            seed_base = int(seed_base * seed_init_mult)  # 최초 시드 배율(게이트 감액보다 먼저)
         seed = int(seed_base * regime_mult) if regime_mult < 1.0 else seed_base
         cands = [{"stk_cd": c["sig"]["stk_cd"], "score": c["score"], "price": c["price"]} for c in items]
         allocate(seed, cands)

@@ -25,7 +25,7 @@ _ANALYSIS_COLS = (
     "days_since_frgn_surge", "red_candle", "red_candle_streak",
     "overhead_vol_ratio", "poc_dist_pct", "prog_am_net", "prog_pm_net",
     "fin_per", "fin_pbr", "fin_ev", "fin_roe", "fin_eps", "fin_bps",
-    "fin_sales", "fin_op_profit", "fin_net_income",
+    "fin_sales", "fin_op_profit", "fin_net_income", "op_earnings_yield",
     "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct",
 )
 
@@ -143,6 +143,7 @@ def save_stock_reports(candidates: list[dict]):
                 "fin_sales": c.get("fin_sales"),
                 "fin_op_profit": c.get("fin_op_profit"),
                 "fin_net_income": c.get("fin_net_income"),
+                "op_earnings_yield": c.get("op_earnings_yield"),
                 "ob_imbalance": c.get("ob_imbalance"),
                 "ob_fpr_imbalance": c.get("ob_fpr_imbalance"),
                 "ob_spread_pct": c.get("ob_spread_pct"),

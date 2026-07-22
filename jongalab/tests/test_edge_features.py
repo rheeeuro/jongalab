@@ -6,8 +6,8 @@ import pytest
 
 from core.edge_features import (
     afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, financials, is_bio,
-    ma5_reclaim, order_book_features, overhead_vol_ratio, poc_dist_pct, prog_buy_days,
-    prog_cum_net, red_candle, red_candle_streak, round_dist_pct, vol_ratio,
+    ma5_reclaim, op_earnings_yield, order_book_features, overhead_vol_ratio, poc_dist_pct,
+    prog_buy_days, prog_cum_net, red_candle, red_candle_streak, round_dist_pct, vol_ratio,
 )
 
 TODAY = "2026-07-03"
@@ -42,6 +42,33 @@ def test_afternoon_ret_no_13h_bar_returns_none():
 ])
 def test_afternoon_ret_missing_returns_none(candles, price):
     assert afternoon_ret(candles, price, TODAY) is None
+
+
+# ── op_earnings_yield ──
+
+def test_op_earnings_yield_exactly_one_tenth():
+    # 영업이익 1,000억원(=1e11원) / 시총 1조원(=1e12원) = 0.1 (통설 경계값)
+    assert op_earnings_yield(1000, 1_000_000_000_000) == 0.1
+
+
+def test_op_earnings_yield_above_and_below():
+    assert op_earnings_yield(2000, 1_000_000_000_000) == 0.2   # 1/5 — 통과
+    assert op_earnings_yield(500, 1_000_000_000_000) == 0.05   # 1/20 — 미달
+
+
+def test_op_earnings_yield_negative_when_operating_loss():
+    # 영업적자면 음수 → predicate >= 0.1 에 자연 탈락, 적자 veto 축에도 활용 가능
+    assert op_earnings_yield(-300, 1_000_000_000_000) == -0.03
+
+
+@pytest.mark.parametrize("op_profit,mkt_cap", [
+    (None, 1_000_000_000_000),   # 영업이익 결측(적자·신규상장 등 ka10001 공란)
+    (1000, None),                # 시총 결측
+    (1000, 0),                   # 시총 0
+    (1000, -5),                  # 시총 비정상 음수
+])
+def test_op_earnings_yield_missing_returns_none(op_profit, mkt_cap):
+    assert op_earnings_yield(op_profit, mkt_cap) is None
 
 
 # ── prog_buy_days ──

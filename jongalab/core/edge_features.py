@@ -102,6 +102,20 @@ def financials(info: dict) -> dict:
     }
 
 
+def op_earnings_yield(op_profit_eok: int | None, market_cap_won: int | None) -> float | None:
+    """영업이익 기준 이익수익률 = 영업이익 ÷ 시가총액 (선정 시점 파생 컬럼).
+
+    op_profit_eok: fin_op_profit(억원), market_cap_won: market_cap(원 — closing_bet 이 mac×1e8 로 저장).
+    반환 0.1 이면 "영업이익이 시가총액의 1/10"(≈ 주가/영업이익 10배). 적자면 음수.
+    edge_predicate DSL 은 컬럼-상수 비교만 지원(교차 컬럼 비율 불가)하므로, 이 비율을 선정 시점에
+    미리 구워 행 단위 predicate({"col":"op_earnings_yield","op":">=","value":0.1})로 쓰게 한다.
+    시총 결측/0 이하·영업이익 결측이면 None(edge_predicate 의 NULL=매칭실패 보수 계약). 점수 무영향.
+    """
+    if op_profit_eok is None or not market_cap_won or market_cap_won <= 0:
+        return None
+    return round(op_profit_eok * 100_000_000 / market_cap_won, 4)
+
+
 # ── 호가 미시구조 스냅샷 (2026-07-22) — ka10004 주식호가요청 파생 ──
 # 선정 시점(closing_bet 13~15시) 호가창의 잔량 불균형·스프레드. 오버나이트 갭 방향의
 # 단기 미시구조 신호. 연속장 밖(장 종료·개장 전)엔 잔량이 전부 0 으로 와서 분모 0 가드로

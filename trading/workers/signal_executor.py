@@ -32,6 +32,7 @@ from core.kiwoom_data_client import to_int
 from core.repository import trade_signal as signal_repo
 from core.repository import order as order_repo
 from core.repository import blocklist as blocklist_repo
+from core.repository import risk_config as risk_config_repo
 from core.repository import audit_log
 
 setup_logging()
@@ -294,6 +295,14 @@ def main() -> int:
     logger.info("가용현금 %d × (거래소점수 %.0f / 전체 %.0f) → 시드 %d원, 후보 %d종목",
                 cash, venue_score, total_score, seed, len(venue_items))
 
+    # 최초 시드 배율(대시보드 설정) — base 시드에 곱해 레짐/거시/선물 게이트 감액보다 먼저 적용.
+    #   0.0~1.0 축소 전용. 기본 1.0 이면 현행 동작 그대로. 게이트와 독립(곱셈 순서만 앞).
+    seed_init_mult = risk_config_repo.get_risk_config().get("SEED_INIT_MULT", 1.0)
+    if seed_init_mult < 1.0:
+        before_init = seed
+        seed = int(seed * seed_init_mult)
+        logger.info("최초 시드 배율 적용: 시드 %d → %d원 (배율 %.3f)", before_init, seed, seed_init_mult)
+
     # 롤링 엣지 게이트 — 최근 선정 종목의 점수 판별력이 역전된 레짐이면 총 시드를 축소.
     #   등가중 사이징이라 조절 대상은 개별 비중이 아니라 총 노출(seed). 배분 로직은 불변.
     mult, regime = seed_multiplier()
@@ -304,7 +313,7 @@ def main() -> int:
                     before, seed, mult, regime.get("split"))
     # 미개입(1.0)이어도 매 판단을 기록 — 게이트 성적을 사후 채점(백테스트)할 관찰 로그.
     audit_log.append("regime_gate", None,
-                     {"venue": args.venue, "multiplier": mult,
+                     {"venue": args.venue, "multiplier": mult, "seed_init_mult": seed_init_mult,
                       "seed_before": before, "seed_after": seed, **regime})
 
     # 3) 윈도우 시작 시점 현재가로 시드 배분 → 종목별 매수 수량 확정 (이후 수량 고정)

@@ -5,29 +5,14 @@ import { Save, RotateCcw, Loader2, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
+// 리스크 한도(주문수/금액/손실/보유수)는 UI 에서 편집하지 않지만, 저장 시 값 유실을
+// 막기 위해 GET 응답을 그대로 담아 PUT 으로 되돌려 보낸다(백엔드 DB 값 보존).
 interface RiskConfig {
   MAX_ORDERS_PER_DAY: number;
   MAX_NOTIONAL_PER_NAME: number;
   MAX_DAILY_LOSS: number;
   MAX_POSITIONS: number;
-}
-
-const FIELDS: {
-  key: keyof RiskConfig;
-  label: string;
-  unit: string;
-  currency?: boolean;
-}[] = [
-  { key: "MAX_ORDERS_PER_DAY", label: "일일 최대 주문수", unit: "건" },
-  { key: "MAX_NOTIONAL_PER_NAME", label: "종목당 최대 금액", unit: "원", currency: true },
-  { key: "MAX_DAILY_LOSS", label: "일일 최대 손실", unit: "원", currency: true },
-  { key: "MAX_POSITIONS", label: "동시 보유 종목수", unit: "개" },
-];
-
-function formatCurrency(value: number): string {
-  if (value >= 100_000_000) return `${(value / 100_000_000).toLocaleString()}억`;
-  if (value >= 10_000) return `${(value / 10_000).toLocaleString()}만`;
-  return value.toLocaleString();
+  SEED_INIT_MULT: number;
 }
 
 interface BlockItem {
@@ -131,9 +116,11 @@ export default function RiskSettingsPage() {
     }
   }
 
-  function updateField(key: keyof RiskConfig, value: number) {
+  function updateSeedMult(value: number) {
     if (!config) return;
-    setConfig({ ...config, [key]: value });
+    // 0.0~1.0 축소 전용 (백엔드도 클램프하지만 UI 에서도 막아 혼란 방지)
+    const clamped = Math.max(0, Math.min(1, value));
+    setConfig({ ...config, SEED_INIT_MULT: clamped });
   }
 
   if (loading || !config) {
@@ -155,8 +142,8 @@ export default function RiskSettingsPage() {
           <ArrowLeft className="h-4 w-4" />
           대시보드
         </Link>
-        <h1 className="mt-2 text-xl font-bold sm:text-2xl">리스크 설정</h1>
-        <p className="mt-1 text-sm text-slate-500">한도 초과 시 주문이 차단됩니다.</p>
+        <h1 className="mt-2 text-xl font-bold sm:text-2xl">자동매매 설정</h1>
+        <p className="mt-1 text-sm text-slate-500">다음 집행부터 적용됩니다.</p>
       </div>
 
       {/* 화면 테마 */}
@@ -179,28 +166,35 @@ export default function RiskSettingsPage() {
 
       {/* 폼 카드 — 모바일 우선 세로 배치 */}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="divide-y divide-slate-100 dark:divide-slate-800">
-          {FIELDS.map((f) => (
-            <div key={f.key} className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center">
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-300 sm:w-48 sm:shrink-0">
-                {f.label}
-              </label>
-              <div className="flex flex-1 items-center gap-2">
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={config[f.key]}
-                  onChange={(e) => updateField(f.key, Number(e.target.value))}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                />
-                <span className="w-20 shrink-0 text-right text-xs text-slate-400">
-                  {f.currency ? formatCurrency(config[f.key]) : f.unit}
-                </span>
-              </div>
-            </div>
-          ))}
+        <div className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center">
+          <label
+            htmlFor="seed-init-mult"
+            className="text-sm font-medium text-slate-700 dark:text-slate-300 sm:w-48 sm:shrink-0"
+          >
+            최초 시드 배율
+          </label>
+          <div className="flex flex-1 items-center gap-2">
+            <input
+              id="seed-init-mult"
+              type="number"
+              inputMode="decimal"
+              step={0.05}
+              min={0}
+              max={1}
+              value={config.SEED_INIT_MULT}
+              onChange={(e) => updateSeedMult(Number(e.target.value))}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            />
+            <span className="w-20 shrink-0 text-right text-xs text-slate-400">
+              ×{config.SEED_INIT_MULT} ({Math.round(config.SEED_INIT_MULT * 100)}%)
+            </span>
+          </div>
         </div>
       </div>
+      <p className="mt-2 px-1 text-xs text-slate-500">
+        가용현금 기준 최초 시드에 곱하는 배율입니다(0.0~1.0). 레짐·거시·선물 감액보다 먼저 적용됩니다.
+        예: 0.5 → 시드의 50%만 최초 투입. 1.0 은 현행 동작(감액 없음).
+      </p>
 
       {/* 액션 — 모바일에서 풀폭 터치 타깃 */}
       <div className="mt-5 flex gap-2">
