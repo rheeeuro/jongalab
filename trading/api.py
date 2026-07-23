@@ -238,8 +238,16 @@ def monitor():
 
 @app.get("/names")
 def names():
-    """종목코드 → 종목명 맵 (표시용)."""
-    return signal_repo.get_name_map()
+    """종목코드 → 종목명 맵 (표시용).
+
+    시그널에 등장한 종목명 + 레버리지 ETF 치환분(포지션/주문에만 등장해 시그널엔 없음).
+    치환 매수분은 원종목만 시그널에 남으므로 ETF 이름을 여기서 합쳐 코드 노출을 막는다.
+    """
+    m = signal_repo.get_name_map()
+    for info in leverage_map_repo.get_active_map().values():
+        if info.get("etf_nm"):
+            m[info["etf_cd"]] = info["etf_nm"]
+    return m
 
 
 @app.get("/signals")
