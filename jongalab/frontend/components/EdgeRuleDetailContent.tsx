@@ -237,6 +237,7 @@ export function EdgeRuleDetailContent({
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { l: STAT_META.n.label, v: `${s.n}회` },
+                  { l: STAT_META.n_days.label, v: s.n_days != null ? `${s.n_days}일` : "—" },
                   { l: STAT_META.mean_net.label, v: fmtPct(s.mean_net), tone: retTone(s.mean_net) },
                   { l: STAT_META.win_rate.label, v: s.win_rate !== null ? `${Math.round(s.win_rate * 100)}%` : "—" },
                   { l: STAT_META.ci_low.label, v: fmtPct(s.ci_low), tone: retTone(s.ci_low) },

@@ -12,6 +12,7 @@ import {
   STATUS_LABEL,
   STATUS_BADGE,
   STAT_META,
+  PROMO_MIN_DAYS,
   isPromotionCandidate,
 } from "@/lib/edge";
 
@@ -34,7 +35,12 @@ export function EdgeRuleCard({
   // 검증 진행바: 검증 횟수 n / 필요 횟수 min_sample (stats 미생성이면 0회로 취급)
   const n = s?.n ?? 0;
   const hasData = n > 0;
-  const progress = Math.min(100, Math.round((n / rule.min_sample) * 100));
+  // 승격 게이트는 횟수(n≥min_sample)와 거래일(n_days≥PROMO_MIN_DAYS)을 모두 요구한다.
+  // 진행바는 둘 중 덜 찬 쪽으로 그려, 횟수만 40회를 넘겨도 거래일이 모자라면 '완료'로 보이지 않게 한다.
+  const nDays = s?.n_days ?? 0;
+  const cntPct = Math.min(100, Math.round((n / rule.min_sample) * 100));
+  const daysPct = Math.min(100, Math.round((nDays / PROMO_MIN_DAYS) * 100));
+  const progress = Math.min(cntPct, daysPct);
 
   return (
     <Link
@@ -124,7 +130,12 @@ export function EdgeRuleCard({
         <div className="mt-0.5">
           <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500">
             <span>검증 진행</span>
-            <span className="tabular-nums">{n}/{rule.min_sample}회</span>
+            <span className="tabular-nums">
+              {n}/{rule.min_sample}회
+              <span className={nDays < PROMO_MIN_DAYS ? "text-amber-500 dark:text-amber-400" : ""}>
+                {" · "}{nDays}/{PROMO_MIN_DAYS}일
+              </span>
+            </span>
           </div>
           <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
             <div
