@@ -66,9 +66,9 @@ export function StockReportCard({
     totalPct === null
       ? "bg-white dark:bg-slate-900/60"
       : totalPct > 0
-        ? "bg-rose-50/70 ring-1 ring-rose-200/70 dark:bg-rose-950/20 dark:ring-rose-900/40"
+        ? "bg-rose-50/30 ring-1 ring-rose-200/40 dark:bg-rose-950/20 dark:ring-rose-900/40"
         : totalPct < 0
-          ? "bg-blue-50/70 ring-1 ring-blue-200/70 dark:bg-blue-950/20 dark:ring-blue-900/40"
+          ? "bg-blue-50/30 ring-1 ring-blue-200/40 dark:bg-blue-950/20 dark:ring-blue-900/40"
           : "bg-white dark:bg-slate-900/60";
 
   return (

@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 
 from core.repository import get_youtube_sources
 from core.repository import macro_event
+from core.market_calendar import holidays_in_month
 from core.market_data import (
     fetch_stock_price,
     fetch_stock_history,
@@ -79,6 +80,18 @@ def get_macro_events(days: int = 30, month: str | None = None):
         } for r in rows]}
     except Exception:
         return {"events": []}
+
+
+@router.get("/market-holidays")
+def get_market_holidays(month: str):
+    """month=YYYY-MM 의 KRX 휴장 평일(공휴일·대체공휴일·근로자의날·연말휴장 등)을
+    이름과 함께 반환 — 리포트 캘린더의 휴일 라벨용. 조회 실패는 빈 목록."""
+    if not re.fullmatch(r"\d{4}-\d{2}", month or ""):
+        raise HTTPException(status_code=400, detail="month(YYYY-MM) 형식이 필요합니다.")
+    try:
+        return {"holidays": holidays_in_month(month)}
+    except Exception:
+        return {"holidays": []}
 
 
 @router.get("/channels")

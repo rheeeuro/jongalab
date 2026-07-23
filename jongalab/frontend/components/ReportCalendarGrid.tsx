@@ -18,9 +18,26 @@ export type CalendarCellData = {
   themes: string[];
   gap: CalendarGap | null;
   events: CalendarEvent[];
+  holiday: string | null;
 } | null;
 
 const WEEKDAYS = ["월", "화", "수", "목", "금"];
+
+// 그날 리포트(Top10) 승패에 따라 셀 배경을 칠한다 — 일간 리포트 종목카드와 같은 톤(상승=빨강, 하락=파랑)
+function gapCellBg(gap: CalendarGap | null): string {
+  if (!gap || gap.total === 0) return "bg-white dark:bg-slate-900/60";
+  if (gap.wins > gap.losses) return "bg-rose-50/30 dark:bg-rose-950/25";
+  if (gap.losses > gap.wins) return "bg-blue-50/30 dark:bg-blue-950/25";
+  return "bg-white dark:bg-slate-900/60";
+}
+
+// 배경과 짝을 이루는 테두리(종목카드와 동일) — 오늘/선택 인디고 링과 겹치지 않게 그때는 이 링을 쓰지 않는다
+function gapCellRing(gap: CalendarGap | null): string {
+  if (!gap || gap.total === 0) return "ring-1 ring-slate-200/70 dark:ring-slate-800";
+  if (gap.wins > gap.losses) return "ring-1 ring-rose-200/40 dark:ring-rose-900/40";
+  if (gap.losses > gap.wins) return "ring-1 ring-blue-200/40 dark:ring-blue-900/40";
+  return "ring-1 ring-slate-200/70 dark:ring-slate-800";
+}
 
 function eventDotTone(events: CalendarEvent[]): string {
   return events.some((e) => e.severity >= 3)
@@ -218,6 +235,7 @@ function Cell({
 
   // 리포트 없는 평일
   if (!hasReport) {
+    const holiday = cell.holiday;
     const border = cell.isToday
       ? "border-indigo-300 dark:border-indigo-700"
       : "border-slate-200 dark:border-slate-800";
@@ -229,21 +247,32 @@ function Cell({
       </span>
     );
 
-    // 모바일: 날짜 + 이벤트 점 슬롯(이벤트가 없어도 같은 높이를 예약해 날짜 정렬을 맞춘다)
+    // 모바일: 날짜 아래에 휴일명(있으면) 또는 이벤트 점 슬롯(높이 예약해 날짜 정렬 유지)
     const mobileInner = (
-      <span className="flex h-full w-full flex-col items-center justify-center gap-1 sm:hidden">
+      <span className="flex h-full w-full flex-col items-center justify-center gap-0.5 sm:hidden">
         {dayEl}
-        <span className="flex h-1 items-center gap-0.5">
-          {hasEvents && (
-            <span className={`h-1 w-1 rounded-full ${eventDotTone(cell.events)}`} />
-          )}
-        </span>
+        {holiday ? (
+          <span className="max-w-full truncate px-0.5 text-[8px] font-bold leading-tight text-slate-400 dark:text-slate-500">
+            {holiday}
+          </span>
+        ) : (
+          <span className="flex h-1 items-center gap-0.5">
+            {hasEvents && (
+              <span className={`h-1 w-1 rounded-full ${eventDotTone(cell.events)}`} />
+            )}
+          </span>
+        )}
       </span>
     );
-    // 데스크탑: 날짜 상단 정렬 + (있으면) 이벤트 칩
+    // 데스크탑: 날짜 상단 정렬 + 휴일명 + (있으면) 이벤트 칩
     const desktopInner = (
       <span className="hidden w-full flex-col gap-1 sm:flex">
         {dayEl}
+        {holiday && (
+          <span className="whitespace-normal break-keep text-[11px] font-bold leading-tight text-slate-400 dark:text-slate-500">
+            {holiday}
+          </span>
+        )}
         {hasEvents && (
           <span className="flex flex-col gap-0.5">
             {cell.events.map((ev) => (
@@ -282,8 +311,12 @@ function Cell({
     <button
       type="button"
       onClick={() => onSelect(cell)}
-      className={`flex min-h-[44px] flex-col rounded-lg bg-white p-1 text-left transition-all hover:shadow-md dark:bg-slate-900/60 sm:min-h-[132px] sm:gap-1 sm:p-2 sm:hover:-translate-y-0.5 ${
-        cell.isToday || selected ? "ring-2 ring-indigo-500" : ""
+      className={`flex min-h-[44px] flex-col rounded-lg p-1 text-left transition-all hover:shadow-md sm:min-h-[132px] sm:gap-1 sm:p-2 sm:hover:-translate-y-0.5 ${gapCellBg(
+        cell.gap,
+      )} ${
+        cell.isToday || selected
+          ? "ring-2 ring-indigo-500"
+          : gapCellRing(cell.gap)
       }`}
     >
       {/* 모바일: 날짜 + 점만 (리포트=남색, 거시 이벤트=주황/회색) */}

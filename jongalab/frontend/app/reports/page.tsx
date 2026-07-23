@@ -45,6 +45,19 @@ async function getTopThemes(
   );
 }
 
+// 선택 월의 KRX 휴장 평일(공휴일·대체공휴일 등)을 날짜별 이름으로 묶는다 — 캘린더 휴일 라벨용
+async function getHolidaysByDate(
+  month: string,
+): Promise<Record<string, string>> {
+  const res = await apiFetch<{ holidays?: { date: string; name: string }[] }>(
+    `/api/market-holidays?month=${month}`,
+    {},
+  );
+  const byDate: Record<string, string> = {};
+  for (const h of res?.holidays ?? []) byDate[h.date] = h.name;
+  return byDate;
+}
+
 // 선택 월의 거시 이벤트(FOMC·CPI 등, 과거 포함)를 날짜별로 묶는다 — 캘린더 셀 마커용
 async function getMacroEventsByDate(
   month: string,
@@ -151,7 +164,10 @@ export default async function ReportsArchivePage({
   const canPrev = selectedMonth > minMonth;
   const canNext = selectedMonth < maxMonth;
 
-  const macroByDate = await getMacroEventsByDate(selectedMonth);
+  const [macroByDate, holidaysByDate] = await Promise.all([
+    getMacroEventsByDate(selectedMonth),
+    getHolidaysByDate(selectedMonth),
+  ]);
   const weeks = buildWeeks(selectedMonth, picksByDate);
 
   // 클라이언트 컴포넌트로 넘길 직렬화 가능한 셀 데이터
@@ -170,6 +186,7 @@ export default async function ReportsArchivePage({
             ? { wins: gap.wins, losses: gap.losses, total: gap.total }
             : null,
         events: macroByDate[cell.dateStr] ?? [],
+        holiday: holidaysByDate[cell.dateStr] ?? null,
       };
     }),
   );
