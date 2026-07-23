@@ -387,39 +387,43 @@ function PositionGauge({ p }: { p: MonitorPosition }) {
       <div className="relative h-2 rounded-full bg-slate-100 dark:bg-slate-800">
         {/* 위험 구간: 실질 청산선(스탑) 이하 */}
         <div
-          className="absolute inset-y-0 left-0 rounded-l-full bg-red-400/50 dark:bg-red-500/40"
+          className="absolute inset-y-0 left-0 rounded-l-full bg-red-400/50 transition-[width] duration-700 ease-out motion-reduce:transition-none dark:bg-red-500/40"
           style={{ width: `${stopPct}%` }}
         />
         {/* 여유 구간: 스탑 → 현재가 (상승 시에만 의미) */}
         {curPct > stopPct && (
           <div
-            className="absolute inset-y-0 bg-emerald-400/60 dark:bg-emerald-500/40"
+            className="absolute inset-y-0 bg-emerald-400/60 transition-[left,width] duration-700 ease-out motion-reduce:transition-none dark:bg-emerald-500/40"
             style={{ left: `${stopPct}%`, width: `${curPct - stopPct}%` }}
           />
         )}
         {/* 평단 (손익분기) — 점선 세로선 */}
         <div
-          className="pointer-events-none absolute -top-1 -bottom-1 w-0 border-l border-dashed border-slate-400 dark:border-slate-500"
+          className="pointer-events-none absolute -top-1 -bottom-1 w-0 border-l border-dashed border-slate-400 transition-[left] duration-700 ease-out motion-reduce:transition-none dark:border-slate-500"
           style={{ left: `${avgPct}%` }}
         />
         {/* 손절가 틱 */}
         <div
-          className="pointer-events-none absolute -top-0.5 -bottom-0.5 w-0.5 -translate-x-1/2 rounded bg-red-500"
+          className="pointer-events-none absolute -top-0.5 -bottom-0.5 w-0.5 -translate-x-1/2 rounded bg-red-500 transition-[left] duration-700 ease-out motion-reduce:transition-none"
           style={{ left: `${at(hard)}%` }}
         />
         {/* 스탑선 틱 */}
         {trail != null && (
           <div
-            className="pointer-events-none absolute -top-0.5 -bottom-0.5 w-0.5 -translate-x-1/2 rounded bg-amber-500"
+            className="pointer-events-none absolute -top-0.5 -bottom-0.5 w-0.5 -translate-x-1/2 rounded bg-amber-500 transition-[left] duration-700 ease-out motion-reduce:transition-none"
             style={{ left: `${at(trail)}%` }}
           />
         )}
-        {/* 현재가 노브 */}
+        {/* 현재가 노브 — 폴링 갱신 시 left/색은 부드럽게 미끄러지고, hover 확대(scale)는 즉각 반응 */}
         <div
-          className={`pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow transition-transform dark:border-slate-900 ${
+          className={`pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow dark:border-slate-900 ${
             up ? "bg-rose-500" : "bg-blue-500"
           } ${active === "cur" ? "scale-125" : ""}`}
-          style={{ left: `${curPct}%` }}
+          style={{
+            left: `${curPct}%`,
+            transition:
+              "left 700ms ease-out, background-color 700ms ease-out, transform 150ms ease-out",
+          }}
         />
 
         {/* 넓은 히트 타깃 (틱/노브는 얇으므로 별도 오버레이로 hover/탭 수신) */}
@@ -428,7 +432,7 @@ function PositionGauge({ p }: { p: MonitorPosition }) {
             key={m.key}
             type="button"
             aria-label={`${m.label} ${wonExact(m.value)}`}
-            className="absolute top-1/2 z-[1] h-6 w-7 -translate-x-1/2 -translate-y-1/2"
+            className="absolute top-1/2 z-[1] h-6 w-7 -translate-x-1/2 -translate-y-1/2 transition-[left] duration-700 ease-out motion-reduce:transition-none"
             style={{ left: `${m.pct}%` }}
             onMouseEnter={() => setActive(m.key)}
             onMouseLeave={() => clear(m.key)}
