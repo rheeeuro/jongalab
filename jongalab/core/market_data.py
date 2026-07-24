@@ -207,20 +207,40 @@ def _fetch_sparkline(symbol: str) -> list[float] | None:
         return None
 
 
-def fetch_index_ohlc(symbol: str, period: str = "6mo", interval: str = "1d") -> list[dict]:
-    """시장 지수/심볼의 OHLCV 시계열 (yfinance). 상세 페이지 캔들 차트용.
+def fetch_index_ohlc(symbol: str, period: str = "5d", interval: str = "5m",
+                     prepost: bool = True) -> list[dict]:
+    """시장 지수/심볼의 OHLCV 시계열 (yfinance). 상세 페이지 분봉 차트용.
 
-    반환: [{time:"YYYY-MM-DDTHH:MM", open, high, low, close, volume}, ...] (오름차순).
-    코스피/코스닥(^KS11/^KQ11)도 yfinance 시계열을 그대로 쓴다(카드 라이브값은 KIS).
-    yfinance에 없는 커스텀 심볼(코스피200 주/야간선물)이나 조회 실패 시 []."""
+    분봉(intraday) + 프리/애프터마켓 포함이 기본. `prepost=True` 면 정규장 밖(프리·애프터)
+    체결도 한 시계열에 합쳐 반환한다(주식/ETF 만 실제 확장봉 존재; 지수·환율은 무영향).
+    시각은 전 심볼을 **KST(Asia/Seoul)** 로 변환한 벽시계값 문자열로 낸다 — 차트는 이 값을
+    그대로 시각 축에 표시한다(US 정규장 09:30~16:00 ET → 22:30~05:00 KST 처럼 한국 시간축 통일).
+
+    반환: [{time:"YYYY-MM-DDTHH:MM", open, high, low, close, volume, extended}, ...] (오름차순).
+      extended=True 는 정규장 밖(프리/애프터) 봉. 코스피/코스닥(^KS11/^KQ11)도 yfinance 시계열
+      을 쓴다(카드 라이브값은 KIS). 커스텀 심볼(코스피200 선물)·조회 실패 시 []."""
     if symbol in _NO_SPARKLINE_SYMBOLS:
         return []
     try:
-        hist = yf.Ticker(symbol).history(period=period, interval=interval)
+        tk = yf.Ticker(symbol)
+        hist = tk.history(period=period, interval=interval, prepost=prepost)
     except Exception:
         return []
     if hist is None or hist.empty:
         return []
+    # 정규장 시간대 판정용 — yfinance metadata(있으면). 없으면 extended 전부 False(무해).
+    reg_start = reg_end = None
+    try:
+        meta = getattr(tk, "history_metadata", None) or {}
+        gmt = meta.get("gmtoffset")
+        cts = meta.get("currentTradingPeriod") or {}
+        reg = cts.get("regular") or {}
+        if gmt is not None and reg.get("start") and reg.get("end"):
+            # epoch(UTC) + gmtoffset → 거래소 로컬 초(자정 기준 hh:mm 비교용)
+            reg_start = ((reg["start"] + gmt) % 86400)
+            reg_end = ((reg["end"] + gmt) % 86400)
+    except Exception:
+        reg_start = reg_end = None
     candles: list[dict] = []
     for idx, row in hist.iterrows():
         o = _safe_float(row.get("Open"))
@@ -229,10 +249,21 @@ def fetch_index_ohlc(symbol: str, period: str = "6mo", interval: str = "1d") -> 
         c = _safe_float(row.get("Close"))
         if None in (o, h, low, c):
             continue
+        # extended(정규장 밖) 판정은 거래소 로컬(idx 자체 tz) 기준 — 세션 시간과 맞아야 정확.
+        extended = False
+        if reg_start is not None:
+            sec = idx.hour * 3600 + idx.minute * 60
+            extended = not (reg_start <= sec < reg_end)
+        # 표시 시각은 KST 로 변환(tz-naive 면 그대로) — 전 심볼을 한국 시간축으로 통일.
+        try:
+            disp = idx.tz_convert("Asia/Seoul")
+        except (TypeError, AttributeError):
+            disp = idx
         candles.append({
-            "time": idx.strftime("%Y-%m-%dT%H:%M"),
+            "time": disp.strftime("%Y-%m-%dT%H:%M"),
             "open": o, "high": h, "low": low, "close": c,
             "volume": _safe_float(row.get("Volume")) or 0.0,
+            "extended": extended,
         })
     return candles
 

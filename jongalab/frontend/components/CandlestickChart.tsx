@@ -18,7 +18,14 @@ interface CandleData {
   low: number;
   close: number;
   volume: number;
+  extended?: boolean; // 정규장 밖(프리/애프터) 봉 — 흐리게 표시
 }
+
+// 한국식 색(상승=빨강, 하락=파랑). 정규장 밖 봉은 채도를 낮춰 구분.
+const UP = "#ef4444";
+const DOWN = "#3b82f6";
+const UP_EXT = "#fca5a5";
+const DOWN_EXT = "#93c5fd";
 
 function toTimestamp(timeStr: string): UTCTimestamp {
   // "2025-09-17T13:20" → UTC timestamp (seconds)
@@ -33,9 +40,11 @@ function toTimestamp(timeStr: string): UTCTimestamp {
 export function CandlestickChart({
   data,
   initialRangeDays = 7,
+  fit = false,
 }: {
   data: CandleData[];
   initialRangeDays?: number;
+  fit?: boolean; // true 면 가져온 전 구간을 꽉 차게(분봉 시장 차트용). false 면 최근 N일 줌.
 }) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -74,23 +83,23 @@ export function CandlestickChart({
 
     chartRef.current = chart;
 
-    // 캔들스틱 시리즈 (한국식: 상승=빨강, 하락=파랑)
+    // 캔들스틱 시리즈 (한국식: 상승=빨강, 하락=파랑). 정규장 밖 봉은 per-bar 색으로 흐리게.
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#ef4444",
-      downColor: "#3b82f6",
-      borderUpColor: "#ef4444",
-      borderDownColor: "#3b82f6",
-      wickUpColor: "#ef4444",
-      wickDownColor: "#3b82f6",
+      upColor: UP,
+      downColor: DOWN,
+      borderUpColor: UP,
+      borderDownColor: DOWN,
+      wickUpColor: UP,
+      wickDownColor: DOWN,
     });
 
-    const candleData: CandlestickData<UTCTimestamp>[] = data.map((d) => ({
-      time: toTimestamp(d.time),
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }));
+    const candleData: CandlestickData<UTCTimestamp>[] = data.map((d) => {
+      const up = d.close >= d.open;
+      const base = { time: toTimestamp(d.time), open: d.open, high: d.high, low: d.low, close: d.close };
+      if (!d.extended) return base;
+      const col = up ? UP_EXT : DOWN_EXT;
+      return { ...base, color: col, borderColor: col, wickColor: col };
+    });
 
     candleSeries.setData(candleData);
 
@@ -104,14 +113,15 @@ export function CandlestickChart({
       scaleMargins: { top: 0.8, bottom: 0 },
     });
 
-    const volumeData = data.map((d) => ({
-      time: toTimestamp(d.time),
-      value: d.volume,
-      color:
-        d.close >= d.open
-          ? "rgba(239, 68, 68, 0.3)"
-          : "rgba(59, 130, 246, 0.3)",
-    }));
+    const volumeData = data.map((d) => {
+      const up = d.close >= d.open;
+      const opacity = d.extended ? 0.12 : 0.3; // 정규장 밖 봉은 더 흐리게
+      return {
+        time: toTimestamp(d.time),
+        value: d.volume,
+        color: up ? `rgba(239, 68, 68, ${opacity})` : `rgba(59, 130, 246, ${opacity})`,
+      };
+    });
 
     volumeSeries.setData(volumeData);
 
@@ -142,13 +152,17 @@ export function CandlestickChart({
       maSeries.setData(maData);
     });
 
-    // 초기 줌: 최근 initialRangeDays 일치만 보이도록 (기본 7일)
-    const lastTime = candleData[candleData.length - 1].time;
-    const rangeStart = lastTime - initialRangeDays * 24 * 60 * 60;
-    chart.timeScale().setVisibleRange({
-      from: rangeStart as UTCTimestamp,
-      to: lastTime as UTCTimestamp,
-    });
+    // 초기 줌: fit 이면 가져온 전 구간을 꽉 차게(분봉 시장 차트), 아니면 최근 initialRangeDays 일치.
+    if (fit) {
+      chart.timeScale().fitContent();
+    } else {
+      const lastTime = candleData[candleData.length - 1].time;
+      const rangeStart = lastTime - initialRangeDays * 24 * 60 * 60;
+      chart.timeScale().setVisibleRange({
+        from: rangeStart as UTCTimestamp,
+        to: lastTime as UTCTimestamp,
+      });
+    }
 
     const container = chartContainerRef.current;
     const resizeObserver = new ResizeObserver((entries) => {
@@ -165,7 +179,7 @@ export function CandlestickChart({
         chartRef.current = null;
       }
     };
-  }, [data, initialRangeDays]);
+  }, [data, initialRangeDays, fit]);
 
   if (!data.length) {
     return (

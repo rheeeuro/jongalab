@@ -60,13 +60,17 @@ def get_us_extended():
 
 
 @router.get("/market-index-history/{symbol}")
-def get_market_index_history(symbol: str, range: str = "6m"):
-    """시장 지수/심볼의 OHLCV 캔들 시계열 (상세 페이지 차트용, yfinance).
+def get_market_index_history(symbol: str, range: str = "5d"):
+    """시장 지수/심볼의 분봉 OHLCV 시계열 (상세 페이지 차트용, yfinance, 프리/애프터 포함).
 
-    range: 1m·3m·6m·1y. 커스텀 선물 심볼은 candles=[] (yfinance 미제공).
+    range → (period, interval): 1d=(1d,1m)·5d=(5d,5m)·1mo=(1mo,30m). yfinance 분봉 한계에 맞춤
+    (1m 은 최근 ~7일, 5m/30m 은 ~60일). 전부 prepost=True 로 정규장 밖 체결을 합친다.
+    커스텀 선물 심볼은 candles=[] (yfinance 미제공).
     """
-    period = {"1m": "1mo", "3m": "3mo", "6m": "6mo", "1y": "1y"}.get(range, "6mo")
-    candles = fetch_index_ohlc(symbol, period=period)
+    period, interval = {
+        "1d": ("1d", "1m"), "5d": ("5d", "5m"), "1mo": ("1mo", "30m"),
+    }.get(range, ("5d", "5m"))
+    candles = fetch_index_ohlc(symbol, period=period, interval=interval, prepost=True)
     return {"symbol": symbol, "name": resolve_index_name(symbol), "candles": candles}
 
 

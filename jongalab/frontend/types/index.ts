@@ -110,6 +110,7 @@ export interface HourlyCandleItem {
   low: number;
   close: number;
   volume: number;
+  extended?: boolean; // 정규장 밖(프리/애프터마켓) 분봉 — 시장 상세 차트에서 흐리게 표시
 }
 
 export interface StockReport {

@@ -1,15 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, LineChart, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { ArrowLeft, LineChart } from "lucide-react";
 import { MarketIndexHistory } from "@/types";
-import { CandlestickChart } from "@/components/CandlestickChart";
+import { MarketIndexChart } from "@/components/MarketIndexChart";
 import { apiFetch } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 async function getIndexHistory(symbol: string): Promise<MarketIndexHistory> {
+  // 초기 로드는 5일 분봉(프리·애프터 포함). 범위 토글은 클라이언트가 refetch.
   return apiFetch<MarketIndexHistory>(
-    `/api/market-index-history/${encodeURIComponent(symbol)}`,
+    `/api/market-index-history/${encodeURIComponent(symbol)}?range=5d`,
     { symbol, name: symbol, candles: [] },
   );
 }
@@ -28,16 +29,6 @@ export async function generateMetadata({
   };
 }
 
-function formatPrice(price: number, symbol: string): string {
-  if (symbol === "USDKRW=X") {
-    return `₩${price.toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }
-  if (symbol === "BTC-USD") {
-    return `$${price.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-  }
-  return price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
 export default async function MarketIndexDetailPage({
   params,
 }: {
@@ -46,20 +37,6 @@ export default async function MarketIndexDetailPage({
   const { symbol } = await params;
   const decoded = decodeURIComponent(symbol);
   const { name, candles } = await getIndexHistory(decoded);
-
-  const last = candles.at(-1);
-  const prev = candles.at(-2);
-  const change = last && prev ? last.close - prev.close : null;
-  const pct = change !== null && prev ? (change / prev.close) * 100 : null;
-
-  const isUp = (pct ?? 0) > 0;
-  const isDown = (pct ?? 0) < 0;
-  const Icon = isUp ? TrendingUp : isDown ? TrendingDown : Minus;
-  const changeColor = isUp
-    ? "text-rose-600 dark:text-rose-400"
-    : isDown
-    ? "text-blue-600 dark:text-blue-400"
-    : "text-slate-500 dark:text-slate-400";
 
   return (
     <main className="min-h-screen">
@@ -83,31 +60,10 @@ export default async function MarketIndexDetailPage({
             </h1>
             <span className="text-sm font-bold text-slate-400 dark:text-slate-500">{decoded}</span>
           </div>
-          {last && (
-            <div className="mt-2 flex items-center gap-2">
-              <span className="text-2xl font-extrabold tabular-nums tracking-tight text-slate-900 dark:text-slate-100">
-                {formatPrice(last.close, decoded)}
-              </span>
-              {change !== null && pct !== null && (
-                <span className={`flex items-center gap-1 text-sm font-bold tabular-nums ${changeColor}`}>
-                  <Icon className="h-4 w-4" />
-                  {isUp ? "+" : ""}
-                  {change.toFixed(2)} ({isUp ? "+" : ""}
-                  {pct.toFixed(2)}%)
-                </span>
-              )}
-            </div>
-          )}
         </header>
 
         <section className="rounded-3xl bg-white p-4 dark:bg-slate-900/60 sm:p-6">
-          {candles.length > 0 ? (
-            <CandlestickChart data={candles} initialRangeDays={120} />
-          ) : (
-            <p className="py-12 text-center text-sm text-slate-400">
-              이 지표는 차트 데이터를 제공하지 않습니다.
-            </p>
-          )}
+          <MarketIndexChart symbol={decoded} initialCandles={candles} />
         </section>
       </div>
     </main>
