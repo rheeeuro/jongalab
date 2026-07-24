@@ -85,3 +85,83 @@ def test_all_maintenance_failing_still_monitors(patched, monkeypatch):
 
     assert len(patched.sells) == 1
     assert patched.sells[0]["tag"] == "hardstop"
+
+
+# ── 오버나잇 US 결과로 하드손절 강화 (effective_hard_stop_pct) ──
+
+class _FakeResp:
+    def __init__(self, data):
+        self._data = data
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._data
+
+
+@pytest.fixture(autouse=True)
+def _reset_us_tighten(monkeypatch):
+    """모듈 캐시(프로세스당 1회 계산)가 테스트 간 새지 않게 리셋 + 기본은 네트워크 없이 base pct."""
+    monitor._us_tighten_cache.update(computed=False, pct=None)
+
+    def _no_net(*a, **k):
+        raise RuntimeError("no network in tests")
+
+    monkeypatch.setattr(monitor.requests, "get", _no_net)
+    yield
+    monitor._us_tighten_cache.update(computed=False, pct=None)
+
+
+def _us_resp(monkeypatch, **regs):
+    """monitor.requests.get 을 US 정규장 등락(regular_ret) 응답으로 대체."""
+    data = {sym: {"regular_ret": regs.get(sym), "extended_ret": None, "market_state": "CLOSED"}
+            for sym in ("SOXX", "SKHY", "EWY", "KORU")}
+    monkeypatch.setattr(monitor.requests, "get", lambda *a, **k: _FakeResp(data))
+
+
+def test_overnight_intensity_ramp():
+    b = monitor.FUTURES_FLAT_BAND
+    assert monitor._overnight_intensity(None) == 0.0
+    assert monitor._overnight_intensity(1.0) == 0.0          # 상승
+    assert monitor._overnight_intensity(-b) == 0.0           # 보합밴드 경계
+    assert monitor._overnight_intensity(-monitor.FUTURES_FULL_CUT_PCT - 5) == 1.0  # 급락 → 상한
+    assert 0.0 < monitor._overnight_intensity(-1.0) < 1.0
+
+
+def test_effective_hard_stop_no_change_when_up(monkeypatch):
+    _us_resp(monkeypatch, SOXX=1.0, SKHY=0.8, EWY=0.5, KORU=1.5)
+    assert monitor.effective_hard_stop_pct() == HARD_STOP_LOSS_PCT  # 상승 밤 → 기본
+
+
+def test_effective_hard_stop_tightens_on_semis_crash(monkeypatch):
+    # 반도체(SOXX/SKHY) 급락 밤 → 손절 폭이 기본보다 좁아지고 하한 이상
+    _us_resp(monkeypatch, SOXX=-3.0, SKHY=-2.5, EWY=-0.2, KORU=-0.3)
+    pct = monitor.effective_hard_stop_pct()
+    assert monitor.US_STOP_MIN_PCT <= pct < HARD_STOP_LOSS_PCT
+
+
+def test_effective_hard_stop_floor(monkeypatch):
+    # 초급락이어도 US_STOP_MIN_PCT 밑으로는 안 내려간다
+    _us_resp(monkeypatch, SOXX=-20.0, SKHY=-20.0, EWY=-20.0, KORU=-60.0)
+    assert monitor.effective_hard_stop_pct() == monitor.US_STOP_MIN_PCT
+
+
+def test_effective_hard_stop_koru_normalized(monkeypatch):
+    # KORU(3x)는 /3 정규화 — KORU -3% 만으로는 EWY -1% 상당(약한 강도)이라 큰 컷 안 남
+    _us_resp(monkeypatch, SOXX=0.5, SKHY=0.5, EWY=None, KORU=-3.0)
+    pct = monitor.effective_hard_stop_pct()
+    assert pct < HARD_STOP_LOSS_PCT  # 약하게라도 강화
+    # KORU/3 = -1% 강도 < 반도체 -3% 강도였을 때보다 덜 좁혀짐(경계만 확인)
+    assert pct > monitor.US_STOP_MIN_PCT
+
+
+def test_effective_hard_stop_fetch_fail_keeps_base(monkeypatch):
+    # autouse 픽스처가 이미 no-net → 취득 실패 시 기본값 유지
+    assert monitor.effective_hard_stop_pct() == HARD_STOP_LOSS_PCT
+
+
+def test_effective_hard_stop_disabled(monkeypatch):
+    monkeypatch.setattr(monitor, "US_STOP_TIGHTEN_ENABLED", False)
+    _us_resp(monkeypatch, SOXX=-5.0, SKHY=-5.0, EWY=-5.0, KORU=-15.0)
+    assert monitor.effective_hard_stop_pct() == HARD_STOP_LOSS_PCT  # 비활성 → 미개입

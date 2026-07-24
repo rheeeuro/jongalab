@@ -34,7 +34,7 @@ jongalab/
 | `prompts.py` | 콘텐츠 분석 프롬프트 ⚠️민감/가드. 구조화 출력(sentiment_score·tldr·tags·summary·stocks[방향/확신/시간축]·strategy·related_companies) |
 | `kiwoom_client.py` | 키움 데이터 서버(`:8001`) HTTP 클라이언트 — 기본/상세/수급/차트/주도주 |
 | `kis_client.py` | 한국투자증권(KIS) Open API — 코스피200 야간선물 시세, WebSocket 키 |
-| `market_data.py` | 통합 시세 조회(국내→키움, 선물→KIS, 지수/원자재/환율→yfinance). `fetch_index_ohlc(symbol)` 은 지수/심볼의 OHLCV 캔들 시계열(yfinance, 시장 카드 클릭→상세 차트용, 커스텀 K200 선물은 빈 배열)을 반환. `fetch_edge_market_snapshot()` 은 표시용 경로를 재사용해 시장 스냅샷 1행(코스피/코스닥·NQ·SPX·SOX·VIX·환율·K200 주야간선물)을 조립 |
+| `market_data.py` | 통합 시세 조회(국내→키움, 선물→KIS, 지수/원자재/환율→yfinance). `fetch_index_ohlc(symbol)` 은 지수/심볼의 OHLCV 캔들 시계열(yfinance, 시장 카드 클릭→상세 차트용, 커스텀 K200 선물은 빈 배열)을 반환. `fetch_edge_market_snapshot()` 은 표시용 경로를 재사용해 시장 스냅샷 1행(코스피/코스닥·NQ·SPX·SOX·VIX·환율·WTI·EWY·KORU·SKHY(하이닉스ADR)·K200 주야간선물)을 조립. `fetch_us_extended()`(→ `GET /api/us-extended`)는 US 프록시(SOXX·SKHY·EWY·KORU)의 정규장(`regular_ret`)+장 마감 후 프리/애프터(`extended_ret`)+`market_state`를 반환(60s 캐시) — trading 종가베팅 NXT 매수 게이트(프리마켓 최근등락)·아침 하드손절 강화(오버나잇 정규장 결과)가 소비 |
 | `sector_resolver.py` | 티커→섹터 해석(ticker_dictionary 캐시, TTL 1년) |
 | `ticker.py` | 기업명↔티커 변환, 신규 티커 등록, 콘텐츠 본문 기업명 추출 |
 | `news_matcher.py` | 뉴스 헤드라인 → 종목 사전매칭(LLM 없음). ticker_dictionary(ACTIVE) 인메모리 매처, 경계 룩어라운드 + 발행처 대괄호([]·【】) 제거로 오탐 억제 |
@@ -53,7 +53,7 @@ jongalab/
 
 #### `core/repository/` — DB 접근 계층 (raw SQL 은 반드시 여기서만)
 `content`(콘텐츠 분석) · `news`(뉴스 속보 언급 `news_mention`) · `source`(채널) · `ticker`(기업명↔티커, 상장종목 벌크 시딩) · `stock_report`(종목일간리포트 — 리포트 저장·갭 체크·NXT 스냅샷·결과 백필) ·
-`sector_report`(주도 섹터) · `market_snapshot`(일 단위 시장 피처 — 지수·선물·VIX·환율, F2·레짐 연구용) · `trade_signal`(→ trading DB 매수신호 핸드오프, 멱등 upsert) ·
+`sector_report`(주도 섹터) · `market_snapshot`(일 단위 시장 피처 — 지수·선물·VIX·환율·WTI·한국 프록시 EWY/KORU/SKHY, F2·레짐/지정학 프록시 연구용) · `trade_signal`(→ trading DB 매수신호 핸드오프, 멱등 upsert) ·
 `trade_result`(trading.audit_log 실현손익 읽기) · `strategy_config`(점수 가중치·임계값) ·
 `weight_tuning`(주간 GPT 제안) · `edge_rule`(가설 원장 CRUD·stats·일별 채점 edge_rule_daily) · `kis_token` · `kis_night_future` · `telegram_user` ·
 `job_run`(스케줄러 잡 실행 이력 — start/finish 기록, 잡별 최신/최근 조회, 재시작 sweep·60일 정리) ·

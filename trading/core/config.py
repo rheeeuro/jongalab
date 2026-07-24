@@ -134,6 +134,25 @@ FUTURES_STALE_SEC = int(os.getenv('FUTURES_STALE_SEC', '900'))    # 야간선물
 # NQ 등락률 취득용 — jongalab market-indices 엔드포인트(야간선물은 jongalab DB 직접 조회)
 JONGALAB_BASE_URL = os.getenv('JONGALAB_BASE_URL', 'http://127.0.0.1:8000')
 
+# ── US 확장시간(프리/애프터) 축 — NXT 매수(19:50=미국 프리마켓 열림) 시점의 '장 마감 후 최근 등락' ──
+# 미국 정규장 '일일 등락'은 지난밤 세션이라 이미 국장 종가에 반영 → 오버나잇 갭 예측엔 후행. 대신
+# NXT 매수 시점엔 미국 프리마켓이 살아있어 '정규장 종가 대비 프리마켓 최근 등락'을 순방향 신호로 쓴다.
+# jongalab /api/us-extended(SOXX·SKHY·EWY·KORU) 의 extended_ret 소비. NQ 선물과 중복 아닌 축:
+#   반도체 = min(SOXX, SKHY) → tech 클래스만, 한국 = min(EWY, KORU/3) → 지수 민감도(idx_s)로 전 섹터.
+# KRX(15:20)는 매수 시점 미국장이 완전 폐장(다크)이라 확장 데이터가 stale → 이 축은 NXT 전용.
+# ⚠️ reduce-only·미검증(통설). 매 적용을 futures_gate diag→audit_log 에 남겨 사후 채점.
+FUTURES_US_EXT_ENABLED = os.getenv('FUTURES_US_EXT_ENABLED', '1') == '1'
+FUTURES_US_EXT_MAX_CUT = float(os.getenv('FUTURES_US_EXT_MAX_CUT', '0.3'))  # US 확장 축당 최대 감액률(보수적)
+
+# ── 아침 오버나잇 US 결과로 하드손절 강화 (core/monitor) — KRX 보유분(매수 시점 US 다크) 대비책 ──
+# monitor(08:01~) 시점엔 지난밤 미국 정규장이 이미 마감 → 그 결과(regular_ret)로 오버나잇 리스크를
+# 읽어, 급락 밤이었으면 그날 아침 하드손절 폭을 '더 좁게'(보수적으로) 조인다. 축소 전용(절대 넓히지 않음).
+# 강도: US 오버나잇(반도체 min(SOXX,SKHY) + 한국 min(EWY,KORU/3))이 -FLAT_BAND~-FULL_CUT_PCT 하락일 때
+# 0~US_STOP_TIGHTEN_MAX %p 만큼 HARD_STOP_LOSS_PCT 를 줄이되, US_STOP_MIN_PCT 밑으로는 안 내린다.
+US_STOP_TIGHTEN_ENABLED = os.getenv('US_STOP_TIGHTEN_ENABLED', '1') == '1'
+US_STOP_TIGHTEN_MAX = float(os.getenv('US_STOP_TIGHTEN_MAX', '1.0'))  # 최대로 좁힐 손절 폭(%p)
+US_STOP_MIN_PCT = float(os.getenv('US_STOP_MIN_PCT', '1.0'))          # 강화 후 하드손절 하한(너무 타이트 방지)
+
 # ── 거시 이벤트 게이트 (core.macro_gate) — 보유 창의 '예정 이벤트'(FOMC·CPI·고용)로 총 시드 축소 ──
 # 선물 게이트가 '이미 실현된 방향'을 재는 것과 달리, 이건 '아직 실현 안 된 이진 이벤트 리스크'를 잰다
 # (발표 전엔 선물이 보합이라 futures_gate 가 못 잡음). jongalab DB macro_event(수동 시드 캘린더) 조회.

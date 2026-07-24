@@ -12,6 +12,7 @@ from core.market_data import (
     fetch_stock_name,
     fetch_market_indices,
     fetch_index_ohlc,
+    fetch_us_extended,
     resolve_index_name,
 )
 
@@ -46,6 +47,16 @@ def get_stock_history(ticker: str):
 def get_market_indices():
     """주요 시장 지수 일괄 조회"""
     return fetch_market_indices()
+
+
+@router.get("/us-extended")
+def get_us_extended():
+    """US 프록시(SOXX·SKHY·EWY·KORU) 정규장/장 마감 후(프리·애프터) 등락 스냅샷.
+
+    trading 종가베팅 매수 게이트(NXT, extended_ret)·아침 손절 강화(monitor, regular_ret)가 소비.
+    {symbol: {regular_ret, extended_ret, market_state}} — 실패 심볼은 값이 None.
+    """
+    return fetch_us_extended()
 
 
 @router.get("/market-index-history/{symbol}")

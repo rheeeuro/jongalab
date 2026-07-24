@@ -9,7 +9,8 @@ from core.db import get_db
 
 _FIELDS = (
     "kospi_ret", "kosdaq_ret", "nq_fut_ret", "spx_ret", "sox_ret",
-    "vix", "usdkrw_ret", "k200f_day_ret", "k200f_night_ret",
+    "vix", "usdkrw_ret", "wti_ret", "ewy_ret", "koru_ret", "skhy_ret",
+    "k200f_day_ret", "k200f_night_ret",
 )
 
 

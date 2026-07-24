@@ -146,3 +146,76 @@ def test_keep_factors_all_up_no_cut(monkeypatch):
     monkeypatch.setattr(fg, "_sectors_for", lambda codes: {"AAA": "전기/전자"})
     factors, diag = fg.sector_keep_factors("nxt", ["AAA"])
     assert diag["gated"] is True and factors["AAA"] == 1.0  # 상승이면 감액 없음
+
+
+# ── US 장 마감 후(프리/애프터) 확장 축 ──
+
+def test_min_opt():
+    assert fg._min_opt(None, None) is None
+    assert fg._min_opt(-0.5, None) == -0.5
+    assert fg._min_opt(0.3, -1.2) == -1.2      # 가장 약세를 택함
+
+
+def test_sector_keep_us_ext_semis_only_tech():
+    # 반도체 확장 하락은 tech 만 깎고 방어주는 안 깎는다(semis 민감도 tech=1, else 0)
+    us = {"semis_pct": -2.0, "korea_pct": None}
+    tech = fg._sector_keep("전기/전자", 0.5, 0.5, us)
+    defensive = fg._sector_keep("통신", 0.5, 0.5, us)
+    assert tech < 1.0
+    assert defensive == 1.0
+
+
+def test_sector_keep_us_ext_korea_all_sectors():
+    # 한국(EWY) 확장 하락은 전 섹터에 idx 민감도로 작용(방어주도 조금은 깎임)
+    us = {"semis_pct": None, "korea_pct": -2.0}
+    defensive = fg._sector_keep("통신", 0.5, 0.5, us)
+    assert defensive < 1.0
+
+
+def test_sector_keep_us_ext_reduce_only_and_none():
+    # us_ext=None(KRX/미신선)이면 기존과 동일, 상승 확장은 감액 0, 항상 reduce-only
+    base = fg._sector_keep("전기/전자", -0.5, 0.3)
+    assert fg._sector_keep("전기/전자", -0.5, 0.3, None) == base
+    up = {"semis_pct": 1.0, "korea_pct": 0.5}
+    assert fg._sector_keep("전기/전자", 0.5, 0.5, up) == 1.0
+    dn = {"semis_pct": -2.0, "korea_pct": -2.0}
+    assert fg._sector_keep("전기/전자", 0.5, 0.5, dn) <= 1.0
+
+
+def test_keep_factors_krx_skips_us_ext(monkeypatch):
+    # KRX 는 미국장 다크 → US 확장 축 미개입(fetch 자체 안 함), diag.us_ext.applied=False
+    monkeypatch.setattr(fg, "FUTURES_GATE_VENUES", {"krx", "nxt"})
+    monkeypatch.setattr(fg, "_futures_state", lambda venue: _state(True, 0.5, 0.5, label="주간선물"))
+    monkeypatch.setattr(fg, "_sectors_for", lambda codes: {"AAA": "전기/전자"})
+    called = {"n": 0}
+    monkeypatch.setattr(fg, "_us_ext_signals", lambda: called.__setitem__("n", called["n"] + 1) or {})
+    factors, diag = fg.sector_keep_factors("krx", ["AAA"])
+    assert called["n"] == 0                       # KRX 에선 US 확장 조회 안 함
+    assert diag["us_ext"]["applied"] is False
+    assert factors["AAA"] == 1.0
+
+
+def test_keep_factors_nxt_applies_us_ext(monkeypatch):
+    # NXT + 신선 프리마켓 + 반도체 확장 급락 → tech 종목 추가 감액, diag 기록
+    monkeypatch.setattr(fg, "FUTURES_GATE_VENUES", {"nxt"})
+    monkeypatch.setattr(fg, "_futures_state", lambda venue: _state(True, 0.5, 0.5))  # 선물은 보합
+    monkeypatch.setattr(fg, "_sectors_for", lambda codes: {"AAA": "전기/전자"})
+    monkeypatch.setattr(fg, "_us_ext_signals", lambda: {
+        "semis_pct": -2.5, "korea_pct": -1.0, "fresh": True,
+        "market_state": "PRE", "note": "ok"})
+    factors, diag = fg.sector_keep_factors("nxt", ["AAA"])
+    assert diag["us_ext"]["applied"] is True and diag["us_ext"]["market_state"] == "PRE"
+    assert factors["AAA"] < 1.0                   # 선물 보합이어도 US 확장 하락으로 감액
+
+
+def test_keep_factors_nxt_us_ext_stale_not_applied(monkeypatch):
+    # NXT 라도 미국장 폐장(POST/CLOSED)=stale 이면 US 축 미개입(선물 축은 정상)
+    monkeypatch.setattr(fg, "FUTURES_GATE_VENUES", {"nxt"})
+    monkeypatch.setattr(fg, "_futures_state", lambda venue: _state(True, 0.5, 0.5))
+    monkeypatch.setattr(fg, "_sectors_for", lambda codes: {"AAA": "전기/전자"})
+    monkeypatch.setattr(fg, "_us_ext_signals", lambda: {
+        "semis_pct": -2.5, "korea_pct": -1.0, "fresh": False,
+        "market_state": "POSTPOST", "note": "ok"})
+    factors, diag = fg.sector_keep_factors("nxt", ["AAA"])
+    assert diag["us_ext"]["applied"] is False
+    assert factors["AAA"] == 1.0                  # 선물 보합 + US stale → 감액 없음

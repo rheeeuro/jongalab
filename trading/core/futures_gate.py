@@ -13,6 +13,10 @@
       - KRX(15:20): 주간선물(K200DF) — 그 시각 정규장 열려 실시간. market-indices 에서 취득.
       - NXT(19:50): 야간선물(K200NF) — 야간세션(18:00~) 실시간. DB kis_night_future 직접(신선도 체크).
   각 등락률이 -FUTURES_FLAT_BAND %p 미만이면 '하락'으로 본다(±band 이내 보합·상승은 하락 아님).
+  · US 장 마감 후 최근 등락(NXT 전용) — jongalab /api/us-extended. NXT(19:50)는 미국 프리마켓이
+      열려 '정규장 종가 대비 프리마켓 최근 등락'이 순방향 신호(일일 등락은 지난밤이라 이미 국장 종가에
+      반영=후행). 반도체 min(SOXX,SKHY)는 tech 만, 한국 min(EWY,KORU/3)은 idx 민감도로 전 섹터에.
+      KRX(15:20)는 매수 시점 미국장 완전 폐장(다크)이라 stale → 이 축 미개입(선물 축만).
 
 [감액] 종목 섹터(키움 업종명, jongalab ticker_dictionary)를 클래스로 매핑하고, 클래스별 축당 민감도 ×
   하락 강도(폭 비례: -FLAT_BAND=0 ~ -FULL_CUT_PCT=1)로:
@@ -42,6 +46,8 @@ from core.config import (
     FUTURES_IDX_MAX_CUT,
     FUTURES_SECTOR_MIN_KEEP,
     FUTURES_STALE_SEC,
+    FUTURES_US_EXT_ENABLED,
+    FUTURES_US_EXT_MAX_CUT,
     JONGALAB_BASE_URL,
     SEED_COMBINED_MIN_MULT,
 )
@@ -121,6 +127,39 @@ def _nq_pct() -> tuple[float | None, str]:
     return _market_futures_pct(_NQ_SYMBOL, "nq")
 
 
+def _min_opt(*vals: float | None) -> float | None:
+    """None 을 무시한 최소값(둘 다 None 이면 None). 여러 프록시 중 '가장 약세'를 택해 보수적으로."""
+    present = [v for v in vals if v is not None]
+    return min(present) if present else None
+
+
+def _us_ext_signals() -> dict:
+    """jongalab /api/us-extended(SOXX·SKHY·EWY·KORU) → 장 마감 후 최근 등락 두 축.
+
+    semis_pct = min(SOXX, SKHY) extended / korea_pct = min(EWY, KORU/3) extended(3x 정규화).
+    fresh: 미국장 상태가 프리마켓/정규장이어야 True(NXT 19:50 정상). 애프터/폐장이면 stale →
+    소비측이 US 축 미개입. 취득 실패/부재는 None(그 축만 제외)."""
+    try:
+        resp = requests.get(f"{JONGALAB_BASE_URL}/api/us-extended", timeout=_HTTP_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json() or {}
+    except Exception as e:
+        return {"semis_pct": None, "korea_pct": None, "fresh": False,
+                "market_state": None, "note": f"http_error: {e}"}
+
+    def _ext(sym: str) -> float | None:
+        v = (data.get(sym) or {}).get("extended_ret")
+        return float(v) if v is not None else None
+
+    koru = _ext("KORU")
+    semis = _min_opt(_ext("SOXX"), _ext("SKHY"))
+    korea = _min_opt(_ext("EWY"), (koru / 3.0) if koru is not None else None)
+    ms = (data.get("SOXX") or {}).get("market_state") or (data.get("EWY") or {}).get("market_state")
+    fresh = bool(ms) and (str(ms).startswith("PRE") or str(ms).startswith("REGULAR"))
+    return {"semis_pct": semis, "korea_pct": korea, "fresh": fresh,
+            "market_state": ms, "note": "ok"}
+
+
 def _kospi_future_pct(venue: str) -> tuple[float | None, str, str]:
     """코스피 축 선물 — 거래소별로 그 시각 살아있는 선물. 반환 (pct, note, label).
 
@@ -160,13 +199,24 @@ def _cut_intensity(pct: float | None) -> float:
     return min(1.0, (-pct - FUTURES_FLAT_BAND) / span)
 
 
-def _sector_keep(sector: str | None, nq_pct: float | None, kospi_pct: float | None) -> float:
+def _sector_keep(sector: str | None, nq_pct: float | None, kospi_pct: float | None,
+                 us_ext: dict | None = None) -> float:
     """섹터 클래스 민감도 × 하락 강도로 keep-factor(≤1.0, 하한 MIN_KEEP) 계산.
-    축별 감액 = MAX_CUT × 섹터민감도 × 하락강도(폭 비례). 상승/보합 축은 감액 0."""
-    nq_s, idx_s = _SECTOR_SENSITIVITY[_class_of(sector)]
+    축별 감액 = MAX_CUT × 섹터민감도 × 하락강도(폭 비례). 상승/보합 축은 감액 0.
+
+    us_ext(NXT 전용, 신선할 때만 전달)가 있으면 US 장 마감 후 최근 등락 두 축을 추가로 곱한다:
+      · 반도체(semis_pct): tech 클래스만(반도체 ADR/ETF 는 국내 반도체 직결) — 민감도 1.0
+      · 한국(korea_pct): 전 섹터, 지수 민감도(idx_s) 재사용(EWY≈코스피 광역)
+    """
+    cls = _class_of(sector)
+    nq_s, idx_s = _SECTOR_SENSITIVITY[cls]
     keep = 1.0
     keep *= (1.0 - FUTURES_NQ_MAX_CUT * nq_s * _cut_intensity(nq_pct))
     keep *= (1.0 - FUTURES_IDX_MAX_CUT * idx_s * _cut_intensity(kospi_pct))
+    if us_ext:
+        semis_s = 1.0 if cls == "tech" else 0.0
+        keep *= (1.0 - FUTURES_US_EXT_MAX_CUT * semis_s * _cut_intensity(us_ext.get("semis_pct")))
+        keep *= (1.0 - FUTURES_US_EXT_MAX_CUT * idx_s * _cut_intensity(us_ext.get("korea_pct")))
     return round(max(keep, FUTURES_SECTOR_MIN_KEEP), 3)
 
 
@@ -230,13 +280,26 @@ def sector_keep_factors(venue: str, stk_cds: list[str]) -> tuple[dict[str, float
                     "kospi_label": st["kospi_label"],
                     "nq_note": st["nq_note"], "kospi_note": st["kospi_note"]}
 
+    # US 장 마감 후 최근 등락 축 — NXT(매수 시점 미국 프리마켓 열림) 전용, 신선할 때만.
+    # KRX(15:20)는 미국장 완전 폐장이라 stale → 미개입(선물 축만).
+    us_ext = None
+    us_diag: dict = {"applied": False}
+    if FUTURES_US_EXT_ENABLED and venue == "nxt":
+        sig = _us_ext_signals()
+        us_diag = {"applied": False, "semis_pct": sig["semis_pct"], "korea_pct": sig["korea_pct"],
+                   "market_state": sig["market_state"], "fresh": sig["fresh"],
+                   "note": sig["note"]}
+        if sig["fresh"] and (sig["semis_pct"] is not None or sig["korea_pct"] is not None):
+            us_ext = sig
+            us_diag["applied"] = True
+
     sectors = _sectors_for(stk_cds)
     nq, kospi = st["nq_pct"], st["kospi_pct"]
     factors: dict[str, float] = {}
     detail: dict[str, dict] = {}
     for code in stk_cds:
         sec = sectors.get(code)
-        keep = _sector_keep(sec, nq, kospi)
+        keep = _sector_keep(sec, nq, kospi, us_ext)
         factors[code] = keep
         detail[code] = {"sector": sec, "class": _class_of(sec), "keep": keep}
 
@@ -244,7 +307,7 @@ def sector_keep_factors(venue: str, stk_cds: list[str]) -> tuple[dict[str, float
         "gated": True, "venue": venue, "kospi_label": st["kospi_label"],
         "nq_pct": round(nq, 3), "kospi_pct": round(kospi, 3),
         "nq_down": _bearish(nq), "kospi_down": _bearish(kospi),
-        "flat_band": FUTURES_FLAT_BAND, "detail": detail,
+        "flat_band": FUTURES_FLAT_BAND, "us_ext": us_diag, "detail": detail,
     }
     logger.info("선물 섹터 게이트[%s]: NQ %+.2f%%(하락=%s) / %s %+.2f%%(하락=%s) → %d종목 keep 계산",
                 venue, nq, _bearish(nq), st["kospi_label"], kospi, _bearish(kospi), len(factors))

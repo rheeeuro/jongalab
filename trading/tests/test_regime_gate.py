@@ -40,6 +40,7 @@ def test_split_to_mult_binary():
 
 def test_seed_multiplier_insufficient_days(monkeypatch):
     # 종목-일 표본이 많아도 거래일 수가 부족하면 미개입 — 같은 날 표본은 상관되어 실효 표본이 아니다.
+    monkeypatch.setattr(rg, "REGIME_GATE_ENABLED", True)  # 기본 OFF(7/23)라 로직 검증엔 활성 고정
     many = [{"score": 90, "next_open_ret": -2.0}, {"score": 10, "next_open_ret": 2.0}] * 30
     monkeypatch.setattr(rg, "_recent_samples", lambda w: (many, rg.REGIME_MIN_DAYS - 1))
     mult, diag = rg.seed_multiplier()
@@ -48,6 +49,7 @@ def test_seed_multiplier_insufficient_days(monkeypatch):
 
 def test_seed_multiplier_inverted_reduces(monkeypatch):
     # 역전(고점수 손실) + 거래일 충족 → MIN_MULT 로 축소
+    monkeypatch.setattr(rg, "REGIME_GATE_ENABLED", True)
     bad = [{"score": 90, "next_open_ret": -2.0}, {"score": 10, "next_open_ret": 2.0}] * 20
     monkeypatch.setattr(rg, "_recent_samples", lambda w: (bad, rg.REGIME_MIN_DAYS))
     mult, diag = rg.seed_multiplier()
@@ -57,6 +59,7 @@ def test_seed_multiplier_inverted_reduces(monkeypatch):
 
 
 def test_seed_multiplier_healthy_full(monkeypatch):
+    monkeypatch.setattr(rg, "REGIME_GATE_ENABLED", True)
     good = [{"score": 90, "next_open_ret": 2.0}, {"score": 10, "next_open_ret": -2.0}] * 20
     monkeypatch.setattr(rg, "_recent_samples", lambda w: (good, rg.REGIME_MIN_DAYS))
     mult, diag = rg.seed_multiplier()

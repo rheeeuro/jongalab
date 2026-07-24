@@ -204,6 +204,10 @@ CREATE TABLE IF NOT EXISTS market_snapshot (
     sox_ret         FLOAT DEFAULT NULL,   -- 필라델피아 반도체(^SOX) 전일 등락률
     vix             FLOAT DEFAULT NULL,   -- VIX 지수 값(등락률 아님)
     usdkrw_ret      FLOAT DEFAULT NULL,   -- 원/달러 환율 등락률(%)
+    wti_ret         FLOAT DEFAULT NULL,   -- WTI 원유(CL=F) 등락률(%) — 지정학/유가 쇼크 프록시 연구용(2026-07-24 추가)
+    ewy_ret         FLOAT DEFAULT NULL,   -- iShares MSCI Korea(EWY) 등락률(%) — 미국 세션 한국 프록시(2026-07-24 추가)
+    koru_ret        FLOAT DEFAULT NULL,   -- Direxion Korea 3x Bull(KORU) 등락률(%) — 미국 세션 한국 레버리지 프록시(2026-07-24 추가)
+    skhy_ret        FLOAT DEFAULT NULL,   -- SK하이닉스 ADR(SKHY) 등락률(%) — 미국 세션 반도체 프록시(2026-07-24 추가)
     k200f_day_ret   FLOAT DEFAULT NULL,   -- 코스피200 주간선물 등락률(장 마감 기준)
     k200f_night_ret FLOAT DEFAULT NULL    -- 야간선물 등락률(19:50 시점, kis_night_future)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -450,10 +450,14 @@ def fetch_edge_market_snapshot() -> dict:
         {"symbol": "^SOX", "name": "SOX"},
         {"symbol": "^VIX", "name": "VIX"},
         {"symbol": "USDKRW=X", "name": "USDKRW"},
+        {"symbol": "CL=F", "name": "WTI"},
+        {"symbol": "EWY", "name": "EWY"},
+        {"symbol": "KORU", "name": "KORU"},
+        {"symbol": "SKHY", "name": "SKHY"},
     ]
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=9) as executor:
         q = list(executor.map(_fetch_quote, yf_items))
-    nq, spx, sox, vix, usdkrw = q
+    nq, spx, sox, vix, usdkrw, wti, ewy, koru, skhy = q
 
     def _kis_index_pct(index_code: str) -> float | None:
         try:
@@ -470,6 +474,63 @@ def fetch_edge_market_snapshot() -> dict:
         "sox_ret": sox.get("change_percent"),
         "vix": vix.get("price"),
         "usdkrw_ret": usdkrw.get("change_percent"),
+        "wti_ret": wti.get("change_percent"),
+        "ewy_ret": ewy.get("change_percent"),
+        "koru_ret": koru.get("change_percent"),
+        "skhy_ret": skhy.get("change_percent"),
         "k200f_day_ret": _kospi200_day_future().get("change_percent"),
         "k200f_night_ret": _kospi200_night_future().get("change_percent"),
     }
+
+
+# ── 미국 세션 확장(프리/애프터) 프록시 — 종가베팅 매수 게이트/아침 손절 강화용 ──
+# 종가베팅은 오후에 사서 익일 국장 시가까지 오버나잇 홀드한다. 익일 갭을 미리 읽으려면
+# "매수 시점 이후~국장 개장 전"의 미국 움직임이 필요한데, 미국 정규장 '일일 등락'은 지난밤
+# 세션이라 이미 우리 종가에 반영돼 있다. 그래서 여기선 두 가지를 함께 노출한다:
+#   · regular_ret  : 직전 정규장 종가 등락률(= 지난밤 세션 결과). 아침(monitor 08시대)에 오버나잇
+#                    US 결과로 그날 보유분 손절을 보수적으로 조일 때 쓴다.
+#   · extended_ret : 프리/애프터마켓 최근 등락률(정규장 종가 대비). NXT 매수(19:50=미국 프리마켓
+#                    열림) 시점의 '장 마감 후 최근 등락' — 매수 게이트의 순방향 신호.
+# 심볼: 반도체(SOXX·SK하이닉스 ADR SKHY) + 한국(EWY·KORU 3x). NQ 선물과 중복 아닌 섹터/국가 축.
+US_EXTENDED_SYMBOLS = ["SOXX", "SKHY", "EWY", "KORU"]
+_US_EXT_TTL_SEC = 60
+_us_ext_cache: dict = {"at": 0.0, "data": None}
+
+
+def _us_extended_one(symbol: str) -> dict:
+    """한 US 심볼의 정규장 등락 + 장 마감 후(프리/애프터) 최근 등락 + 시장 상태.
+
+    실패·필드 부재는 None(그 심볼만 제외, 소비자는 None 이면 그 축 미개입).
+    프리마켓이 살아있으면 extended_ret=프리마켓 등락(신선), 폐장이면 마지막 애프터마켓 등락.
+    """
+    out = {"symbol": symbol, "regular_ret": None, "extended_ret": None, "market_state": None}
+    try:
+        info = yf.Ticker(symbol).info
+    except Exception:
+        return out
+    out["market_state"] = info.get("marketState")
+    prev = info.get("regularMarketPreviousClose")
+    reg = info.get("regularMarketPrice")
+    if prev and reg is not None:
+        out["regular_ret"] = round((reg - prev) / prev * 100, 3)
+    # 장 마감 후 최근 등락: 프리마켓 우선(신선), 없으면 애프터마켓 — 정규장 종가(reg) 대비로 직접
+    # 계산한다(yfinance *ChangePercent 필드의 fraction/percent 단위 모호성 회피).
+    ext_price = info.get("preMarketPrice")
+    if ext_price is None:
+        ext_price = info.get("postMarketPrice")
+    if ext_price is not None and reg:
+        out["extended_ret"] = round((float(ext_price) - reg) / reg * 100, 3)
+    return out
+
+
+def fetch_us_extended() -> dict:
+    """US_EXTENDED_SYMBOLS 각각의 정규장/확장시간 등락 스냅샷 {symbol: {...}}. 60s TTL 캐시."""
+    import time
+    now = time.time()
+    if _us_ext_cache["data"] is not None and now - _us_ext_cache["at"] < _US_EXT_TTL_SEC:
+        return _us_ext_cache["data"]
+    with ThreadPoolExecutor(max_workers=len(US_EXTENDED_SYMBOLS)) as ex:
+        rows = list(ex.map(_us_extended_one, US_EXTENDED_SYMBOLS))
+    data = {r["symbol"]: r for r in rows}
+    _us_ext_cache.update(at=now, data=data)
+    return data

@@ -26,7 +26,18 @@ import time
 import logging
 from datetime import datetime
 
-from core.config import HARD_STOP_LOSS_PCT, TRAIL_PCT
+import requests
+
+from core.config import (
+    HARD_STOP_LOSS_PCT,
+    TRAIL_PCT,
+    US_STOP_TIGHTEN_ENABLED,
+    US_STOP_TIGHTEN_MAX,
+    US_STOP_MIN_PCT,
+    FUTURES_FLAT_BAND,
+    FUTURES_FULL_CUT_PCT,
+    JONGALAB_BASE_URL,
+)
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.fill_sync import sync_fills
@@ -50,6 +61,67 @@ def _beat(payload: dict) -> None:
         audit_log.append("monitor_poll", None, payload)
     except Exception as e:
         logger.warning("하트비트 기록 실패: %s", e)
+
+
+# ── 오버나잇 US 결과로 하드손절 강화 (KRX 보유분 대비책) ──
+# KRX 종가베팅 보유분은 매수(15:20) 시점 미국장이 다크라 futures_gate 의 US 확장 축을 못 받는다.
+# 대신 여기(08:01~) 시점엔 지난밤 미국 정규장이 이미 마감 → 그 결과(regular_ret)로 오버나잇
+# 리스크를 읽어, 급락 밤이었으면 그날 하드손절 폭을 더 좁게(보수적) 조인다. 축소 전용.
+_us_tighten_cache = {"computed": False, "pct": None}
+
+
+def _min_opt(*vals):
+    """None 무시 최소값(둘 다 None 이면 None) — 여러 프록시 중 가장 약세를 택해 보수적으로."""
+    present = [v for v in vals if v is not None]
+    return min(present) if present else None
+
+
+def _overnight_intensity(regular_ret) -> float:
+    """지난밤 US 정규장 하락 강도 0~1 (futures_gate 와 동일 램프: -FLAT_BAND=0 ~ -FULL_CUT_PCT=1)."""
+    if regular_ret is None or regular_ret >= -FUTURES_FLAT_BAND:
+        return 0.0
+    span = FUTURES_FULL_CUT_PCT - FUTURES_FLAT_BAND
+    if span <= 0:
+        return 1.0
+    return min(1.0, (-regular_ret - FUTURES_FLAT_BAND) / span)
+
+
+def effective_hard_stop_pct() -> float:
+    """오버나잇 US 정규장(반도체 min(SOXX,SKHY) + 한국 min(EWY,KORU/3)) 결과로 강화된 하드손절 %.
+
+    급락 밤일수록 손절을 좁게 — HARD_STOP_LOSS_PCT 에서 최대 US_STOP_TIGHTEN_MAX %p 줄이되
+    US_STOP_MIN_PCT 밑으론 안 내린다(축소 전용). 프로세스당 1회 계산·캐시(오버나잇 결과는 아침 내내 고정).
+    비활성/취득 실패면 기본 HARD_STOP_LOSS_PCT(미개입)."""
+    if not US_STOP_TIGHTEN_ENABLED:
+        return HARD_STOP_LOSS_PCT
+    if _us_tighten_cache["computed"]:
+        return _us_tighten_cache["pct"]
+    pct = HARD_STOP_LOSS_PCT
+    try:
+        resp = requests.get(f"{JONGALAB_BASE_URL}/api/us-extended", timeout=5)
+        resp.raise_for_status()
+        data = resp.json() or {}
+
+        def _reg(sym):
+            v = (data.get(sym) or {}).get("regular_ret")
+            return float(v) if v is not None else None
+
+        koru = _reg("KORU")
+        semis = _min_opt(_reg("SOXX"), _reg("SKHY"))
+        korea = _min_opt(_reg("EWY"), koru / 3.0 if koru is not None else None)
+        intensity = max(_overnight_intensity(semis), _overnight_intensity(korea))
+        pct = max(US_STOP_MIN_PCT, round(HARD_STOP_LOSS_PCT - US_STOP_TIGHTEN_MAX * intensity, 2))
+        if intensity > 0:
+            logger.info("오버나잇 US 하락(강도 %.2f) → 하드손절 %.1f%%→%.1f%% 강화 (반도체 %s / 한국 %s)",
+                        intensity, HARD_STOP_LOSS_PCT, pct, semis, korea)
+            audit_log.append("monitor_us_tighten", None, {
+                "intensity": round(intensity, 3), "base_pct": HARD_STOP_LOSS_PCT,
+                "eff_pct": pct, "semis_reg": semis, "korea_reg": korea})
+    except Exception as e:
+        logger.warning("오버나잇 US 조회 실패 — 하드손절 기본값 유지: %s", e)
+        pct = HARD_STOP_LOSS_PCT
+    _us_tighten_cache.update(computed=True, pct=pct)
+    return pct
 
 
 def in_window(now: datetime) -> bool:
@@ -117,6 +189,7 @@ def check_once(engine: ExecutionEngine) -> None:
     plans = {p["stk_cd"]: p for p in plan_repo.get_active_plans()}
     positions = {p["stk_cd"]: p for p in position_repo.get_open_positions()}
     vetoes = news_veto.get_severe_verdicts()  # 실패/비활성 → {} — 감시 루프는 계속 돈다
+    hard_pct = effective_hard_stop_pct()  # 오버나잇 US 급락이면 기본보다 좁게(보수적), 아니면 기본
 
     # plan 은 있는데 포지션이 사라진 경우 정리
     for stk_cd, plan in plans.items():
@@ -166,8 +239,9 @@ def check_once(engine: ExecutionEngine) -> None:
                     logger.warning("뉴스베토 매도 거부/미전송(또는 멱등 스킵) [%s] @%d — 다음 폴링 재시도",
                                    stk_cd, cur)
                 continue
-            # 1) 하드 손절(칼손절): 평단 대비 -HARD_STOP_LOSS_PCT% 이하면 plan 유무 무관 전량매도
-            hard_stop = round(pos["avg_price"] * (1 - HARD_STOP_LOSS_PCT / 100))
+            # 1) 하드 손절(칼손절): 평단 대비 -hard_pct% 이하면 plan 유무 무관 전량매도
+            #    hard_pct 는 오버나잇 US 급락 밤이면 기본(HARD_STOP_LOSS_PCT)보다 좁혀진 값.
+            hard_stop = round(pos["avg_price"] * (1 - hard_pct / 100))
             if cur <= hard_stop:
                 venue = resolve_sell_venue(engine, stk_cd, datetime.now())
                 if venue is None:
@@ -180,13 +254,13 @@ def check_once(engine: ExecutionEngine) -> None:
                                            dmst_stex_tp=venue, tag="hardstop")
                 audit_log.append("monitor_hardstop", stk_cd, {
                     "cur": cur, "hard_stop": hard_stop, "avg_price": pos["avg_price"],
-                    "qty": pos["qty"], "pct": HARD_STOP_LOSS_PCT, "sent": bool(sold)})
+                    "qty": pos["qty"], "pct": hard_pct, "sent": bool(sold)})
                 if sold and _exit_confirmed(stk_cd):
                     if plan:
                         plan_repo.deactivate(plan["trade_date"], stk_cd,
                                              f"하드손절 청산완료 @{cur}(<= {hard_stop}, 평단 {pos['avg_price']})")
                     logger.info("하드손절 청산완료 [%s] %d주 @%d (선 %d, 평단 %d, -%.1f%%)",
-                                stk_cd, pos["qty"], cur, hard_stop, pos["avg_price"], HARD_STOP_LOSS_PCT)
+                                stk_cd, pos["qty"], cur, hard_stop, pos["avg_price"], hard_pct)
                 elif sold:
                     logger.info("하드손절 매도 전송 [%s] @%d — 체결 미확인, 다음 폴링에서 재확인/재시도",
                                 stk_cd, cur)
