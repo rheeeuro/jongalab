@@ -14,6 +14,7 @@ import {
   STAT_META,
   PROMO_MIN_DAYS,
   isPromotionCandidate,
+  verifyProgress,
 } from "@/lib/edge";
 
 export function EdgeRuleCard({
@@ -32,15 +33,10 @@ export function EdgeRuleCard({
   const series = rule.daily.map((d) => d.mean_net_ret).filter((v): v is number => v !== null);
   const meanTone = retTone(s?.mean_net);
 
-  // 검증 진행바: 검증 횟수 n / 필요 횟수 min_sample (stats 미생성이면 0회로 취급)
-  const n = s?.n ?? 0;
+  // 검증 진행바: 검증 횟수 n / 필요 횟수 min_sample (stats 미생성이면 0회로 취급).
+  // 진행도 계산은 lib/edge.verifyProgress 단일 소스 — 목록 정렬과 같은 값을 쓴다.
+  const { n, nDays, progress } = verifyProgress(rule);
   const hasData = n > 0;
-  // 승격 게이트는 횟수(n≥min_sample)와 거래일(n_days≥PROMO_MIN_DAYS)을 모두 요구한다.
-  // 진행바는 둘 중 덜 찬 쪽으로 그려, 횟수만 40회를 넘겨도 거래일이 모자라면 '완료'로 보이지 않게 한다.
-  const nDays = s?.n_days ?? 0;
-  const cntPct = Math.min(100, Math.round((n / rule.min_sample) * 100));
-  const daysPct = Math.min(100, Math.round((nDays / PROMO_MIN_DAYS) * 100));
-  const progress = Math.min(cntPct, daysPct);
 
   return (
     <Link

@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { EdgeRuleWithDaily } from "@/types";
 import { EdgeSummaryStrip } from "@/components/EdgeSummaryStrip";
 import { EdgeRuleCard } from "@/components/EdgeRuleCard";
-import { ROLE_META } from "@/lib/edge";
+import { ROLE_META, verifyProgress } from "@/lib/edge";
 
 // 이 화면은 읽기 전용 — 실전 투입/종료 등 관리는 /admin/edge-rules(관리자 인증)에서만 한다.
 const GROUPS: { status: "live" | "candidate" | "retired"; label: string; desc: string }[] = [
@@ -76,7 +76,15 @@ export function EdgeBoard({ rules }: { rules: EdgeRuleWithDaily[] }) {
       )}
 
       {GROUPS.map(({ status, label, desc }) => {
-        const group = visible.filter((r) => r.status === status);
+        // 진행도(카드 진행바와 같은 값) 높은 전략부터 — 통과에 가까운 전략이 위로 온다.
+        // 동률이면 검증 횟수 많은 쪽 우선(적용 중처럼 모두 100%인 그룹의 안정적 순서용).
+        const group = visible
+          .filter((r) => r.status === status)
+          .sort((a, b) => {
+            const pa = verifyProgress(a);
+            const pb = verifyProgress(b);
+            return pb.progress - pa.progress || pb.n - pa.n;
+          });
         if (group.length === 0) return null;
         const cards = (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

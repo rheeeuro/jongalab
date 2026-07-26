@@ -222,7 +222,7 @@ def save_content_analysis(
         """
         cursor.execute(query, (
             external_id, source_name, title, content, score,
-            source_url, json.dumps(related_tickers), platform,
+            source_url, json.dumps(related_tickers, ensure_ascii=False), platform,
             ticker_sectors_json,
             tldr or None, tags_json, stock_calls_json,
         ))

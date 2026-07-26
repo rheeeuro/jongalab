@@ -80,13 +80,18 @@ def _kospi200_day_future() -> dict:
 
 
 def _kospi200_futures_sparkline() -> list[float] | None:
-    """코스피200 선물 근월물 일별 종가 스파크라인 (KIS REST). 실패 시 None."""
+    """코스피200 선물 근월물 분봉 종가 스파크라인 (KIS REST). 당일 1분봉 우선,
+    비었으면(장전·휴장 등) 일봉으로 폴백. 실패 시 None."""
     try:
         from core.kis_client import kospi200_front_month_code
-        closes = _get_kis().inquire_futures_daily_closes(kospi200_front_month_code())
+        code = kospi200_front_month_code()
+        kis = _get_kis()
+        closes = kis.inquire_futures_minute_closes(code)
+        if not closes or len(closes) < 2:
+            closes = kis.inquire_futures_daily_closes(code)  # 폴백: 일봉
     except Exception:
         return None
-    return closes[-30:] if closes and len(closes) >= 2 else None
+    return closes[-80:] if closes and len(closes) >= 2 else None
 
 
 def _parse_num(val) -> float:
@@ -184,23 +189,28 @@ def _safe_float(val) -> float | None:
     return round(f, 2)
 
 
-def _closes_to_sparkline(hist) -> list[float] | None:
-    """일봉 종가 시계열 → 카드 배경 스파크라인용 float 리스트 (최근 30개)."""
+def _closes_to_sparkline(hist, keep: int = 80) -> list[float] | None:
+    """종가 시계열 → 카드 배경 스파크라인용 float 리스트 (최근 keep개)."""
     try:
         closes = [_safe_float(c) for c in hist["Close"].tolist()]
     except Exception:
         return None
     closes = [c for c in closes if c is not None]
-    return closes[-30:] if len(closes) >= 2 else None
+    return closes[-keep:] if len(closes) >= 2 else None
 
 
 def _fetch_sparkline(symbol: str) -> list[float] | None:
-    """yfinance 일봉(1개월) 종가 스파크라인. 커스텀 심볼/실패 시 None."""
+    """yfinance 분봉(최근 1거래일 5분봉, 프리·애프터 포함) 종가 스파크라인.
+
+    상세 차트와 동일하게 카드 미니 스파크라인도 분봉으로 그린다. 분봉이 빈 심볼(장이 오래
+    닫혀 최근 세션이 없는 경우 등)은 일봉(1개월)으로 폴백한다. 커스텀 심볼/실패 시 None."""
     if symbol in _NO_SPARKLINE_SYMBOLS:
         return None
     try:
-        hist = yf.Ticker(symbol).history(period="1mo")
-        if hist.empty:
+        hist = yf.Ticker(symbol).history(period="1d", interval="5m", prepost=True)
+        if hist is None or hist.empty:
+            hist = yf.Ticker(symbol).history(period="1mo")  # 폴백: 일봉
+        if hist is None or hist.empty:
             return None
         return _closes_to_sparkline(hist)
     except Exception:
@@ -279,7 +289,8 @@ def _fetch_quote(item: dict) -> dict:
         current = _safe_float(hist["Close"].iloc[-1])
         if current is None:
             return empty
-        sparkline = _closes_to_sparkline(hist)
+        # 가격·일일 등락은 일봉(hist) 기준 그대로, 미니 스파크라인만 분봉으로.
+        sparkline = _fetch_sparkline(item["symbol"])
         prev = _safe_float(hist["Close"].iloc[-2]) if len(hist) >= 2 else current
         if prev is None or prev == 0:
             return {**item, "price": current, "change": None, "change_percent": None, "sparkline": sparkline}

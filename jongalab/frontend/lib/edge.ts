@@ -187,6 +187,17 @@ export const TONE_FILL: Record<Tone, string> = {
   flat: '#94a3b8',
 };
 
+// 검증 진행도(0~100) — 승격 게이트는 횟수(n≥min_sample)와 거래일(n_days≥PROMO_MIN_DAYS)을 모두
+// 요구하므로 둘 중 덜 찬 쪽으로 본다(횟수만 채워도 '완료'로 보이지 않게). 카드 진행바와 목록
+// 정렬이 같은 값을 쓰도록 여기 한 곳에서 계산한다.
+export function verifyProgress(rule: EdgeRule): { n: number; nDays: number; progress: number } {
+  const n = rule.stats?.n ?? 0;
+  const nDays = rule.stats?.n_days ?? 0;
+  const cntPct = Math.min(100, Math.round((n / rule.min_sample) * 100));
+  const daysPct = Math.min(100, Math.round((nDays / PROMO_MIN_DAYS) * 100));
+  return { n, nDays, progress: Math.min(cntPct, daysPct) };
+}
+
 // 검증 통과 신호: 서버(core/edge_policy 게이트)가 계산해 stats.promo_eligible 에 저장한 값을
 // 렌더링만 한다. 조건을 프론트에서 재계산하지 않는다(단일 소스).
 export function isPromotionCandidate(rule: EdgeRule): boolean {

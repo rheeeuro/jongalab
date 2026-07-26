@@ -38,6 +38,8 @@ _INDEX_TR_ID = "FHPUP02100000"
 _INDEX_PATH = "/uapi/domestic-stock/v1/quotations/inquire-index-price"
 _FUTURES_CHART_TR_ID = "FHKIF03020100"
 _FUTURES_CHART_PATH = "/uapi/domestic-futureoption/v1/quotations/inquire-daily-fuopchartprice"
+_FUTURES_MIN_TR_ID = "FHKIF03020200"
+_FUTURES_MIN_PATH = "/uapi/domestic-futureoption/v1/quotations/inquire-time-fuopchartprice"
 
 
 def _is_token_expired(expires_dt: str | None) -> bool:
@@ -224,6 +226,47 @@ class KisRestClient:
                 dated.append((d, round(close, 2)))
         dated.sort(key=lambda x: x[0])  # 날짜 오름차순(오래된→최신)
         return [c for _, c in dated][-count:]
+
+    def inquire_futures_minute_closes(self, symbol: str, count: int = 80) -> list[float]:
+        """국내선물 당일 분봉 종가 시계열 (오래된→최신 순). 카드 배경 분봉 스파크라인용.
+
+        inquire-time-fuopchartprice(FHKIF03020200) 1분봉 output2 에서 종가(futs_prpr)만
+        추출한다. 이 TR 은 기준시각(FID_INPUT_HOUR_1)에서 과거로 ~120봉을 준다. 실패/무데이터
+        시 빈 리스트(호출부에서 일봉 폴백).
+        """
+        self.ensure_token()
+        url = f"{self.base_url}{_FUTURES_MIN_PATH}"
+        headers = {
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.secret_key,
+            "tr_id": _FUTURES_MIN_TR_ID,
+            "custtype": "P",
+            "Content-Type": "application/json; charset=UTF-8",
+        }
+        now = datetime.now()
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "F",
+            "FID_INPUT_ISCD": symbol,
+            "FID_HOUR_CLS_CODE": "60",          # 60초 = 1분봉
+            "FID_PW_DATA_INCU_YN": "Y",         # 과거(장 시작~) 데이터 포함
+            "FID_FAKE_TICK_INCU_YN": "N",
+            "FID_INPUT_DATE_1": now.strftime("%Y%m%d"),  # 기준일(필수)
+            "FID_INPUT_HOUR_1": now.strftime("%H%M%S"),  # 기준시각(현재에서 과거로 ~120봉)
+        }
+        resp = self.session.get(url, headers=headers, params=params, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        rows = resp.json().get("output2") or []
+
+        timed = []
+        for row in rows:
+            close = _to_float(row.get("futs_prpr"))
+            t = row.get("stck_cntg_hour") or ""
+            d = row.get("stck_bsop_date") or ""
+            if close is not None and close != 0 and t:
+                timed.append(((d, t), round(close, 2)))
+        timed.sort(key=lambda x: x[0])  # (일자, 시각) 오름차순(오래된→최신)
+        return [c for _, c in timed][-count:]
 
     def inquire_index_price(self, index_code: str) -> dict | None:
         """국내 업종/지수 현재가 조회. {price, change, change_percent} 또는 None.

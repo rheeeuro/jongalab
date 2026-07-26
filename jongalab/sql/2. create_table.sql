@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS content_analysis (
     sentiment_score INT DEFAULT 50,           -- 감성 점수 (0~100, 기본 50=중립)
     platform VARCHAR(20) DEFAULT 'youtube',   -- 'youtube', 'telegram', 'news'
     source_url VARCHAR(255),                  -- 원문 링크
-    related_tickers VARCHAR(255) DEFAULT NULL, -- JSON 배열 [{"ticker":"...", "name":"..."}]
-    ticker_sectors VARCHAR(500) DEFAULT NULL COMMENT 'related_tickers와 1:1 대응 [{"ticker":"...","sector":"..."}]',
+    related_tickers TEXT DEFAULT NULL, -- JSON 배열 [{"ticker":"...", "name":"..."}] (종목 다수 시 255 초과 → TEXT)
+    ticker_sectors TEXT DEFAULT NULL COMMENT 'related_tickers와 1:1 대응 [{"ticker":"...","sector":"..."}]',
     tldr VARCHAR(255) DEFAULT NULL COMMENT '한 줄 대표 요약(카드 헤드라인)',
     tags JSON DEFAULT NULL COMMENT '테마 해시태그 배열 ["#반도체", ...]',
     stock_calls JSON DEFAULT NULL COMMENT '종목별 판단 [{"name","ticker","stance","conviction","horizon","reason"}]',
