@@ -23,6 +23,8 @@ import {
   STATUS_LABEL,
   STATUS_BADGE,
   STATUS_HELP,
+  MEASURE_HELP,
+  isMeasurementOnly,
   STAT_META,
   exitLabelText,
   condText,
@@ -84,6 +86,8 @@ export function EdgeRuleDetailContent({
   const s = rule.stats;
   const fam = familyMeta(rule.family);
   const role = roleMeta(rule.role);
+  // 측정용(기준선)은 검증·실전 투입 대상이 아니라 상태 배지·상태 설명을 다르게 낸다.
+  const measure = isMeasurementOnly(rule);
   const chartData = rule.daily.map((d) => ({
     date: d.report_date.slice(5),
     mean: d.mean_net_ret,
@@ -93,13 +97,16 @@ export function EdgeRuleDetailContent({
 
   return (
     <div className="space-y-5">
-      <header className={`rounded-2xl border border-slate-200 border-l-4 bg-white p-5 shadow-sm sm:p-6 dark:border-slate-800 dark:bg-[#17171C] ${ACCENT[rule.status]}`}>
+      <header className={`rounded-2xl border border-slate-200 border-l-4 bg-white p-5 shadow-sm sm:p-6 dark:border-slate-800 dark:bg-[#17171C] ${measure ? "border-l-sky-400" : ACCENT[rule.status]}`}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[rule.status]}`}>
-                {STATUS_LABEL[rule.status]}
-              </span>
+              {/* 측정용은 검증/투입 대상이 아니라 상태를 숨긴다(단, '종료'는 수명 정보라 유지) */}
+              {(!measure || rule.status === "retired") && (
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[rule.status]}`}>
+                  {STATUS_LABEL[rule.status]}
+                </span>
+              )}
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                 {fam.label}
               </span>
@@ -117,7 +124,7 @@ export function EdgeRuleDetailContent({
           {action}
         </div>
         <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 dark:border-slate-800 dark:bg-[#202027] dark:text-slate-400">
-          {STATUS_HELP[rule.status]}
+          {measure ? MEASURE_HELP : STATUS_HELP[rule.status]}
         </p>
       </header>
 

@@ -198,10 +198,20 @@ export function verifyProgress(rule: EdgeRule): { n: number; nDays: number; prog
   return { n, nDays, progress: Math.min(cntPct, daysPct) };
 }
 
+// ── 측정용(benchmark) 룰: '검증 → 실전 투입' 파이프라인 밖 ──
+// 선정에 쓰지 않는 대조군·계측 도구라 승격 게이트가 전면 면제되고(promo_eligible 이 늘 true),
+// rule_evaluator 도 승격/강등 알림에서 제외한다. 따라서 상태(검증 중/적용 중)·검증 진행도·
+// '검증 통과' 표기를 화면에서 모두 숨긴다 — 통과할 관문이 없는데 진행률을 보여주면 오해만 준다.
+// 이 판정을 쓰는 곳: 카드/상세/요약 타일/관리 페이지(모두 이 헬퍼 경유).
+export function isMeasurementOnly(rule: EdgeRule): boolean {
+  return rule.role === 'benchmark';
+}
+
+export const MEASURE_HELP =
+  '성적 비교용 기준선입니다. 종목 선정에는 쓰지 않아 검증·실전 투입 대상이 아닙니다.';
+
 // 검증 통과 신호: 서버(core/edge_policy 게이트)가 계산해 stats.promo_eligible 에 저장한 값을
 // 렌더링만 한다. 조건을 프론트에서 재계산하지 않는다(단일 소스).
 export function isPromotionCandidate(rule: EdgeRule): boolean {
-  // benchmark(측정용)는 게이트 전면 면제라 promo_eligible 이 늘 true — 실전 투입 대상이
-  // 아니므로 '검증 통과' 배지·투입 대기 목록에서 제외한다(기준선 교체는 API 로 수동 수행).
-  return rule.status === 'candidate' && rule.stats?.promo_eligible === true && rule.role !== 'benchmark';
+  return rule.status === 'candidate' && rule.stats?.promo_eligible === true && !isMeasurementOnly(rule);
 }

@@ -14,6 +14,7 @@ import {
   STAT_META,
   PROMO_MIN_DAYS,
   isPromotionCandidate,
+  isMeasurementOnly,
   verifyProgress,
 } from "@/lib/edge";
 
@@ -25,7 +26,9 @@ export function EdgeRuleCard({
   const s = rule.stats;
   const fam = familyMeta(rule.family);
   const role = roleMeta(rule.role);
-  const isLive = rule.status === "live";
+  // 측정용(기준선)은 선정에 반영되지 않으므로 '적용 중' 강조색·상태·검증 진행도를 쓰지 않는다.
+  const measure = isMeasurementOnly(rule);
+  const isLive = rule.status === "live" && !measure;
   const isRetired = rule.status === "retired";
   const promo = isPromotionCandidate(rule);
 
@@ -63,9 +66,12 @@ export function EdgeRuleCard({
           </span>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[rule.status]}`}>
-            {STATUS_LABEL[rule.status]}
-          </span>
+          {/* 측정용은 검증/투입 대상이 아니라 상태를 숨긴다(단, '종료'는 수명 정보라 유지) */}
+          {(!measure || isRetired) && (
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[rule.status]}`}>
+              {STATUS_LABEL[rule.status]}
+            </span>
+          )}
           {promo && (
             <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-600 dark:bg-rose-500/15 dark:text-rose-300">
               검증 통과
@@ -121,8 +127,8 @@ export function EdgeRuleCard({
         )}
       </div>
 
-      {/* 검증 진행바 — 검증 중 카드는 기록이 없어도(0회) 항상 표시 */}
-      {rule.status === "candidate" && (
+      {/* 검증 진행바 — 검증 중 카드는 기록이 없어도(0회) 항상 표시. 측정용은 통과할 관문이 없어 제외 */}
+      {rule.status === "candidate" && !measure && (
         <div className="mt-0.5">
           <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500">
             <span>검증 진행</span>

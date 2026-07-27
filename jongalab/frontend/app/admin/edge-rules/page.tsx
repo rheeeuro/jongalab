@@ -13,6 +13,8 @@ import {
   STATUS_BADGE,
   STAT_META,
   isPromotionCandidate,
+  isMeasurementOnly,
+  ROLE_META,
 } from "@/lib/edge";
 
 /**
@@ -84,9 +86,13 @@ export default function EdgeRulesAdminPage() {
     );
   }
 
-  const ready = rules.filter(isPromotionCandidate);
-  const live = rules.filter((r) => r.status === "live");
-  const verifying = rules.filter((r) => r.status === "candidate" && !isPromotionCandidate(r));
+  // 측정용(기준선)은 검증→투입 파이프라인 밖 — 투입 대기/적용 중/검증 중 어디에도 넣지 않고
+  // 별도 섹션에서 종료만 가능하게 한다(기준선 교체는 의도적 수동 작업).
+  const measured = rules.filter((r) => isMeasurementOnly(r) && r.status !== "retired");
+  const pipeline = rules.filter((r) => !isMeasurementOnly(r));
+  const ready = pipeline.filter(isPromotionCandidate);
+  const live = pipeline.filter((r) => r.status === "live");
+  const verifying = pipeline.filter((r) => r.status === "candidate" && !isPromotionCandidate(r));
   const retired = rules.filter((r) => r.status === "retired");
 
   return (
@@ -169,7 +175,25 @@ export default function EdgeRulesAdminPage() {
         )}
       />
 
-      {/* ④ 종료됨 (접힘) */}
+      {/* ④ 측정용 기준선 — 검증/투입 대상이 아니라 성적만 보고, 교체 시에만 종료 */}
+      {measured.length > 0 && (
+        <Section
+          title={`${ROLE_META.benchmark.label} 기준선 (선정에 미반영)`}
+          empty=""
+          rules={measured}
+          render={(r) => (
+            <ActionButton
+              label="종료"
+              icon={<Archive className="h-3.5 w-3.5" />}
+              busy={acting === r.id}
+              onClick={() => act(r, "retire")}
+              variant="ghost"
+            />
+          )}
+        />
+      )}
+
+      {/* ⑤ 종료됨 (접힘) */}
       {retired.length > 0 && (
         <details>
           <summary className="cursor-pointer list-none text-sm font-bold text-slate-400">
@@ -232,9 +256,12 @@ function RuleRow({ rule, action }: { rule: EdgeRule; action?: React.ReactNode })
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{rule.title ?? rule.name}</span>
-          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[rule.status]}`}>
-            {STATUS_LABEL[rule.status]}
-          </span>
+          {/* 측정용은 검증/투입 대상이 아니라 상태를 숨긴다(단, '종료'는 수명 정보라 유지) */}
+          {(!isMeasurementOnly(rule) || rule.status === "retired") && (
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[rule.status]}`}>
+              {STATUS_LABEL[rule.status]}
+            </span>
+          )}
           <span className="text-[10px] font-semibold text-slate-400">{fam.label}</span>
           <span className={`rounded-full px-1.5 py-px text-[10px] font-bold ${role.badge}`} title={role.hint}>
             {role.label}

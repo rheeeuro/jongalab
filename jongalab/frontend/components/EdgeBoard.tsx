@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { EdgeRuleWithDaily } from "@/types";
 import { EdgeSummaryStrip } from "@/components/EdgeSummaryStrip";
 import { EdgeRuleCard } from "@/components/EdgeRuleCard";
-import { ROLE_META, verifyProgress } from "@/lib/edge";
+import { ROLE_META, verifyProgress, isMeasurementOnly } from "@/lib/edge";
 
 // 이 화면은 읽기 전용 — 실전 투입/종료 등 관리는 /admin/edge-rules(관리자 인증)에서만 한다.
 const GROUPS: { status: "live" | "candidate" | "retired"; label: string; desc: string }[] = [
@@ -37,6 +37,11 @@ export function EdgeBoard({ rules }: { rules: EdgeRuleWithDaily[] }) {
 
   const visible = roleTab === "all" ? rules : rules.filter((r) => r.role === roleTab);
   const activeHint = ROLE_TABS.find((t) => t.key === roleTab)?.hint;
+
+  // 측정용(기준선)은 '적용 중/검증 중' 파이프라인 밖이라 상태 그룹에서 빼고 따로 모은다
+  // (검증 통과할 관문이 없는데 '검증 중' 아래 놓이면 검증 대기처럼 읽힌다).
+  const measured = visible.filter(isMeasurementOnly);
+  const pipeline = visible.filter((r) => !isMeasurementOnly(r));
 
   return (
     <div className="space-y-6">
@@ -78,7 +83,7 @@ export function EdgeBoard({ rules }: { rules: EdgeRuleWithDaily[] }) {
       {GROUPS.map(({ status, label, desc }) => {
         // 진행도(카드 진행바와 같은 값) 높은 전략부터 — 통과에 가까운 전략이 위로 온다.
         // 동률이면 검증 횟수 많은 쪽 우선(적용 중처럼 모두 100%인 그룹의 안정적 순서용).
-        const group = visible
+        const group = pipeline
           .filter((r) => r.status === status)
           .sort((a, b) => {
             const pa = verifyProgress(a);
@@ -120,6 +125,28 @@ export function EdgeBoard({ rules }: { rules: EdgeRuleWithDaily[] }) {
           </section>
         );
       })}
+
+      {/* 측정용 기준선 — 상태·검증 진행도 없이 성적만 본다(카드에서도 숨김) */}
+      {measured.length > 0 && (
+        <section>
+          <h2 className="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200">
+              {ROLE_META.benchmark.label} 기준선
+              <span className="rounded-full bg-slate-100 px-1.5 text-xs text-slate-500 dark:bg-slate-800">
+                {measured.length}
+              </span>
+            </span>
+            <span className="text-xs text-slate-400 dark:text-slate-500">{ROLE_META.benchmark.hint}</span>
+          </h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[...measured]
+              .sort((a, b) => (b.stats?.n ?? 0) - (a.stats?.n ?? 0))
+              .map((r) => (
+                <EdgeRuleCard key={r.id} rule={r} />
+              ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
