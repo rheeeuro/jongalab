@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from routers.admin import require_admin
 from core.edge_predicate import validate_predicate, PredicateError
-from core.edge_policy import ROLES, FAMILIES, rule_role, check_promotion
+from core.edge_policy import ROLES, FAMILIES, rule_role, check_promotion, decision_stage
 from core.repository.edge_rule import (
     create_rule,
     list_rules,
@@ -125,15 +125,36 @@ def promote_edge_rule(rule_id: int):
     """candidate → live 승격. 정량 게이트 미충족 시 409(force 불가).
 
     게이트 판정은 core.edge_policy.check_promotion **단일 소스**(라우터·평가기·프론트 공유):
-    (selector) n≥min_sample · ci_low>0 · live 대조군(role=benchmark) 우위 —
-    대조군 부재/미평가면 fail-closed(승격 불가). (selector·veto) 선정 시점 실행 가능성.
-    여기에 라우터만 시점 의존 운영 제약(상태=candidate, 월 승격 상한)을 더한다.
+    (selector) 거래일 수 · ci_low_exc>0 · 일 클러스터 t(초과, t분포 임계값) · live 대조군
+    (role=benchmark) 우위 — 대조군 부재/미평가면 fail-closed(승격 불가).
+    (selector·veto) 선정 시점 실행 가능성.
+    여기에 라우터만 시점 의존 운영 제약(상태=candidate, 월 승격 상한, **판정 일정**)을 더한다.
     """
     rule = get_rule(rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="rule 을 찾을 수 없습니다.")
     if rule["status"] != "candidate":
         raise HTTPException(status_code=409, detail=f"candidate 상태만 승격할 수 있습니다(현재 {rule['status']}).")
+
+    # 판정 일정 규율(sql/39) — 확인창까지 통과한 rule 만 승격한다. 이걸 안 막으면 stats 는
+    # 매일 재계산되므로, 판정에서 탈락한 rule 이 나중에 우연히 게이트를 통과하는 날 승격할 수
+    # 있어 '시험 횟수 1회' 규율이 무의미해진다(오탐 2.4% → 22% 로 되돌아감).
+    decision = rule.get("decision") or {}
+    verdict = decision.get("verdict")
+    stage = decision_stage(rule)
+    if stage != "decided":
+        raise HTTPException(
+            status_code=409,
+            detail=(f"판정 미완료(현재 단계: {stage}) — 발견 후 확인창의 새 표본으로 확증돼야 "
+                    "승격할 수 있습니다. 매일 재평가로 통과를 노리는 경로를 막는 규율입니다."),
+        )
+    if verdict != "confirmed":
+        raise HTTPException(
+            status_code=409,
+            detail=(f"판정 결과 '{verdict}' — 승격 불가. 사유: "
+                    + " / ".join((decision.get("confirm") or {}).get("reasons")
+                                 or (decision.get("discovery") or {}).get("reasons") or ["기록 없음"])),
+        )
 
     now = datetime.now()
     if count_promoted_in_month(now.year, now.month) >= _MONTHLY_PROMOTE_CAP:

@@ -19,7 +19,7 @@ ALLOWED_EXIT_LABELS = (
 
 def _serialize(row: dict) -> dict:
     """JSON 컬럼 파싱 + 날짜/Decimal 직렬화."""
-    for k in ("predicate", "stats", "matched"):
+    for k in ("predicate", "stats", "decision", "matched"):
         v = row.get(k)
         if isinstance(v, str):
             try:
@@ -97,6 +97,17 @@ def update_rule_stats(rule_id: int, stats: dict) -> None:
         cursor.execute(
             "UPDATE edge_rule SET stats = %s WHERE id = %s",
             (json.dumps(stats, ensure_ascii=False, default=str), rule_id),
+        )
+        conn.commit()
+
+
+def update_rule_decision(rule_id: int, decision: dict) -> None:
+    """판정 기록 갱신(sql/39). stats 와 달리 **재계산 대상이 아닌 영구 기록**이다 —
+    한 번 판정한 rule 을 다시 시험하지 않기 위한 근거이므로 덮어쓸 때 주의한다."""
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "UPDATE edge_rule SET decision = %s WHERE id = %s",
+            (json.dumps(decision, ensure_ascii=False, default=str), rule_id),
         )
         conn.commit()
 

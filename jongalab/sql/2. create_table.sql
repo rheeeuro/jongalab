@@ -339,9 +339,10 @@ CREATE TABLE IF NOT EXISTS edge_rule (
     predicate     JSON NOT NULL,                     -- 조건 목록(AND 결합, edge_predicate DSL)
     exit_label    VARCHAR(30) NOT NULL DEFAULT 'exec_leg_ret',  -- 채점에 쓸 결과 라벨 컬럼
     status        VARCHAR(10) NOT NULL DEFAULT 'candidate',      -- candidate / live / retired
-    min_sample    INT NOT NULL DEFAULT 40,           -- 승격 심사 최소 표본(매칭 종목-일)
+    min_sample    INT NOT NULL DEFAULT 40,           -- 참고값(매칭 종목-일) — 2026-07-28 승격 게이트에서 제외(단위가 거래일과 어긋나 좁은 룰을 막았음)
     registered_at DATE NOT NULL,                     -- ★ 사전 등록일 — 이 날짜 이후 표본만 승격 판정
-    stats         JSON DEFAULT NULL,                 -- evaluator 캐시(n, mean_net, win_rate, std, ci_low, worst_low_ret, updated_through)
+    stats         JSON DEFAULT NULL,                 -- evaluator 캐시(n, mean_net, win_rate, std, ci_low, 초과 계열 mean_exc/ci_low_exc/t_days_exc, worst_low_ret, updated_through)
+    decision      JSON DEFAULT NULL,                 -- 판정 기록(sql/39) {discovery, confirm, decided_at, verdict} — 재시험 금지용 영구 기록
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     promoted_at   TIMESTAMP NULL DEFAULT NULL,
     retired_at    TIMESTAMP NULL DEFAULT NULL,

@@ -110,6 +110,77 @@ PROMO_MIN_DAYS = 10
 # 꼬리 때문에 유지가 맞았다). 평균 t 를 요구하면 정작 필요한 보호 veto 가 후보로도 못 올라온다.
 PROMO_MIN_DAY_T = 1.65
 
+# 단측 95% t 임계값 (자유도 → 임계값). 거래일 표본이 작을 때 정규 근사 1.65 는 **너무 관대**하다
+# (거래일 5일=df4 면 실제 임계값 2.13). 소표본에서 오히려 엄격해지도록 t 분포를 쓴다.
+# df 가 표에 없으면 그보다 큰 첫 항목(=더 보수적인 값)을 쓰고, 120 초과는 정규 극한 1.645.
+_T_CRIT_ONE_SIDED_95: dict[int, float] = {
+    1: 6.314, 2: 2.920, 3: 2.353, 4: 2.132, 5: 2.015, 6: 1.943, 7: 1.895, 8: 1.860,
+    9: 1.833, 10: 1.812, 11: 1.796, 12: 1.782, 13: 1.771, 14: 1.761, 15: 1.753,
+    16: 1.746, 17: 1.740, 18: 1.734, 19: 1.729, 20: 1.725, 25: 1.708, 30: 1.697,
+    40: 1.684, 60: 1.671, 120: 1.658,
+}
+
+
+def day_t_threshold(n_days: int) -> float | None:
+    """거래일 n_days 표본에 적용할 일 클러스터 t 문턱. n_days<2 면 검정 불가(None)."""
+    df = (n_days or 0) - 1
+    if df < 1:
+        return None
+    for k in sorted(_T_CRIT_ONE_SIDED_95):
+        if df <= k:
+            return _T_CRIT_ONE_SIDED_95[k]
+    return 1.645
+
+
+# ── 판정 일정 (2026-07-28) — '매일 재평가'가 게이트를 무력화하는 문제의 해법 ──
+# 게이트를 매 평일 다시 검사하면 룰 하나가 무기한 재시험을 치게 된다(optional stopping).
+# 시뮬레이션(일간 초과 sd 2.43): 진짜 엣지 0 인 룰의 오탐이 명목 5% → **22%**, candidate 24종이면
+# 기대 오탐 5.2건·최소 1건 발생 확률 99.8%. 롤링 창은 해법이 아니라 악화다(창 크기가 고정이라
+# W일마다 새 시험 → 250거래일 오탐 91%). 해법은 **시험 횟수를 묶는 것**:
+#   발견(1~DISCOVERY_DAYS) 에서 통계 게이트 → 통과 시 확인창(다음 CONFIRM_DAYS)의
+#   **발견에 쓰지 않은 새 표본**으로 재확인 → 확인일에 단 1회 판정.
+# 오탐 22% → 2.4%. 검출력은 떨어지지만(+1%/일 88%→32%) 초과수익 채점이 손실의 절반을 되사온다.
+# 전이는 여전히 관리자 수동 — 여기서 자동 retire 하지 않는다(판정만 기록하고 알림을 멈춘다).
+DISCOVERY_DAYS = 10
+CONFIRM_DAYS = 10
+
+# 확인창 통과 기준 — 발견 단계만큼 엄격하게 요구하면 진짜 엣지도 대부분 탈락한다(검출력 붕괴).
+# '새 표본에서도 초과수익이 양수'만 요구한다. 이 조합이 오탐 2.4%·검출력 32%(+1%/일)다.
+CONFIRM_MIN_MEAN_EXC = 0.0
+
+DECISION_STAGES: tuple[str, ...] = ("discovery", "confirming", "decided")
+
+
+def decision_stage(rule: dict) -> str:
+    """rule 이 판정 일정상 어느 단계인가 — decision 컬럼(기록)만 보고 판단한다.
+
+    discovery  : 아직 발견 판정 전
+    confirming : 발견 통과, 확인창 판정 대기
+    decided    : 판정 완료(통과/탈락 모두) — 다시 검사하지 않는다(재시험 금지)
+    """
+    d = rule.get("decision") or {}
+    if d.get("decided_at"):
+        return "decided"
+    if d.get("discovery", {}).get("pass"):
+        return "confirming"
+    if d.get("discovery"):
+        return "decided"   # 발견에서 탈락 = 종결
+    return "discovery"
+
+
+def decision_due(rule: dict, n_days: int) -> str | None:
+    """지금 판정해야 하는가. 반환: 'discovery' | 'confirm' | None(대기/종결).
+
+    n_days 는 라벨 표본이 있는 누적 거래일 수(stats.n_days). 판정 시점을 **거래일 수**로
+    잡는 이유: 달력일로 잡으면 매칭이 드문 rule 은 표본 없이 판정일이 지나간다.
+    """
+    stage = decision_stage(rule)
+    if stage == "discovery" and n_days >= DISCOVERY_DAYS:
+        return "discovery"
+    if stage == "confirming" and n_days >= DISCOVERY_DAYS + CONFIRM_DAYS:
+        return "confirm"
+    return None
+
 
 def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
     """승격 자격 판정 — 라우터(409 사유)·평가기(알림·stats.promo_eligible)가 공유하는 단일 게이트.
@@ -131,16 +202,18 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
     # 통계 게이트 — selector 는 기대값 전체 검증, benchmark 는 실탄이 아니라 기준선 교체라 면제.
     # veto 는 아래 별도의 최소 실익 게이트만 적용한다.
     if role == "selector":
-        n = stats.get("n") or 0
         # 통계 유의성은 **초과 계열**(유니버스 자기제외 대비)로 본다 — 같은 날 시장 무브를
         # 걷어내야 "우연이 아닌가"에 답이 된다. 반면 아래 '대조군 우위'는 **원시** mean_net
         # 으로 남긴다: "현행 선정보다 나은가"는 절대 순수익으로 물어야 결정에 쓰인다.
         ci_low = stats.get("ci_low_exc")
         mean_net = stats.get("mean_net")
-        min_sample = rule.get("min_sample") or 0
-        if n < min_sample:
-            stat_reasons.append(f"표본 부족: n={n} < min_sample={min_sample}")
         n_days = stats.get("n_days") or 0
+        # **min_sample(종목-일)은 게이트에서 뺐다**(2026-07-28, 항목 ③). 이 프로젝트는 이미
+        # "실효 표본은 거래일"이라고 결론냈는데(PROMO_MIN_DAYS·t_days) min_sample 만 종목-일
+        # 단위로 남아 단위가 어긋났고, 그 결과 **통계적으로 가장 강한 좁은 룰들을 막고 있었다**
+        # (f5_breakout_structure t=2.08·n=4, f4_theme_follower t=2.76·n=6 — 하루 1~2종목만
+        # 매칭하는 룰은 n=40 을 채우려면 30거래일 이상 걸린다). 표본 규율은 아래 거래일 수 +
+        # 거래일 자유도를 반영한 t 문턱이 담당한다. min_sample 컬럼은 참고값으로 남긴다.
         if n_days < PROMO_MIN_DAYS:
             stat_reasons.append(
                 f"거래일 부족: n_days={n_days} < {PROMO_MIN_DAYS} — 같은 날 표본은 "
@@ -148,13 +221,16 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
             )
         if ci_low is None or ci_low <= 0:
             stat_reasons.append(f"신뢰구간 하한 미충족: ci_low_exc={ci_low}(>0 필요)")
-        # 일 클러스터 t — ci_low(종목-일 iid)의 과신을 거래일 단위로 교정. None(거래일 1일 등
-        # 분산 추정 불가, 초과 표본 부재)은 fail-closed: 규율이 조용히 증발하는 fail-open 방지.
+        # 일 클러스터 t — ci_low(종목-일 iid)의 과신을 거래일 단위로 교정. 문턱은 고정 1.65 가
+        # 아니라 **거래일 자유도의 t 분포 임계값**을 쓴다(소표본에서 1.65 는 너무 관대 — 거래일
+        # 10일이면 1.833). None(분산 추정 불가·초과 표본 부재)은 fail-closed.
         t_days = stats.get("t_days_exc")
-        if t_days is None or t_days < PROMO_MIN_DAY_T:
+        t_need = day_t_threshold(n_days) or PROMO_MIN_DAY_T
+        if t_days is None or t_days < t_need:
             stat_reasons.append(
-                f"일 클러스터 t 미충족: t_days_exc={t_days}(>={PROMO_MIN_DAY_T} 필요) — 같은 날 "
-                "종목은 시장 무브로 상관되어 거래일을 관측 단위로 묶어야 실효 유의성이 나온다"
+                f"일 클러스터 t 미충족: t_days_exc={t_days}(>={t_need} 필요, 거래일 {n_days}일 "
+                "자유도 기준) — 같은 날 종목은 시장 무브로 상관되어 거래일을 관측 단위로 묶어야 "
+                "실효 유의성이 나온다"
             )
         # 대조군 우위 — live benchmark 의 mean_net 최대값 이상. 대조군이 없거나 미평가면
         # fail-closed(승격 불가): '대조군 우위' 규율이 조용히 증발하는 fail-open 을 막는다.
@@ -201,6 +277,30 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
         "eligible": not stat_reasons and not exec_reasons,
         "stat_reasons": stat_reasons,
         "exec_reasons": exec_reasons,
+    }
+
+
+def check_confirmation(confirm_stats: dict | None) -> dict:
+    """확인창 판정 — 발견에 **쓰지 않은 새 표본**으로만 재확인한다.
+
+    confirm_stats: 확인창 구간(발견 이후 CONFIRM_DAYS 거래일)만으로 재계산한 stats.
+    발견 단계와 같은 강도를 요구하면 진짜 엣지도 대부분 탈락하므로(검출력 붕괴),
+    '새 표본에서도 초과수익이 양수'만 본다. 표본 부재는 fail-closed.
+    """
+    s = confirm_stats or {}
+    mean_exc = s.get("mean_exc")
+    if mean_exc is None:
+        return {"pass": False, "reasons": ["확인창 초과 표본 없음 — 기준선을 구할 수 없었습니다"],
+                "mean_exc": None, "n_days": s.get("n_days") or 0}
+    ok = mean_exc > CONFIRM_MIN_MEAN_EXC
+    return {
+        "pass": ok,
+        "reasons": [] if ok else [
+            f"확인창 초과수익 미달: mean_exc={mean_exc}(>{CONFIRM_MIN_MEAN_EXC} 필요) — "
+            "발견 단계 성적이 새 표본에서 재현되지 않았습니다"
+        ],
+        "mean_exc": mean_exc,
+        "n_days": s.get("n_days") or 0,
     }
 
 

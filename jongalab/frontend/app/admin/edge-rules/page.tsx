@@ -17,6 +17,7 @@ import {
   ROLE_META,
   fmtT,
   dayTTone,
+  decisionLabel,
 } from "@/lib/edge";
 
 /**
@@ -268,6 +269,23 @@ function RuleRow({ rule, action }: { rule: EdgeRule; action?: React.ReactNode })
           <span className={`rounded-full px-1.5 py-px text-[10px] font-bold ${role.badge}`} title={role.hint}>
             {role.label}
           </span>
+          {/* 판정 단계 — '아직 심사 중'과 '이미 탈락'을 구분한다. 탈락 rule 을 candidate 로만
+              두면 계속 심사 중인 것처럼 읽혀 승격을 기다리게 된다(sql/39 판정 일정). */}
+          {(() => {
+            const d = decisionLabel(rule);
+            if (!d) return null;
+            const tone = d.tone === "pass"
+              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+              : d.tone === "fail"
+              ? "bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+              : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300";
+            return (
+              <span className={`rounded-full px-1.5 py-px text-[10px] font-bold ${tone}`}
+                    title={rule.decision?.confirm?.reasons?.[0] ?? rule.decision?.discovery?.reasons?.[0] ?? undefined}>
+                {d.text}
+              </span>
+            );
+          })()}
           <span className="font-mono text-[10px] text-slate-400">{rule.name}</span>
         </div>
         <p className="mt-1 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{rule.description}</p>

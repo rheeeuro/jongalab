@@ -75,6 +75,7 @@ from core.repository.edge_rule import (
     get_rule_daily_since,
     get_latest_matched,
     get_universe_label_totals,
+    update_rule_decision,
 )
 
 from core.repository.sector_report import (

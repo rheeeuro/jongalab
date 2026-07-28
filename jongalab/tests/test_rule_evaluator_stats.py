@@ -6,7 +6,7 @@
 눌리는데(대조군 기준 시 겹침 평균 54%·일부 100%), 그게 이 테스트의 핵심 표적이다.
 """
 from core.config import EDGE_COST_PCT
-from workers.rule_evaluator import _recompute_stats
+from workers.rule_evaluator import _recompute_stats, _slice_sample_days
 
 
 def _day(d, matched):
@@ -101,3 +101,35 @@ def test_single_day_has_no_t_but_keeps_mean():
     s = _recompute_stats([_day("2026-07-01", [_m("A", 5.0)])], {"2026-07-01": (5.0, 2)})
     assert s["mean_exc"] is not None
     assert s["t_days_exc"] is None   # 거래일 1일 → 분산 추정 불가
+
+
+# ── 판정 구간 슬라이스 (발견 1~10 / 확인 11~20) ──
+# 판정 시점은 달력일이 아니라 **표본이 있는 거래일** 기준이다. 매칭이 드문 rule 은 달력으로
+# 끊으면 표본 없이 판정일이 지나간다. 표본 없는 날을 세면 구간이 어긋나므로 계약을 고정한다.
+
+def test_slice_counts_only_days_with_labeled_samples():
+    rows = [_day("d1", [_m("A", 1.0)]),
+            _day("d2", []),                       # 매칭 없음 — 세지 않음
+            _day("d3", [_m("B", None)]),          # 라벨 미도래 — 세지 않음
+            _day("d4", [_m("C", 2.0)]),
+            _day("d5", [_m("D", 3.0)])]
+    assert [r["report_date"] for r in _slice_sample_days(rows, 0, 2)] == ["d1", "d4"]
+    assert [r["report_date"] for r in _slice_sample_days(rows, 2, 4)] == ["d5"]
+    assert _slice_sample_days(rows, 5, None) == []
+
+
+def test_slice_windows_are_disjoint_so_confirm_uses_fresh_samples():
+    # 확인창이 발견 구간과 겹치면 '새 표본으로 확증'이라는 전제가 깨진다.
+    rows = [_day(f"d{i}", [_m("A", float(i))]) for i in range(6)]
+    disc = _slice_sample_days(rows, 0, 3)
+    conf = _slice_sample_days(rows, 3, 6)
+    assert [r["report_date"] for r in disc] == ["d0", "d1", "d2"]
+    assert [r["report_date"] for r in conf] == ["d3", "d4", "d5"]
+    assert not ({r["report_date"] for r in disc} & {r["report_date"] for r in conf})
+
+
+def test_slice_is_stable_when_later_days_are_appended():
+    # 재계산 시 같은 발견 구간이 재현돼야 한다(뒤에 날이 붙어도 앞 구간은 불변).
+    base = [_day(f"d{i}", [_m("A", 1.0)]) for i in range(4)]
+    grown = base + [_day("d9", [_m("A", 9.0)])]
+    assert _slice_sample_days(base, 0, 3) == _slice_sample_days(grown, 0, 3)

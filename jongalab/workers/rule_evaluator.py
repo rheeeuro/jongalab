@@ -27,7 +27,16 @@ from datetime import date
 from core.config import EDGE_COST_PCT
 from core.logging_setup import setup_logging
 from core.edge_predicate import evaluate
-from core.edge_policy import check_demotion, check_promotion, rule_role
+from core.edge_policy import (
+    CONFIRM_DAYS,
+    DISCOVERY_DAYS,
+    check_confirmation,
+    check_demotion,
+    check_promotion,
+    decision_due,
+    decision_stage,
+    rule_role,
+)
 from core.notifications import send_edge_rule_alert
 from core.repository import (
     list_rules,
@@ -38,6 +47,7 @@ from core.repository import (
     upsert_rule_daily,
     get_rule_daily_since,
     get_universe_label_totals,
+    update_rule_decision,
     update_rule_stats,
 )
 
@@ -90,6 +100,24 @@ def _day_cluster_t(day_means: list[float]) -> tuple[float | None, float | None]:
     if sd <= 0:
         return mean_days, None
     return mean_days, mean_days / (sd / math.sqrt(len(day_means)))
+
+
+def _slice_sample_days(daily_rows: list[dict], start: int, end: int | None) -> list[dict]:
+    """표본이 있는 거래일만 세어 [start, end) 구간의 daily_rows 를 잘라낸다.
+
+    판정 일정(발견 1~10 / 확인 11~20)은 **달력일이 아니라 표본 거래일** 기준이다 — 매칭이
+    드문 rule 은 달력으로 끊으면 표본 없이 판정일이 지나간다. n_matched=0 인 날(라벨 미도래
+    sentinel 포함)은 세지 않으므로, 같은 구간이 언제 재계산해도 동일하게 재현된다.
+    """
+    out, idx = [], 0
+    for dr in daily_rows:
+        has = any(m.get("ret") is not None for m in (dr.get("matched") or []))
+        if not has:
+            continue
+        if idx >= start and (end is None or idx < end):
+            out.append(dr)
+        idx += 1
+    return out
 
 
 def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> dict:
@@ -312,9 +340,9 @@ def run():
         low_refreshed = _refresh_missing_lows(rule["id"], daily_rows, _universe)
         if low_refreshed:
             logger.info(f"{rule['name']}: next_low_ret 소급 반영 {low_refreshed}일")
-        rule["stats"] = _recompute_stats(
-            daily_rows, uni_totals_by_label.get(rule.get("exit_label") or "exec_leg_ret")
-        )
+        rule["_uni"] = uni_totals_by_label.get(rule.get("exit_label") or "exec_leg_ret")
+        rule["stats"] = _recompute_stats(daily_rows, rule["_uni"])
+        rule["_daily_rows"] = daily_rows   # pass2 판정이 발견/확인 구간으로 잘라 쓴다
         rule["_new_scored"] = new_scored
 
     # ── pass 2: 승격/강등 게이트 (모든 rule 의 stats 가 신선해진 뒤 — 대조군 비교 정합) ──
@@ -325,21 +353,68 @@ def run():
         if rule["status"] == "candidate":
             gate = check_promotion(rule, controls)  # 라우터 승격 게이트와 동일 단일 소스
             stats["promo_eligible"] = gate["eligible"]
+            stats["decision_stage"] = decision_stage(rule)
             row = {
                 "name": rule["name"], "family": rule["family"],
                 "n": stats["n"], "mean_net": stats["mean_net"], "ci_low": stats["ci_low"],
             }
-            # benchmark(측정용) 후보는 게이트 전면 면제라 항상 eligible 이지만, '실전 투입'
-            # 알림 대상이 아니다(기준선 교체는 필요 시 관리자가 API 로 의도적으로 수행).
-            if gate["eligible"] and rule_role(rule) != "benchmark":
-                promotions.append(row)
-            elif (
-                not gate["stat_reasons"] and gate["exec_reasons"]
-                and stats["n"] >= (rule.get("min_sample") or 0)
-            ):
-                # 통계 게이트 통과 + 표본 충족인데 선정 시점 실행 불가 피처만 남은 페이퍼 엣지 —
-                # 집행 설계(선정 시점 이동 등) 검토 대상. 표본 미달엔 알리지 않는다(매일 스팸 방지).
-                exec_pending.append({**row, "reason": gate["exec_reasons"][0]})
+            # ── 판정 일정 (2026-07-28) — 게이트를 '매일' 검사하면 무기한 재시험이 되어
+            # 오탐이 명목 5% → 22% 가 된다. 판정은 사전에 정한 시점에 1회만 하고 기록한다.
+            # benchmark 는 실탄이 아니라 기준선이므로 일정 밖(알림 대상도 아님).
+            due = decision_due(rule, stats.get("n_days") or 0) if rule_role(rule) != "benchmark" else None
+            if due == "discovery":
+                d_stats = _recompute_stats(
+                    _slice_sample_days(rule["_daily_rows"], 0, DISCOVERY_DAYS), rule["_uni"])
+                d_gate = check_promotion({**rule, "stats": d_stats}, controls)
+                # 발견 판정은 **통계만** 본다. 선정 시점 실행 불가(exec_reasons)는 가설이
+                # 반증된 게 아니라 집행 설계 문제이고, 설계가 바뀌면 되살아나야 한다
+                # (veto_short_surge 사례: short_wght 가 17:50 수집이라 실행 불가지만 통계는
+                # 별개). exec 사유로 종결시키면 설계 변경 후 재검토 경로가 사라진다.
+                d_pass = not d_gate["stat_reasons"]
+                rule["decision"] = {
+                    "discovery": {
+                        "at": str(date.today()), "n_days": d_stats.get("n_days"),
+                        "pass": d_pass,
+                        "mean_exc": d_stats.get("mean_exc"), "t_days_exc": d_stats.get("t_days_exc"),
+                        "reasons": d_gate["stat_reasons"],
+                        "exec_blocked": d_gate["exec_reasons"] or None,
+                    },
+                }
+                if not d_pass:
+                    # 발견 탈락 = 종결. 자동 retire 는 하지 않는다(전이는 관리자 수동).
+                    rule["decision"]["decided_at"] = str(date.today())
+                    rule["decision"]["verdict"] = "discovery_failed"
+                update_rule_decision(rule["id"], rule["decision"])
+                logger.info(
+                    f"[판정:발견] {rule['name']} — {'통과→확인창 대기' if d_pass else '탈락(종결)'}"
+                    f"{' (단 선정 시점 실행 불가)' if d_gate['exec_reasons'] else ''}"
+                    f" (거래일 {d_stats.get('n_days')}, 초과 {d_stats.get('mean_exc')}%, t {d_stats.get('t_days_exc')})"
+                )
+            elif due == "confirm":
+                c_stats = _recompute_stats(
+                    _slice_sample_days(rule["_daily_rows"], DISCOVERY_DAYS,
+                                       DISCOVERY_DAYS + CONFIRM_DAYS), rule["_uni"])
+                conf = check_confirmation(c_stats)
+                dec = dict(rule.get("decision") or {})
+                dec["confirm"] = {
+                    "at": str(date.today()), "n_days": conf["n_days"],
+                    "pass": conf["pass"], "mean_exc": conf["mean_exc"], "reasons": conf["reasons"],
+                }
+                dec["decided_at"] = str(date.today())
+                dec["verdict"] = "confirmed" if conf["pass"] else "confirm_failed"
+                rule["decision"] = dec
+                update_rule_decision(rule["id"], dec)
+                logger.info(
+                    f"[판정:확인] {rule['name']} — {'확증(승격 후보)' if conf['pass'] else '재현 실패(종결)'}"
+                    f" (확인창 거래일 {conf['n_days']}, 초과 {conf['mean_exc']}%)"
+                )
+                if conf["pass"]:
+                    # 확인창까지 통과 — 이때만 알린다. 실행 가능성은 여기서 다시 확인한다
+                    # (통계는 확증됐는데 선정 시점 실행 불가면 '집행 설계 필요' 분기).
+                    if gate["exec_reasons"]:
+                        exec_pending.append({**row, "reason": gate["exec_reasons"][0]})
+                    else:
+                        promotions.append({**row, "mean_exc": c_stats.get("mean_exc")})
         elif rule["status"] == "live":
             # 강등 게이트도 core.edge_policy 단일 소스 — 역할별 mean_net 부호가 반대다
             # (selector 는 음수, veto 는 제외 종목이 양수일 때 강등 검토). benchmark 면제.

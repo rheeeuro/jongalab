@@ -321,6 +321,25 @@ export interface PredicateCond {
   value?: unknown;
 }
 
+// 판정 기록(sql/39) — 매일 재평가(오탐 22%)를 막기 위해 판정을 사전 시점 1회로 묶은 결과.
+// 발견(누적 거래일 1~10) → 확인창(11~20, 발견에 쓰지 않은 새 표본) → 종결.
+export interface EdgeRuleDecisionStep {
+  at: string;
+  n_days: number | null;
+  pass: boolean;
+  mean_exc: number | null;
+  t_days_exc?: number | null;
+  reasons: string[];
+  exec_blocked?: string[] | null;  // 선정 시점 실행 불가 — 통계 탈락과 구분(설계 변경 시 재검토)
+}
+
+export interface EdgeRuleDecision {
+  discovery?: EdgeRuleDecisionStep;
+  confirm?: EdgeRuleDecisionStep;
+  decided_at?: string;
+  verdict?: 'confirmed' | 'discovery_failed' | 'confirm_failed';
+}
+
 export interface EdgeRule {
   id: number;
   name: string;
@@ -331,9 +350,10 @@ export interface EdgeRule {
   predicate: PredicateCond[];
   exit_label: string;
   status: 'candidate' | 'live' | 'retired';
-  min_sample: number;
+  min_sample: number;          // 참고값 — 2026-07-28 승격 게이트에서 제외(단위가 거래일 규율과 어긋남)
   registered_at: string;
   stats: EdgeRuleStats | null;
+  decision: EdgeRuleDecision | null;  // 판정 기록(sql/39) — 재시험 금지용 영구 기록
   created_at: string;
   promoted_at: string | null;
   retired_at: string | null;

@@ -12,6 +12,12 @@ from core.edge_policy import (
     check_promotion,
     check_demotion,
     PROMO_MIN_DAY_T,
+    day_t_threshold,
+    decision_stage,
+    decision_due,
+    check_confirmation,
+    DISCOVERY_DAYS,
+    CONFIRM_DAYS,
 )
 
 
@@ -94,14 +100,19 @@ def test_selector_eligible_when_all_gates_pass():
     assert gate["stat_reasons"] == [] and gate["exec_reasons"] == []
 
 
-def test_selector_blocked_on_small_sample_and_ci():
+def test_selector_blocked_on_ci_but_not_on_stock_day_count():
+    # 2026-07-28: min_sample(종목-일)은 게이트에서 빠졌다 — 단위가 거래일 기준 규율과 어긋나
+    # 통계적으로 강한 좁은 룰(하루 1~2종목)을 막고 있었다. n=10 < min_sample=40 이어도
+    # 그 자체로는 탈락 사유가 아니고, 남는 사유는 CI 하한뿐이다.
     gate = check_promotion(
         _rule(stats={"n": 10, "n_days": 12, "mean_net": 0.5,
                      "ci_low_exc": -0.1, "t_days_exc": 2.1}),
         [_control(0.2)],
     )
     assert not gate["eligible"]
-    assert len(gate["stat_reasons"]) == 2  # 표본 부족 + CI 하한
+    assert len(gate["stat_reasons"]) == 1
+    assert "신뢰구간" in gate["stat_reasons"][0]
+    assert not any("min_sample" in r for r in gate["stat_reasons"])
 
 
 def test_selector_blocked_on_few_trading_days():
@@ -266,8 +277,16 @@ def test_selector_day_cluster_t_is_fail_closed_when_missing():
     assert any("일 클러스터 t" in r for r in gate["stat_reasons"])
 
 
-def test_selector_passes_at_day_cluster_threshold():
+def test_day_cluster_threshold_uses_t_distribution_not_fixed_165():
+    # 문턱은 고정 1.65 가 아니라 거래일 자유도의 t 임계값 — 소표본에서 더 엄격해야 한다.
+    assert day_t_threshold(11) == 1.812      # 거래일 11 → df 10
+    assert day_t_threshold(5) == 2.132       # 거래일 5  → df 4  (1.65 보다 훨씬 높다)
+    assert day_t_threshold(1) is None        # 거래일 1  → 분산 추정 불가
+    assert day_t_threshold(200) == 1.645     # 대표본 → 정규 극한
+    # GOOD_STATS(n_days=12, df=11 → 1.796): 정규 1.65 는 이제 통과가 아니다.
     stats = dict(GOOD_STATS); stats["t_days_exc"] = PROMO_MIN_DAY_T
+    assert not check_promotion(_rule(stats=stats), [_control(0.2)])["eligible"]
+    stats["t_days_exc"] = day_t_threshold(12)
     assert check_promotion(_rule(stats=stats), [_control(0.2)])["eligible"]
 
 
@@ -279,3 +298,45 @@ def test_veto_exempt_from_day_cluster_t():
               stats={"n": 36, "n_days": 11, "mean_net": -0.203, "t_days_exc": -0.4},
               predicate=[{"col": "is_bio", "op": "==", "value": 1}]), [])
     assert gate["eligible"]
+
+
+# ── 판정 일정: 발견 → 확인창 → 종결 (2026-07-28) ──
+# 매일 재평가는 무기한 재시험이라 오탐이 명목 5% → 22% 가 된다. 판정을 사전 시점 1회로 묶는다.
+
+def test_decision_stage_progresses_and_terminates():
+    assert decision_stage({}) == "discovery"                       # 기록 없음 = 발견 전
+    assert decision_stage({"decision": {"discovery": {"pass": True}}}) == "confirming"
+    # 발견 탈락은 확인창으로 가지 않고 즉시 종결 — 재시험 금지
+    assert decision_stage({"decision": {"discovery": {"pass": False}}}) == "decided"
+    assert decision_stage({"decision": {"discovery": {"pass": True},
+                                        "decided_at": "2026-07-28"}}) == "decided"
+
+
+def test_decision_due_only_at_scheduled_points():
+    fresh = {}
+    assert decision_due(fresh, DISCOVERY_DAYS - 1) is None         # 아직 이름
+    assert decision_due(fresh, DISCOVERY_DAYS) == "discovery"
+    passed = {"decision": {"discovery": {"pass": True}}}
+    assert decision_due(passed, DISCOVERY_DAYS) is None            # 확인창 표본 대기
+    assert decision_due(passed, DISCOVERY_DAYS + CONFIRM_DAYS - 1) is None
+    assert decision_due(passed, DISCOVERY_DAYS + CONFIRM_DAYS) == "confirm"
+
+
+def test_decided_rule_is_never_retested():
+    # 핵심 계약 — 한 번 판정한 rule 은 거래일이 아무리 쌓여도 다시 검사하지 않는다.
+    done = {"decision": {"discovery": {"pass": True}, "confirm": {"pass": False},
+                         "decided_at": "2026-07-28", "verdict": "confirm_failed"}}
+    for nd in (10, 20, 50, 500):
+        assert decision_due(done, nd) is None
+
+
+def test_confirmation_requires_positive_excess_on_fresh_sample():
+    assert check_confirmation({"mean_exc": 0.4, "n_days": 10})["pass"]
+    assert not check_confirmation({"mean_exc": -0.1, "n_days": 10})["pass"]
+    assert not check_confirmation({"mean_exc": 0.0, "n_days": 10})["pass"]   # 0 은 미달
+
+
+def test_confirmation_fail_closed_without_samples():
+    for s in (None, {}, {"n_days": 5}):
+        r = check_confirmation(s)
+        assert not r["pass"] and r["reasons"]

@@ -229,6 +229,31 @@ export const MEASURE_HELP =
 
 // 검증 통과 신호: 서버(core/edge_policy 게이트)가 계산해 stats.promo_eligible 에 저장한 값을
 // 렌더링만 한다. 조건을 프론트에서 재계산하지 않는다(단일 소스).
+// **판정 완료+확증(verdict=confirmed)이 아니면 후보로 표시하지 않는다** — 2026-07-28 판정 일정
+// 도입 후 실제 승격 자격은 확인창 확증까지 필요하다(stats 는 매일 재계산되므로 promo_eligible
+// 만 보면 이미 탈락한 rule 이 어느 날 우연히 초록불로 보인다).
 export function isPromotionCandidate(rule: EdgeRule): boolean {
-  return rule.status === 'candidate' && rule.stats?.promo_eligible === true && !isMeasurementOnly(rule);
+  return (
+    rule.status === 'candidate' &&
+    rule.stats?.promo_eligible === true &&
+    rule.decision?.verdict === 'confirmed' &&
+    !isMeasurementOnly(rule)
+  );
+}
+
+// 판정 진행 상태 — 카드/관리자 화면이 "아직 심사 중"과 "이미 탈락"을 구분해 보여주기 위한 라벨.
+// 탈락한 candidate 를 그냥 'candidate' 로만 두면 계속 심사 중인 것처럼 읽힌다.
+export const DECISION_LABEL: Record<string, { text: string; tone: 'wait' | 'pass' | 'fail' }> = {
+  discovery: { text: '발견 단계', tone: 'wait' },
+  confirming: { text: '확인창 진행', tone: 'wait' },
+  confirmed: { text: '확증 완료', tone: 'pass' },
+  discovery_failed: { text: '판정 탈락', tone: 'fail' },
+  confirm_failed: { text: '재현 실패', tone: 'fail' },
+};
+
+export function decisionLabel(rule: EdgeRule): { text: string; tone: 'wait' | 'pass' | 'fail' } | null {
+  if (rule.status !== 'candidate' || isMeasurementOnly(rule)) return null;
+  const v = rule.decision?.verdict;
+  if (v && DECISION_LABEL[v]) return DECISION_LABEL[v];
+  return DECISION_LABEL[rule.decision?.discovery?.pass ? 'confirming' : 'discovery'];
 }

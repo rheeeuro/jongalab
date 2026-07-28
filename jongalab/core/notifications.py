@@ -211,11 +211,14 @@ def send_edge_rule_alert(
 ):
     """Edge Ledger 상태 전이 알림 — 관리자(ADMIN)에게만. 실제 전이는 수동 승인이며 이건 알림뿐.
 
-    promotions:   승격 후보 — core.edge_policy.check_promotion 게이트 전체 충족 candidate.
-    exec_pending: 집행 설계 필요 — 통계 게이트는 충족했지만 선정 시점(13~15시) 실행 불가
-                  피처를 써서 승격이 막힌 candidate(페이퍼 엣지 확인, 집행 시점 재설계 후보).
-    demotions:    강등 검토(최근 표본 mean_net<0) live rule 요약.
-    각 항목: {name, family, n, mean_net, ci_low[, reason]}. 전부 비면 전송하지 않는다.
+    promotions:   승격 후보 — **확인창까지 통과해 확증된** candidate. 2026-07-28 판정 일정
+                  도입 후로는 매일 뜨지 않고 **판정일에 1회만** 온다(sql/39). 알림이 왔다는 것은
+                  발견 구간과 겹치지 않는 새 표본에서 초과수익이 재현됐다는 뜻이다.
+    exec_pending: 집행 설계 필요 — 통계는 확증됐지만 선정 시점(13~15시) 실행 불가 피처를 써서
+                  승격이 막힌 candidate(집행 시점 재설계 후보). 통계 탈락이 아니므로 종결이 아니다.
+    demotions:    강등 검토 — live rule 의 최근 창 성적. **역할별 부호가 반대**다
+                  (selector 는 매수 종목 mean_net<0, veto 는 제외 종목 mean_net>0).
+    각 항목: {name, family, n, mean_net, ci_low[, mean_exc, reason]}. 전부 비면 전송하지 않는다.
     """
     exec_pending = exec_pending or []
     if not promotions and not demotions and not exec_pending:
@@ -228,13 +231,16 @@ def send_edge_rule_alert(
         line = f"• *{r['name']}* (`{r['family']}`) — n={r['n']}, {prefix} {_pct(r.get('mean_net'))}"
         if "ci_low" in r:
             line += f", CI하한 {_pct(r.get('ci_low'))}"
+        # 확인창 초과수익 — 승격 후보의 핵심 근거(발견에 쓰지 않은 새 표본에서의 성적)
+        if r.get("mean_exc") is not None:
+            line += f", 확인창 초과 {_pct(r.get('mean_exc'))}"
         return line
 
     try:
         sections = []
         if promotions:
             sections.append(
-                "🟢 *승격 후보 (candidate→live 검토)*\n"
+                "🟢 *승격 후보 (candidate→live 검토)* — 확인창 확증 완료\n"
                 + "\n".join(_rule_line(r) for r in promotions)
             )
         if exec_pending:
@@ -250,6 +256,7 @@ def send_edge_rule_alert(
         message = (
             "🧪 *[Edge Ledger] 상태 전이 알림*\n"
             "_전이는 관리자 API 수동 승인 — 아래는 후보일 뿐입니다._\n"
+            "_판정일에만 오는 알림입니다(매일 재평가 폐지, sql/39)._\n"
             "──────────────────\n\n"
             + "\n\n".join(sections)
         )
