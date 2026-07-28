@@ -262,6 +262,29 @@ def send_edge_rule_alert(
         logging.error(f"❌ Edge Ledger 알림 실패: {e}")
 
 
+def send_report_save_alert(error: str, candidate_count: int):
+    """종가베팅 리포트 DB 저장 실패 경보 — 관리자 전용 (workers/closing_bet.py).
+
+    저장 실패는 워커가 예외를 삼키고 로그만 남기므로(핸드오프·후속 단계는 계속 진행) 로그를
+    직접 보지 않으면 하루가 지나도 모른다. 그 사이 daily_stock_report 가 비어 대시보드·갭체크·
+    rule_evaluator 표본이 통째로 빠진다. 30분마다 재실행되므로 고쳐지지 않으면 반복 발송된다
+    (같은 날 계속 실패한다는 사실 자체가 경보의 내용이다).
+
+    경보 실패가 워커를 죽이면 안 되므로 예외는 삼키고 로그만 남긴다.
+    """
+    try:
+        message = (
+            f"🚨 *[종가베팅] 리포트 DB 저장 실패* {datetime.now():%Y-%m-%d %H:%M}\n"
+            f"후보 {candidate_count}건이 `daily_stock_report` 에 저장되지 않았습니다.\n"
+            f"```\n{error[:500]}\n```\n"
+            "→ 고치기 전까지 오늘 리포트·갭체크·엣지 표본이 비어 있습니다."
+        )
+        count = _send_telegram_admin(message)
+        logging.info(f"📨 리포트 저장 실패 경보 전송 -> {count}개 채팅방")
+    except Exception as e:
+        logging.error(f"❌ 리포트 저장 실패 경보 전송 실패: {e}")
+
+
 def send_gap_check_alert(report_date: str, check_time: str, rows: list[dict]):
     """갭 체크 최종 리포트 전송 — KRX 체크(09:03)까지 끝난 뒤 하루 한 번만 호출된다.
 

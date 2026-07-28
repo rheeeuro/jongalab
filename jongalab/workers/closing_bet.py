@@ -39,6 +39,7 @@ from core.repository.edge_rule import list_rules
 from core.edge_selection import select_signals
 from core.edge_policy import rule_role
 from core.news_summary import summarize_news
+from core.notifications import send_report_save_alert
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ClosingBet")
@@ -596,7 +597,10 @@ class ClosingBetStrategy:
             save_stock_reports(reports)
             logger.info(f"Phase 2 리포트 {len(reports)}건 DB 저장 완료")
         except Exception as e:
+            # 저장 실패는 후속 단계를 막지 않지만(핸드오프는 계속) 조용히 넘어가면 그날 리포트가
+            # 통째로 비므로 관리자에게 즉시 알린다.
             logger.error(f"Phase 2 리포트 DB 저장 실패: {e}")
+            send_report_save_alert(str(e), len(reports))
 
         # 매수 시그널 핸드오프 — trading 도메인(trade_signal)으로 적재.
         # trading 의 리스크 엔진·사이징이 실제 매수 종목수를 제한하므로 상위 후보를 그대로 넘긴다.

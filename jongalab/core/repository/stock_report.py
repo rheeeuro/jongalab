@@ -6,30 +6,6 @@ from decimal import Decimal
 from core.db import get_db
 
 
-# closing_bet 이 매 실행 재계산하는 분석 컬럼 — save_stock_reports 의 upsert 대상.
-# 다른 워커가 같은 날 행에 쓰는 관측 컬럼(krx_close_price·nxt_price_1950·nxt_gap_pct·
-# nxt_after_value·nxt_listed 등)은 여기 없으므로 재실행에도 보존된다.
-_ANALYSIS_COLS = (
-    "stock_code", "stock_name", "sector", "current_price", "change_pct",
-    "trading_value", "market_cap", "supply_score",
-    "inst_net_buy", "frgn_net_buy",
-    "indv_net_buy", "prog_net_buy", "supply_days", "supply_history",
-    "ma_aligned", "near_high", "hourly_candles",
-    "is_leader", "is_theme_stock", "content_score",
-    "news_count", "news_unique_count", "news_pm_count", "news_first_today", "news_prior_avg",
-    "news_summary", "news_sentiment", "news_catalyst", "news_headlines",
-    "disc_count", "disc_bad_type", "disc_good_type",
-    "score", "rank_no", "selected", "sector_rel_ret", "sector_leader_chg",
-    "foreign_brokers_buying", "afternoon_ret", "vol_ratio", "prog_buy_days",
-    "first_seen", "theme_strength", "frgn_exhaust_rate", "frgn_exhaust_chg",
-    "is_bio", "market", "dist_prior_high_pct", "round_dist_pct", "ma5_reclaim",
-    "days_since_frgn_surge", "red_candle", "red_candle_streak",
-    "overhead_vol_ratio", "poc_dist_pct", "prog_am_net", "prog_pm_net",
-    "fin_per", "fin_pbr", "fin_ev", "fin_roe", "fin_eps", "fin_bps",
-    "fin_sales", "fin_op_profit", "fin_net_income", "op_earnings_yield",
-    "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct",
-)
-
 # 시간 창에서만 수집되는 스냅샷 캡처 컬럼의 upsert 정책 (2026-07-19, 프로그램 오전/오후 분해):
 #  · prog_am_net — 정오 창(12:00~12:45) 실행의 첫 캡처를 보존(first-write-wins).
 #    이후 실행(오후·저녁)은 None 을 보내며, 값이 이미 있으면 갱신하지 않는다.
@@ -41,23 +17,126 @@ _FIRST_WRITE_WINS = frozenset({"prog_am_net"})
 _PRESERVE_ON_NULL = frozenset({"prog_pm_net", "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct"})
 
 
+def _analysis_row(c: dict) -> dict:
+    """후보 dict → daily_stock_report 의 '분석 컬럼' 한 행 (컬럼명 → 값).
+
+    **이 dict 의 키가 분석 컬럼 목록의 단일 소스다.** 컬럼을 추가할 땐 여기 한 곳만 고치면
+    INSERT/UPDATE 문이 따라온다(save_stock_reports 가 키에서 파생). 예전엔 컬럼 목록과 값
+    dict 를 따로 나열해서, 한쪽만 고치면 저장이 통째로 깨졌다(2026-07-28 disc_* 3종 누락으로
+    하루치 리포트 유실).
+
+    closing_bet 이 매 실행 재계산하는 컬럼만 담는다. 다른 워커가 같은 날 행에 쓰는 관측 컬럼
+    (krx_close_price·nxt_price_1950·nxt_gap_pct·nxt_after_value·nxt_listed 등)은 여기
+    없으므로 재실행에도 보존된다.
+    """
+    return {
+        "stock_code": c["stock_code"],
+        "stock_name": c["stock_name"],
+        "sector": c["sector"],
+        "current_price": c["current_price"],
+        "change_pct": c["change_pct"],
+        "trading_value": c["trading_value"],
+        "market_cap": c["market_cap"],
+        "supply_score": c.get("supply_score", 0.0),
+        "inst_net_buy": c["inst_net_buy"],
+        "frgn_net_buy": c["frgn_net_buy"],
+        "indv_net_buy": c["indv_net_buy"],
+        "prog_net_buy": c["prog_net_buy"],
+        "supply_days": c["supply_days"],
+        "supply_history": json.dumps(
+            c.get("supply_history", []), ensure_ascii=False
+        ) if c.get("supply_history") else None,
+        "ma_aligned": c["ma_aligned"],
+        "near_high": c["near_high"],
+        "hourly_candles": json.dumps(
+            c.get("hourly_candles", []), ensure_ascii=False
+        ) if c.get("hourly_candles") else None,
+        "is_leader": c["is_leader"],
+        "is_theme_stock": c.get("is_theme_stock", False),
+        "content_score": c.get("content_score", 0),
+        "news_count": c.get("news_count", 0),
+        "news_unique_count": c.get("news_unique_count", 0),
+        "news_pm_count": c.get("news_pm_count", 0),
+        "news_first_today": c.get("news_first_today", 0),
+        "news_prior_avg": c.get("news_prior_avg"),
+        "news_summary": c.get("news_summary"),
+        "news_sentiment": c.get("news_sentiment"),
+        "news_catalyst": c.get("news_catalyst"),
+        "news_headlines": json.dumps(
+            c.get("news_headlines") or [], ensure_ascii=False
+        ) if c.get("news_headlines") else None,
+        "disc_count": c.get("disc_count"),
+        "disc_bad_type": c.get("disc_bad_type"),
+        "disc_good_type": c.get("disc_good_type"),
+        "score": c["score"],
+        "rank_no": c["rank_no"],
+        "selected": c.get("selected", 1),
+        "sector_rel_ret": c.get("sector_rel_ret"),
+        "sector_leader_chg": c.get("sector_leader_chg"),
+        "foreign_brokers_buying": c.get("foreign_brokers_buying"),
+        "afternoon_ret": c.get("afternoon_ret"),
+        "vol_ratio": c.get("vol_ratio"),
+        "prog_buy_days": c.get("prog_buy_days"),
+        "first_seen": c.get("first_seen"),
+        "theme_strength": c.get("theme_strength"),
+        "frgn_exhaust_rate": c.get("frgn_exhaust_rate"),
+        "frgn_exhaust_chg": c.get("frgn_exhaust_chg"),
+        "is_bio": c.get("is_bio"),
+        "market": c.get("market"),
+        "dist_prior_high_pct": c.get("dist_prior_high_pct"),
+        "round_dist_pct": c.get("round_dist_pct"),
+        "ma5_reclaim": c.get("ma5_reclaim"),
+        "days_since_frgn_surge": c.get("days_since_frgn_surge"),
+        "red_candle": c.get("red_candle"),
+        "red_candle_streak": c.get("red_candle_streak"),
+        "overhead_vol_ratio": c.get("overhead_vol_ratio"),
+        "poc_dist_pct": c.get("poc_dist_pct"),
+        "prog_am_net": c.get("prog_am_net"),
+        "prog_pm_net": c.get("prog_pm_net"),
+        "fin_per": c.get("fin_per"),
+        "fin_pbr": c.get("fin_pbr"),
+        "fin_ev": c.get("fin_ev"),
+        "fin_roe": c.get("fin_roe"),
+        "fin_eps": c.get("fin_eps"),
+        "fin_bps": c.get("fin_bps"),
+        "fin_sales": c.get("fin_sales"),
+        "fin_op_profit": c.get("fin_op_profit"),
+        "fin_net_income": c.get("fin_net_income"),
+        "op_earnings_yield": c.get("op_earnings_yield"),
+        "ob_imbalance": c.get("ob_imbalance"),
+        "ob_fpr_imbalance": c.get("ob_fpr_imbalance"),
+        "ob_spread_pct": c.get("ob_spread_pct"),
+    }
+
+
 def save_stock_reports(candidates: list[dict]):
     """Phase 2 결과를 upsert 저장 — 분석 컬럼만 갱신, 관측 컬럼은 보존.
 
     closing_bet 은 08:00~20:30 매 30분 재실행된다. 예전 DELETE+INSERT 방식은 19:50 NXT
     스냅샷(gap_check --base-nxt 가 쓴 nxt_listed 등)을 20:00 이후 실행이 매일 지웠다.
     이번 배치에서 빠진 종목(후보 탈락)은 삭제해 '당일 행 = 최신 배치 유니버스' 의미는 유지한다.
+
+    컬럼 목록은 _analysis_row 의 키에서 파생한다 — 목록을 따로 두지 않으므로 어긋날 수 없다.
     """
     if not candidates:
         return
 
-    cols = ", ".join(_ANALYSIS_COLS)
-    placeholders = ", ".join(["%s"] * len(_ANALYSIS_COLS))
+    rows = [_analysis_row(c) for c in candidates]
+    col_names = tuple(rows[0])
+
+    # upsert 정책 집합은 컬럼명을 문자열로 참조하는 유일한 곳 — 오타·리네임이 나면 정책이
+    # 조용히 무력화(예: prog_am_net 이 정오 캡처를 덮어씀)되므로 이름 유효성을 확인한다.
+    unknown = (_FIRST_WRITE_WINS | _PRESERVE_ON_NULL) - set(col_names)
+    if unknown:
+        raise KeyError(f"upsert 정책에만 있고 분석 컬럼에 없는 이름: {sorted(unknown)}")
+
+    cols = ", ".join(col_names)
+    placeholders = ", ".join(["%s"] * len(col_names))
     updates = ", ".join(
         f"{c} = COALESCE({c}, VALUES({c}))" if c in _FIRST_WRITE_WINS
         else f"{c} = COALESCE(VALUES({c}), {c})" if c in _PRESERVE_ON_NULL
         else f"{c} = VALUES({c})"
-        for c in _ANALYSIS_COLS
+        for c in col_names
     )
     query = f"""
         INSERT INTO daily_stock_report (report_date, {cols})
@@ -70,86 +149,11 @@ def save_stock_reports(candidates: list[dict]):
         cursor.execute(
             f"""DELETE FROM daily_stock_report
                  WHERE report_date = CURDATE() AND stock_code NOT IN ({code_ph})""",
-            tuple(c["stock_code"] for c in candidates),
+            tuple(r["stock_code"] for r in rows),
         )
 
-        for c in candidates:
-            row = {
-                "stock_code": c["stock_code"],
-                "stock_name": c["stock_name"],
-                "sector": c["sector"],
-                "current_price": c["current_price"],
-                "change_pct": c["change_pct"],
-                "trading_value": c["trading_value"],
-                "market_cap": c["market_cap"],
-                "supply_score": c.get("supply_score", 0.0),
-                "inst_net_buy": c["inst_net_buy"],
-                "frgn_net_buy": c["frgn_net_buy"],
-                "indv_net_buy": c["indv_net_buy"],
-                "prog_net_buy": c["prog_net_buy"],
-                "supply_days": c["supply_days"],
-                "supply_history": json.dumps(
-                    c.get("supply_history", []), ensure_ascii=False
-                ) if c.get("supply_history") else None,
-                "ma_aligned": c["ma_aligned"],
-                "near_high": c["near_high"],
-                "hourly_candles": json.dumps(
-                    c.get("hourly_candles", []), ensure_ascii=False
-                ) if c.get("hourly_candles") else None,
-                "is_leader": c["is_leader"],
-                "is_theme_stock": c.get("is_theme_stock", False),
-                "content_score": c.get("content_score", 0),
-                "news_count": c.get("news_count", 0),
-                "news_unique_count": c.get("news_unique_count", 0),
-                "news_pm_count": c.get("news_pm_count", 0),
-                "news_first_today": c.get("news_first_today", 0),
-                "news_prior_avg": c.get("news_prior_avg"),
-                "news_summary": c.get("news_summary"),
-                "news_sentiment": c.get("news_sentiment"),
-                "news_catalyst": c.get("news_catalyst"),
-                "news_headlines": json.dumps(
-                    c.get("news_headlines") or [], ensure_ascii=False
-                ) if c.get("news_headlines") else None,
-                "score": c["score"],
-                "rank_no": c["rank_no"],
-                "selected": c.get("selected", 1),
-                "sector_rel_ret": c.get("sector_rel_ret"),
-                "sector_leader_chg": c.get("sector_leader_chg"),
-                "foreign_brokers_buying": c.get("foreign_brokers_buying"),
-                "afternoon_ret": c.get("afternoon_ret"),
-                "vol_ratio": c.get("vol_ratio"),
-                "prog_buy_days": c.get("prog_buy_days"),
-                "first_seen": c.get("first_seen"),
-                "theme_strength": c.get("theme_strength"),
-                "frgn_exhaust_rate": c.get("frgn_exhaust_rate"),
-                "frgn_exhaust_chg": c.get("frgn_exhaust_chg"),
-                "is_bio": c.get("is_bio"),
-                "market": c.get("market"),
-                "dist_prior_high_pct": c.get("dist_prior_high_pct"),
-                "round_dist_pct": c.get("round_dist_pct"),
-                "ma5_reclaim": c.get("ma5_reclaim"),
-                "days_since_frgn_surge": c.get("days_since_frgn_surge"),
-                "red_candle": c.get("red_candle"),
-                "red_candle_streak": c.get("red_candle_streak"),
-                "overhead_vol_ratio": c.get("overhead_vol_ratio"),
-                "poc_dist_pct": c.get("poc_dist_pct"),
-                "prog_am_net": c.get("prog_am_net"),
-                "prog_pm_net": c.get("prog_pm_net"),
-                "fin_per": c.get("fin_per"),
-                "fin_pbr": c.get("fin_pbr"),
-                "fin_ev": c.get("fin_ev"),
-                "fin_roe": c.get("fin_roe"),
-                "fin_eps": c.get("fin_eps"),
-                "fin_bps": c.get("fin_bps"),
-                "fin_sales": c.get("fin_sales"),
-                "fin_op_profit": c.get("fin_op_profit"),
-                "fin_net_income": c.get("fin_net_income"),
-                "op_earnings_yield": c.get("op_earnings_yield"),
-                "ob_imbalance": c.get("ob_imbalance"),
-                "ob_fpr_imbalance": c.get("ob_fpr_imbalance"),
-                "ob_spread_pct": c.get("ob_spread_pct"),
-            }
-            cursor.execute(query, tuple(row[col] for col in _ANALYSIS_COLS))
+        for row in rows:
+            cursor.execute(query, tuple(row[col] for col in col_names))
         conn.commit()
 
 
