@@ -73,7 +73,7 @@ kiwoom/
 | `/stock/execution-strength-hourly` | ka10046 | 체결강도 당일 시간별 추이(5/20/60분 평균) |
 | `/chart/daily` | ka10081 | 일봉 차트 |
 | `/chart/minute-pages` | ka10080 | 분봉 차트(연속조회 다건 수집) |
-| `/rank/trading-value` | ka10032 | 거래대금 상위 |
+| `/rank/trading-value` | ka10032 | 거래대금 상위 (`mrkt_tp` 000=전체·001=코스피·101=코스닥, `max_pages` 연속조회 — 1페이지 100행. 페이지 수와 무관하게 `trde_prica_upper` 단일 리스트로 반환) |
 | `/rank/after-hours-flu` | ka10098 | 시간외 단일가 등락률 순위(시장 전체 스캔) |
 | `/market/after-close-investor` | ka10066 | 장마감후 확정 투자자별 순매수(연속조회 병합) |
 | `/program-trade/by-stock` | ka90004 | 종목별 프로그램 매매 현황 |

@@ -129,8 +129,9 @@ class KiwoomRestClient:
         )
 
     # ── 순위 ──
-    def get_trading_value_rank(self, mrkt_tp: str = "001") -> dict:
-        return self._post("/rank/trading-value", {"mrkt_tp": mrkt_tp})
+    def get_trading_value_rank(self, mrkt_tp: str = "000", max_pages: int = 1) -> dict:
+        return self._post("/rank/trading-value",
+                          {"mrkt_tp": mrkt_tp, "max_pages": max_pages})
 
     def get_after_hours_flu_rank(
         self, mrkt_tp: str = "000", sort_base: str = "1", stk_cnd: str = "16"

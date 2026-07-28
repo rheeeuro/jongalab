@@ -6,16 +6,28 @@ class RankMixin:
     # ────────────────────────────────────────────
     # 순위정보 (/api/dostk/rkinfo)
     # ────────────────────────────────────────────
-    def get_trading_value_rank(self, mrkt_tp: str = "001") -> dict:
+    def get_trading_value_rank(self, mrkt_tp: str = "000", max_pages: int = 1) -> dict:
         """
         ka10032 — 거래대금상위요청
-        mrkt_tp: 001=코스피, 101=코스닥
+        mrkt_tp: 000=전체(양시장 통합), 001=코스피, 101=코스닥
+        max_pages: 연속조회 페이지 수(1페이지=100행). 통합 조회는 ETF/ETN 과 양 시장이
+                   한 리스트에 섞이므로 같은 거래대금 구간까지 내려가려면 시장별 조회보다
+                   많은 행이 필요하다(2026-07-28 실측: 100행 끝이 780억).
+        응답 shape 은 페이지 수와 무관하게 {"trde_prica_upper": [...]} 로 동일하다.
         """
-        return self._post(self.cfg.URL_RKINFO, "ka10032", {
+        body = {
             "mrkt_tp": mrkt_tp,
             "mang_stk_incls": "0",  # 관리종목 미포함
             "stex_tp": "3",         # 1:KRX, 2:NXT 3.통합
-        })
+        }
+        if max_pages <= 1:
+            return self._post(self.cfg.URL_RKINFO, "ka10032", body)
+
+        items = self.fetch_all_pages(
+            self.cfg.URL_RKINFO, "ka10032", body,
+            "trde_prica_upper", max_pages=max_pages,
+        )
+        return {"trde_prica_upper": items, "return_code": 0}
 
     def get_foreign_inst_top(self, mrkt_tp: str = "001") -> dict:
         """

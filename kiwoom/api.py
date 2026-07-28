@@ -87,6 +87,11 @@ class AfterCloseInvestor(BaseModel):
     max_pages: int = 5
 
 
+class TradingValueRank(BaseModel):
+    mrkt_tp: str = "000"    # 000:전체(양시장 통합), 001:코스피, 101:코스닥
+    max_pages: int = 1      # 연속조회 페이지 수 (1페이지=100행)
+
+
 class AfterHoursFluRank(BaseModel):
     mrkt_tp: str = "000"    # 000:전체, 001:코스피, 101:코스닥
     sort_base: str = "1"    # 1:상승률, 3:하락률
@@ -199,8 +204,8 @@ def minute_chart_pages(b: MinuteChartPages):
 
 
 @app.post("/rank/trading-value")
-def trading_value_rank(b: MarketTp):
-    return api().get_trading_value_rank(mrkt_tp=b.mrkt_tp)
+def trading_value_rank(b: TradingValueRank):
+    return api().get_trading_value_rank(mrkt_tp=b.mrkt_tp, max_pages=b.max_pages)
 
 
 @app.post("/market/after-close-investor")

@@ -80,8 +80,10 @@ class ClosingBetStrategy:
         except Exception as e:
             logger.warning(f"정오 프로그램 스냅샷 로드 실패: {e}")
             self._prog_am_map = {}
-        # 거래대금 순위 API에서 시장별 TOP_N_BY_VALUE 안에 들어온 종목.
-        # 테마 보너스는 이 유동성 상위권과 교차할 때만 부여한다.
+        # 거래대금 통합 순위(mrkt_tp=000) TOP_N_BY_VALUE 윈도우 안에서 ETF/ETN 이 아니고
+        # 거래대금 하한(MIN_TRADING_VALUE)을 통과한 종목. 테마 보너스는 이 유동성
+        # 상위권과 교차할 때만 부여한다. (2026-07-28: 시장별 분리 → 통합 순위로 전환.
+        # 이전엔 하한 미달·ETF 도 이 셋에 들어가 테마 보너스 게이트가 느슨했다.)
         self._top_value_codes: set[str] = set()
         # ETF/ETN 상장 코드 셋(_load_excluded_codes 에서 구축) — 이름 키워드(EXCLUDE_KEYWORDS)는
         # 운용사 리브랜딩(예: ARIRANG→PLUS)에 뚫리므로 코드 기반 제외가 1차, 키워드는 백업.
@@ -141,47 +143,69 @@ class ClosingBetStrategy:
         candidates = []
         seen_codes = set()
 
-        # (a) 거래대금 TOP N (코스피 + 코스닥)
-        for mrkt in ["001", "101"]:
+        # (a) 거래대금 상위 — 양시장 통합(mrkt_tp=000) 유동성 절대 순위.
+        #     시장별 분리(001/101) 는 시장 규모 차이를 무시하고 각 50 슬롯을 배분해
+        #     코스닥 중소형을 과대 대표했다(2026-07-28: 개별 75건 중 코스닥 50건).
+        #     1페이지 100행으로 거래대금 하한 아래까지 내려간다(2026-07-28 실측: 78행에서
+        #     하한 1,000억 도달, 100행 끝은 784억). 활황장에 100행이 하한 위에서 끝나면
+        #     하한 통과 종목이 조용히 잘리므로 그때만 경고를 남긴다(필요 시 max_pages 상향).
+        try:
+            data = self.api.get_trading_value_rank(mrkt_tp="000")
+            items = data.get("trde_prica_upper", [])
+        except Exception as e:
+            logger.error(f"거래대금순위 조회 실패: {e}")
+            items = []
+
+        min_tv = self.strategy_cfg.MIN_TRADING_VALUE
+        if items:
+            last_tv = abs(self.engine.parse_price(items[-1].get("trde_prica", "0"))) * 1_000_000
+            if last_tv >= min_tv:
+                logger.warning(
+                    f"거래대금 순위 마지막 행({last_tv/1e8:,.0f}억)이 하한({min_tv/1e8:,.0f}억) "
+                    f"이상 — 유니버스가 {len(items)}행에서 절단됐을 수 있다. max_pages 상향 검토."
+                )
+        picked = 0
+        for item in items[:self.strategy_cfg.TOP_N_BY_VALUE]:
+            code = item.get("stk_cd", "").split("_")[0]
+            name = item.get("stk_nm", "")
+            tv = abs(self.engine.parse_price(item.get("trde_prica", "0"))) * 1_000_000
+            cp = abs(self.engine.parse_price(item.get("cur_prc", "0")))
+            chg = self.engine.parse_float(item.get("flu_rt", "0"))
+
+            if code in seen_codes:
+                continue
+            if code in self._excluded_codes:  # ETF/ETN — 개별 시총 조회 전에 제외
+                continue
+            # 거래대금 하한은 순위 응답만으로 판정되므로 시총 조회 전에 컷한다
+            # (통합 순위엔 하한 미달 종목이 다수 섞여 무의미한 ka10001 호출이 커진다).
+            if tv < min_tv:
+                continue
+            self._top_value_codes.add(code)
+
+            # 시가총액은 거래대금순위 API에 없으므로 개별 조회
             try:
-                data = self.api.get_trading_value_rank(mrkt_tp=mrkt)
-                items = data.get("trde_prica_upper", [])
-                for item in items[:self.strategy_cfg.TOP_N_BY_VALUE]:
-                    code = item.get("stk_cd", "").split("_")[0]
-                    name = item.get("stk_nm", "")
-                    self._top_value_codes.add(code)
-                    tv = abs(self.engine.parse_price(item.get("trde_prica", "0"))) * 1_000_000
-                    cp = abs(self.engine.parse_price(item.get("cur_prc", "0")))
-                    chg = self.engine.parse_float(item.get("flu_rt", "0"))
+                info = self.api.get_stock_basic_info(code)
+                mc_raw = self.engine.parse_price(info.get("mac", "0"))
+                mc = mc_raw * 100_000_000
+                self._capture_basic_features(code, info)
+                time.sleep(0.3)
+            except Exception:
+                mc = 0
 
-                    if code in seen_codes:
-                        continue
-                    if code in self._excluded_codes:  # ETF/ETN — 개별 시총 조회 전에 제외
-                        continue
+            if not self.engine.filter_basic(name, tv, mc):
+                continue
 
-                    # 시가총액은 거래대금순위 API에 없으므로 개별 조회
-                    try:
-                        info = self.api.get_stock_basic_info(code)
-                        mc_raw = self.engine.parse_price(info.get("mac", "0"))
-                        mc = mc_raw * 100_000_000
-                        self._capture_basic_features(code, info)
-                        time.sleep(0.3)
-                    except Exception:
-                        mc = 0
+            sector = self._find_sector(code)
+            candidates.append(StockCandidate(
+                code=code, name=name, sector=sector,
+                current_price=cp, trading_value=tv,
+                market_cap=mc, change_pct=chg,
+            ))
+            seen_codes.add(code)
+            picked += 1
 
-                    if not self.engine.filter_basic(name, tv, mc):
-                        continue
-
-                    sector = self._find_sector(code)
-                    candidates.append(StockCandidate(
-                        code=code, name=name, sector=sector,
-                        current_price=cp, trading_value=tv,
-                        market_cap=mc, change_pct=chg,
-                    ))
-                    seen_codes.add(code)
-            except Exception as e:
-                logger.error(f"거래대금순위 조회 실패 (mrkt={mrkt}): {e}")
-            time.sleep(0.3)
+        logger.info(f"거래대금 통합 순위 {len(items)}행 → 하한({min_tv/1e8:,.0f}억) 통과 "
+                    f"{len(self._top_value_codes)}건 → 후보 {picked}건")
 
         # (b) 관심섹터 종목 보강
         for _, codes in self.strategy_cfg.WATCHLIST_SECTORS.items():
