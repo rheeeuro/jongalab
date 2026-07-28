@@ -340,3 +340,39 @@ def test_confirmation_fail_closed_without_samples():
     for s in (None, {}, {"n_days": 5}):
         r = check_confirmation(s)
         assert not r["pass"] and r["reasons"]
+
+
+# ── 절대 수익성 하한 (2026-07-28) ──
+# 초과수익만 보면 '유니버스보다 낫지만 돈은 잃는' rule 이 통과한다. 대조군 우위로도 막히지
+# 않는다 — 대조군(control_legacy_top10) 자체가 -0.227% 라 문턱이 음수이기 때문.
+
+def test_selector_blocked_when_excess_positive_but_absolute_loses():
+    # f5_late_day_strength 실례: 절대 -0.39% / 초과 +0.20%. 유의성이 아무리 좋아도 실탄 불가.
+    losing = {"n": 79, "n_days": 11, "mean_net": -0.39,
+              "ci_low_exc": 0.05, "t_days_exc": 3.0}
+    gate = check_promotion(_rule(family="f5_supply", stats=losing), [_control(-0.227)])
+    assert not gate["eligible"]
+    assert any("절대 수익성" in r for r in gate["stat_reasons"])
+
+
+def test_beating_a_losing_control_is_not_enough():
+    # 대조군이 -0.227% 라고 해서 -0.1% 인 rule 을 올리면 안 된다('덜 잃는 쪽' 선택 금지).
+    gate = check_promotion(
+        _rule(stats={"n": 50, "n_days": 12, "mean_net": -0.1,
+                     "ci_low_exc": 0.2, "t_days_exc": 2.5}),
+        [_control(-0.227)])
+    assert not gate["eligible"]
+    assert any("절대 수익성" in r for r in gate["stat_reasons"])
+    # 대조군 우위 사유로는 걸리지 않는다(-0.1 > -0.227) → 절대 하한이 유일한 방어선
+    assert not any("대조군" in r for r in gate["stat_reasons"])
+
+
+def test_absolute_and_excess_are_both_required():
+    # 절대만 좋고 초과가 없으면(장 덕에 오른 경우) 통과하지 못한다.
+    market_ride = {"n": 50, "n_days": 12, "mean_net": 1.5,
+                   "ci_low_exc": -0.3, "t_days_exc": 0.2}
+    assert not check_promotion(_rule(stats=market_ride), [_control(-0.227)])["eligible"]
+    # 둘 다 충족하면 통과
+    both = {"n": 50, "n_days": 12, "mean_net": 1.5,
+            "ci_low_exc": 0.3, "t_days_exc": 2.5}
+    assert check_promotion(_rule(stats=both), [_control(-0.227)])["eligible"]

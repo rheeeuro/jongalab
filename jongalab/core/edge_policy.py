@@ -187,10 +187,10 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
 
     rule: stats 가 최신으로 갱신된 rule dict. control_rules: role=benchmark 인 live rule 목록.
     반환: {"eligible": bool, "stat_reasons": [...], "exec_reasons": [...]}
-      - stat_reasons: selector 는 표본·거래일 수·신뢰구간·**일 클러스터 t**(셋 다 유니버스
-        자기제외 **초과** 계열)·**대조군 우위**(이건 **원시** mean_net — "현행보다 나은가"는
-        절대값 질문), veto 는 최소 실익 게이트(거래일 수 + 제외 종목 원시 평균 음수)
-        미충족 사유(benchmark 는 면제)
+      - stat_reasons: selector 는 **절대 수익성**(원시 mean_net>0 — "돈을 버는가")·거래일 수·
+        신뢰구간·**일 클러스터 t**(뒤 둘은 유니버스 자기제외 **초과** 계열 — "우연이 아닌가")·
+        **대조군 우위**(원시 — "현행보다 나은가"), veto 는 최소 실익 게이트(거래일 수 +
+        제외 종목 원시 평균 음수) 미충족 사유(benchmark 는 면제)
       - exec_reasons: 선정 시점 실행 불가 사유(benchmark 는 면제 — 선정에 안 쓰므로)
     월 승격 상한은 시점 의존 운영 제약이라 여기 넣지 않고 라우터가 별도 검사한다.
     """
@@ -202,12 +202,26 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
     # 통계 게이트 — selector 는 기대값 전체 검증, benchmark 는 실탄이 아니라 기준선 교체라 면제.
     # veto 는 아래 별도의 최소 실익 게이트만 적용한다.
     if role == "selector":
-        # 통계 유의성은 **초과 계열**(유니버스 자기제외 대비)로 본다 — 같은 날 시장 무브를
-        # 걷어내야 "우연이 아닌가"에 답이 된다. 반면 아래 '대조군 우위'는 **원시** mean_net
-        # 으로 남긴다: "현행 선정보다 나은가"는 절대 순수익으로 물어야 결정에 쓰인다.
+        # 두 질문에 자가 각각 따로 붙는다(2026-07-28) —
+        #   "돈을 버는가?"   → **절대** 순수익 mean_net > 0 (실현 손익은 절대값이다)
+        #   "우연이 아닌가?" → **초과** 계열 ci_low_exc·t_days_exc (같은 날 시장 무브를 걷어내야
+        #                      잡음이 절반이 되고 다른 룰·현행과의 비교가 성립한다)
+        # 하나만 쓰면 각각 다른 구멍이 난다:
+        #   초과만 → 유니버스보다 낫지만 **돈은 잃는** 룰이 통과(실측: f5_late_day_strength
+        #            절대 -0.39%/초과 +0.20%, f8_op_earnings_yield -0.76%/+0.15%).
+        #            대조군 우위만으론 막히지 않는다 — 대조군 자체가 -0.227% 라 문턱이 음수다.
+        #   절대만 → 그 기간 장이 오른 몫을 실력으로 착각(실측: 이 유니버스 기간 평균 +0.320%,
+        #            양수일 7/14). 게다가 절대 계열은 잡음이 2배라 유의성에 도달하지 못한다.
         ci_low = stats.get("ci_low_exc")
         mean_net = stats.get("mean_net")
         n_days = stats.get("n_days") or 0
+        # 절대 수익성 하한 — 비용(EDGE_COST_PCT) 차감 후 순수익이 양수여야 한다.
+        # 손실 최소화가 1순위이므로 '덜 잃는 쪽'을 고르는 게 아니라 '버는 것만' 올린다.
+        if mean_net is None or mean_net <= 0:
+            stat_reasons.append(
+                f"절대 수익성 미충족: mean_net={mean_net}%(>0 필요) — 비용 차감 후 실제로 "
+                "돈을 버는 rule 만 실탄에 올린다(초과수익이 양수여도 절대 손실이면 제외)"
+            )
         # **min_sample(종목-일)은 게이트에서 뺐다**(2026-07-28, 항목 ③). 이 프로젝트는 이미
         # "실효 표본은 거래일"이라고 결론냈는데(PROMO_MIN_DAYS·t_days) min_sample 만 종목-일
         # 단위로 남아 단위가 어긋났고, 그 결과 **통계적으로 가장 강한 좁은 룰들을 막고 있었다**
