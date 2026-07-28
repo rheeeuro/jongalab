@@ -34,11 +34,13 @@ def _rule(family="f1_news", role=None, predicate=None, stats=None, min_sample=40
 
 
 def _control(mean_net):
+    """live 대조군. 게이트는 **일 등가중**(mean_net_days)으로 비교한다 — 시드가 하루 총액
+    고정·종목 등분이라 계좌 실현치가 그 값이기 때문(양쪽 같은 가중이어야 비교가 성립)."""
     return {"name": "control", "family": "control", "role": "benchmark", "status": "live",
-            "stats": {"mean_net": mean_net}}
+            "stats": {"mean_net": mean_net, "mean_net_days": mean_net}}
 
 
-GOOD_STATS = {"n": 50, "n_days": 12, "mean_net": 0.5,
+GOOD_STATS = {"n": 50, "n_days": 12, "mean_net": 0.5, "mean_net_days": 0.5,
               # 통계 게이트는 초과 계열을 본다(원시 ci_low/t_days 는 표시용).
               "ci_low_exc": 0.1, "t_days_exc": 2.1}
 
@@ -105,7 +107,7 @@ def test_selector_blocked_on_ci_but_not_on_stock_day_count():
     # 통계적으로 강한 좁은 룰(하루 1~2종목)을 막고 있었다. n=10 < min_sample=40 이어도
     # 그 자체로는 탈락 사유가 아니고, 남는 사유는 CI 하한뿐이다.
     gate = check_promotion(
-        _rule(stats={"n": 10, "n_days": 12, "mean_net": 0.5,
+        _rule(stats={"n": 10, "n_days": 12, "mean_net": 0.5, "mean_net_days": 0.5,
                      "ci_low_exc": -0.1, "t_days_exc": 2.1}),
         [_control(0.2)],
     )
@@ -118,7 +120,8 @@ def test_selector_blocked_on_ci_but_not_on_stock_day_count():
 def test_selector_blocked_on_few_trading_days():
     # f5_supply_band_d 사례: 광역 rule 은 2거래일 만에 n=70 을 채우지만 같은 날 표본은
     # 시장 무브로 상관 — 종목-일 n 이 아니라 거래일 수(n_days)가 실효 표본이다.
-    few_days = {"n": 70, "n_days": 2, "ci_low": 0.46, "mean_net": 1.25}
+    few_days = {"n": 70, "n_days": 2, "ci_low": 0.46, "mean_net": 1.25, "mean_net_days": 1.25,
+                "ci_low_exc": 0.46, "t_days_exc": 2.5}
     gate = check_promotion(_rule(stats=few_days), [_control(0.2)])
     assert not gate["eligible"]
     assert any("거래일 부족" in r for r in gate["stat_reasons"])
@@ -225,9 +228,11 @@ def test_supply_band_as_benchmark_skips_selector_gates():
 # 강등 후보로 올린다(2026-07-28 veto_bio_kosdaq recent_mean_net=-0.158 오탐 알림).
 
 def _live(role, recent_mean_net, recent_n=29, recent_n_days=10, family="f7_risk"):
+    """live rule. 강등 게이트도 승격과 같은 가중(일 등가중)을 본다."""
     return {"name": "r", "family": family, "role": role, "status": "live",
             "stats": {"recent_n": recent_n, "recent_n_days": recent_n_days,
-                      "recent_mean_net": recent_mean_net}}
+                      "recent_mean_net": recent_mean_net,
+                      "recent_mean_net_days": recent_mean_net}}
 
 
 def test_veto_demotion_sign_is_inverted_vs_selector():
@@ -262,7 +267,7 @@ def test_selector_blocked_on_weak_day_cluster_t():
     # t=0.37 — 수익이 시장 베타라 거래일 단위로는 유의하지 않다.
     gate = check_promotion(
         _rule(family="f4_laggard",
-              stats={"n": 52, "n_days": 10, "mean_net": 1.192,
+              stats={"n": 52, "n_days": 10, "mean_net": 1.192, "mean_net_days": 1.192,
                      "ci_low_exc": 0.207, "t_days_exc": 0.37}),
         [_control(-0.227)])
     assert not gate["eligible"]
@@ -348,7 +353,7 @@ def test_confirmation_fail_closed_without_samples():
 
 def test_selector_blocked_when_excess_positive_but_absolute_loses():
     # f5_late_day_strength 실례: 절대 -0.39% / 초과 +0.20%. 유의성이 아무리 좋아도 실탄 불가.
-    losing = {"n": 79, "n_days": 11, "mean_net": -0.39,
+    losing = {"n": 79, "n_days": 11, "mean_net": -0.39, "mean_net_days": -0.39,
               "ci_low_exc": 0.05, "t_days_exc": 3.0}
     gate = check_promotion(_rule(family="f5_supply", stats=losing), [_control(-0.227)])
     assert not gate["eligible"]
@@ -358,7 +363,7 @@ def test_selector_blocked_when_excess_positive_but_absolute_loses():
 def test_beating_a_losing_control_is_not_enough():
     # 대조군이 -0.227% 라고 해서 -0.1% 인 rule 을 올리면 안 된다('덜 잃는 쪽' 선택 금지).
     gate = check_promotion(
-        _rule(stats={"n": 50, "n_days": 12, "mean_net": -0.1,
+        _rule(stats={"n": 50, "n_days": 12, "mean_net": -0.1, "mean_net_days": -0.1,
                      "ci_low_exc": 0.2, "t_days_exc": 2.5}),
         [_control(-0.227)])
     assert not gate["eligible"]
@@ -369,10 +374,57 @@ def test_beating_a_losing_control_is_not_enough():
 
 def test_absolute_and_excess_are_both_required():
     # 절대만 좋고 초과가 없으면(장 덕에 오른 경우) 통과하지 못한다.
-    market_ride = {"n": 50, "n_days": 12, "mean_net": 1.5,
+    market_ride = {"n": 50, "n_days": 12, "mean_net": 1.5, "mean_net_days": 1.5,
                    "ci_low_exc": -0.3, "t_days_exc": 0.2}
     assert not check_promotion(_rule(stats=market_ride), [_control(-0.227)])["eligible"]
     # 둘 다 충족하면 통과
-    both = {"n": 50, "n_days": 12, "mean_net": 1.5,
+    both = {"n": 50, "n_days": 12, "mean_net": 1.5, "mean_net_days": 1.5,
             "ci_low_exc": 0.3, "t_days_exc": 2.5}
     assert check_promotion(_rule(stats=both), [_control(-0.227)])["eligible"]
+
+
+# ── 가중 방식 (2026-07-28 결정) ──
+# 효과 크기(절대 수익성·대조군 우위·강등)는 **종목-일 가중**(mean_net) — 시드 배분을 반영하지
+# 않는다. 근거: ① rule 채점은 유니버스 전체 대상이라 매칭 종목-일 대부분은 사지도 않은 종목
+# → '그날 계좌 수익률' 개념이 성립하지 않는다. ② 시드 배분은 바뀌므로(SEED_MAX_NAME_PCT
+# 50%→25% 이력) 측정이 배분에 의존하면 배분 변경 시 과거 점수가 무효가 된다.
+# 쏠림(매칭 많은 날에 수익 집중)은 **유의성 쪽에서 t_days_exc(일 등가중)가 잡는다.**
+
+def test_absolute_floor_uses_stock_day_weighting_not_seed_logic():
+    # mean_net_days 가 음수여도 게이트는 mean_net(종목-일)으로 판정한다 — 가설 검증을
+    # 집행(시드 배분) 방식과 분리하기 위한 의도된 선택이다.
+    concentrated = {"n": 23, "n_days": 12, "mean_net": 0.950, "mean_net_days": -0.745,
+                    "ci_low_exc": 0.3, "t_days_exc": 2.5}
+    gate = check_promotion(_rule(family="f5_supply", stats=concentrated), [_control(-0.227)])
+    assert gate["eligible"]
+    assert not any("절대 수익성" in r for r in gate["stat_reasons"])
+
+
+def test_concentration_is_caught_by_significance_not_by_the_floor():
+    # 쏠림이 심해 일 클러스터 t 가 문턱 미달이면 그쪽에서 걸린다(절대 하한이 아니라).
+    concentrated = {"n": 23, "n_days": 12, "mean_net": 0.950, "mean_net_days": -0.745,
+                    "ci_low_exc": 0.3, "t_days_exc": 0.4}
+    gate = check_promotion(_rule(family="f5_supply", stats=concentrated), [_control(-0.227)])
+    assert not gate["eligible"]
+    assert any("일 클러스터 t" in r for r in gate["stat_reasons"])
+
+
+def test_control_comparison_uses_same_weighting_on_both_sides():
+    # 한쪽만 다른 가중으로 바꾸면 비교가 무의미해진다 — 양쪽 mean_net 으로 고정한다.
+    rule = _rule(stats={"n": 40, "n_days": 12, "mean_net": 0.2, "mean_net_days": 0.2,
+                        "ci_low_exc": 0.1, "t_days_exc": 2.1})
+    ctrl = {"name": "c", "family": "control", "role": "benchmark", "status": "live",
+            "stats": {"mean_net": 0.5, "mean_net_days": -9.0}}
+    gate = check_promotion(rule, [ctrl])
+    assert not gate["eligible"]
+    assert any("대조군 우위" in r for r in gate["stat_reasons"])
+
+
+def test_demotion_uses_same_weighting_as_promotion():
+    # 승격은 종목-일, 강등은 일 등가중이면 두 문턱 사이에 모순 구간이 생긴다.
+    r = {"name": "r", "family": "f4_laggard", "role": "selector", "status": "live",
+         "stats": {"recent_n": 29, "recent_n_days": 10,
+                   "recent_mean_net": 0.8, "recent_mean_net_days": -0.3}}
+    assert not check_demotion(r)["demote_candidate"]
+    r["stats"]["recent_mean_net"] = -0.2
+    assert check_demotion(r)["demote_candidate"]

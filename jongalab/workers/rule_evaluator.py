@@ -180,6 +180,16 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
     recent_dates = set(sorted({d for d, _ in dated})[-_RECENT_DAYS:])
     recent = [net for d, net in dated if d in recent_dates]
     recent_mean = sum(recent) / len(recent) if recent else None
+    # 일 등가중 최근 평균 — 강등 게이트가 쓴다. 시드가 하루 총액 고정·종목 등분이라
+    # (seed_allocator: target=min(seed/n, cap)) 계좌 실현치는 종목-일 가중이 아니라 이 값이다.
+    _recent_by_day: dict = {}
+    for d, net in dated:
+        if d in recent_dates:
+            _recent_by_day.setdefault(d, []).append(net)
+    recent_mean_days = (
+        sum(sum(v) / len(v) for v in _recent_by_day.values()) / len(_recent_by_day)
+        if _recent_by_day else None
+    )
 
     # ── 일 클러스터 통계 (2026-07-28) — 위 ci_low 는 종목-일 iid 가정이라 같은 날 종목들이
     # 시장 무브로 상관된 만큼 유의성을 과신한다. 거래일을 관측 단위로 묶어(하루 1표본) 다시 재면
@@ -229,6 +239,8 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
         "recent_n": len(recent),
         "recent_n_days": len(recent_dates),
         "recent_mean_net": round(recent_mean, 3) if recent_mean is not None else None,
+        # 강등 게이트가 쓰는 값 — 계좌 실현치와 같은 가중(일 등가중)
+        "recent_mean_net_days": round(recent_mean_days, 3) if recent_mean_days is not None else None,
     }
 
 
@@ -421,6 +433,7 @@ def run():
             if check_demotion(rule)["demote_candidate"]:
                 demotions.append({
                     "name": rule["name"], "family": rule["family"],
+                    # 알림에도 게이트가 판단한 값(종목-일 가중)을 그대로 보여준다
                     "n": stats["recent_n"], "mean_net": stats["recent_mean_net"],
                 })
 

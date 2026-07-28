@@ -213,10 +213,19 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
         #   절대만 → 그 기간 장이 오른 몫을 실력으로 착각(실측: 이 유니버스 기간 평균 +0.320%,
         #            양수일 7/14). 게다가 절대 계열은 잡음이 2배라 유의성에 도달하지 못한다.
         ci_low = stats.get("ci_low_exc")
-        mean_net = stats.get("mean_net")
         n_days = stats.get("n_days") or 0
         # 절대 수익성 하한 — 비용(EDGE_COST_PCT) 차감 후 순수익이 양수여야 한다.
         # 손실 최소화가 1순위이므로 '덜 잃는 쪽'을 고르는 게 아니라 '버는 것만' 올린다.
+        #
+        # **효과 크기는 종목-일 가중(mean_net) — 시드 배분을 반영하지 않는다**(2026-07-28 결정).
+        # 이유: ① rule 채점은 **유니버스 전체**에 적용된다 — 매칭된 종목-일 대부분은 애초에
+        # 사지도 않은 종목이라 '그날 계좌 수익률' 개념이 성립하지 않는다. ② 시드 배분은 바뀐다
+        # (SEED_MAX_NAME_PCT 50%→25% 이력). 측정이 배분에 의존하면 배분을 바꿀 때마다 과거
+        # 점수가 무효가 된다 — 가설 검증은 집행 방식과 분리해야 한다.
+        # 참고: `mean_net_days`(일 등가중)도 stats 에 함께 있다. 둘의 격차가 크면 수익이 매칭
+        # 많은 날에 쏠렸다는 신호다(실측: f5_frgn_surge_pullback1 종목-일 +0.950% vs 일 등가중
+        # -0.745%) → 화면·수동 검토용 진단값. **유의성은 그 쏠림을 t_days_exc(일 등가중)가 잡는다.**
+        mean_net = stats.get("mean_net")
         if mean_net is None or mean_net <= 0:
             stat_reasons.append(
                 f"절대 수익성 미충족: mean_net={mean_net}%(>0 필요) — 비용 차감 후 실제로 "
@@ -248,6 +257,8 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
             )
         # 대조군 우위 — live benchmark 의 mean_net 최대값 이상. 대조군이 없거나 미평가면
         # fail-closed(승격 불가): '대조군 우위' 규율이 조용히 증발하는 fail-open 을 막는다.
+        # **양쪽 모두 종목-일 가중(mean_net)** — 위 절대 하한과 같은 자여야 한다. 한쪽만 바꾸면
+        # 가중이 다른 값을 견주게 되어 비교가 무의미해진다(2026-07-28 실제로 그 상태를 만들었다).
         control_means = [
             (c.get("stats") or {}).get("mean_net")
             for c in control_rules
@@ -345,6 +356,9 @@ def check_demotion(rule: dict) -> dict:
     stats = rule.get("stats") or {}
     n = stats.get("recent_n") or 0
     n_days = stats.get("recent_n_days") or 0
+    # 승격 게이트와 같은 자(종목-일 가중) — 두 문턱이 어긋나면 승격 기준으론 흑자인데 강등
+    # 기준으론 적자인 구간이 생긴다. 시드 배분을 반영하지 않는 이유는 check_promotion 주석 참조
+    # (채점이 유니버스 전체 대상이고, 배분은 바뀌므로 측정을 집행과 분리한다).
     mean_net = stats.get("recent_mean_net")
     if n < DEMOTE_MIN_N or n_days < DEMOTE_MIN_DAYS or mean_net is None:
         return {"demote_candidate": False, "reasons": []}
