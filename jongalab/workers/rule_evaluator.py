@@ -24,7 +24,7 @@ import logging
 import math
 from datetime import date
 
-from core.config import EDGE_COST_PCT
+from core.config import EDGE_COST_PCT, EDGE_PROMO_POLICY
 from core.logging_setup import setup_logging
 from core.edge_predicate import evaluate
 from core.edge_policy import (
@@ -362,10 +362,21 @@ def run():
     promotions, exec_pending, demotions = [], [], []
     for rule in rules:
         stats = rule["stats"]
+        # 적용 중인 심사 정책은 **전역 설정**이라 상태와 무관하게 전 rule 에 남긴다 — candidate
+        # 에만 붙이면 후보가 0 종인 순간 화면에서 정책 표시가 사라진다.
+        stats["promo_policy"] = EDGE_PROMO_POLICY
         if rule["status"] == "candidate":
-            gate = check_promotion(rule, controls)  # 라우터 승격 게이트와 동일 단일 소스
+            gate = check_promotion(rule, controls, policy=EDGE_PROMO_POLICY)  # 라우터와 동일 단일 소스
             stats["promo_eligible"] = gate["eligible"]
             stats["decision_stage"] = decision_stage(rule)
+            # 화면이 게이트를 **재추정하지 않도록** 막고 있는 항목과 적용 정책을 함께 저장한다.
+            # (프론트가 min_sample 로 진행률을 그리다 2026-07-28 min_sample 이 게이트에서 빠지자
+            #  '게이지는 꽉 찼는데 검증 중'이 되는 불일치가 생겼다 — 조건은 백엔드만 안다.)
+            # 사유 문자열의 콜론 앞부분만 잘라 짧은 라벨로 만든다(문구가 바뀌어도 자동 동기화).
+            stats["promo_blockers"] = [
+                r.split(":")[0].strip() for r in (gate["stat_reasons"] + gate["exec_reasons"])
+            ]
+            stats["promo_policy"] = EDGE_PROMO_POLICY
             row = {
                 "name": rule["name"], "family": rule["family"],
                 "n": stats["n"], "mean_net": stats["mean_net"], "ci_low": stats["ci_low"],
@@ -377,7 +388,7 @@ def run():
             if due == "discovery":
                 d_stats = _recompute_stats(
                     _slice_sample_days(rule["_daily_rows"], 0, DISCOVERY_DAYS), rule["_uni"])
-                d_gate = check_promotion({**rule, "stats": d_stats}, controls)
+                d_gate = check_promotion({**rule, "stats": d_stats}, controls, policy=EDGE_PROMO_POLICY)
                 # 발견 판정은 **통계만** 본다. 선정 시점 실행 불가(exec_reasons)는 가설이
                 # 반증된 게 아니라 집행 설계 문제이고, 설계가 바뀌면 되살아나야 한다
                 # (veto_short_surge 사례: short_wght 가 17:50 수집이라 실행 불가지만 통계는

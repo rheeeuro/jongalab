@@ -13,6 +13,7 @@ import {
   STATUS_BADGE,
   STAT_META,
   PROMO_MIN_DAYS,
+  promoBlockers,
   isPromotionCandidate,
   isMeasurementOnly,
   verifyProgress,
@@ -35,9 +36,10 @@ export function EdgeRuleCard({
   // 스파크라인: 일별 평균 수익 시계열(결측 제외). 2점 미만이면 미표시.
   const series = rule.daily.map((d) => d.mean_net_ret).filter((v): v is number => v !== null);
   const meanTone = retTone(s?.mean_net);
+  const blockers = promoBlockers(rule);
 
-  // 검증 진행바: 검증 횟수 n / 필요 횟수 min_sample (stats 미생성이면 0회로 취급).
-  // 진행도 계산은 lib/edge.verifyProgress 단일 소스 — 목록 정렬과 같은 값을 쓴다.
+  // 검증 진행바: 표본 축적(거래일) 진행도 — lib/edge.verifyProgress 단일 소스(목록 정렬과 동일).
+  // 게이트를 막는 조건은 서버가 stats.promo_blockers 로 내려준다(프론트 재계산 금지).
   const { n, nDays, progress } = verifyProgress(rule);
   const hasData = n > 0;
 
@@ -127,16 +129,21 @@ export function EdgeRuleCard({
         )}
       </div>
 
-      {/* 검증 진행바 — 검증 중 카드는 기록이 없어도(0회) 항상 표시. 측정용은 통과할 관문이 없어 제외 */}
+      {/* 검증 상태 — 표본 진행바(거래일)와 **막고 있는 항목**을 분리해 보여준다.
+          예전엔 진행바가 min_sample(회수)까지 포함해, 그 조건이 게이트에서 빠진 뒤
+          '바는 꽉 찼는데 검증 중'이 되는 모순이 있었다. 이제 바는 심사 대상이 되는 시점만
+          나타내고, 통과를 막는 이유는 서버가 준 blockers 를 그대로 적는다. */}
       {rule.status === "candidate" && !measure && (
         <div className="mt-0.5">
-          <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500">
-            <span>검증 진행</span>
+          <div className="flex items-center justify-between gap-2 text-[10px] text-slate-400 dark:text-slate-500">
+            <span className="shrink-0">
+              {nDays < PROMO_MIN_DAYS ? "표본 쌓는 중" : promo ? "검증 통과" : "심사 중"}
+            </span>
             <span className="tabular-nums">
-              {n}/{rule.min_sample}회
               <span className={nDays < PROMO_MIN_DAYS ? "text-amber-500 dark:text-amber-400" : ""}>
-                {" · "}{nDays}/{PROMO_MIN_DAYS}일
+                {nDays}/{PROMO_MIN_DAYS}일
               </span>
+              {n > 0 && <span className="text-slate-300 dark:text-slate-600">{" · "}{n}회</span>}
             </span>
           </div>
           <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
@@ -145,6 +152,12 @@ export function EdgeRuleCard({
               style={{ width: `${progress}%` }}
             />
           </div>
+          {/* 표본이 찬 뒤에도 통과가 아니면 이유를 밝힌다 — 이게 없으면 '왜 아직?'이 남는다 */}
+          {!promo && nDays >= PROMO_MIN_DAYS && blockers.length > 0 && (
+            <p className="mt-1 truncate text-[10px] text-slate-400 dark:text-slate-500">
+              남은 조건: {blockers.join(" · ")}
+            </p>
+          )}
         </div>
       )}
     </Link>

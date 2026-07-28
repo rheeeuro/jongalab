@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from routers.admin import require_admin
 from core.edge_predicate import validate_predicate, PredicateError
+from core.config import EDGE_PROMO_POLICY
 from core.edge_policy import ROLES, FAMILIES, rule_role, check_promotion, decision_stage
 from core.repository.edge_rule import (
     create_rule,
@@ -27,7 +28,13 @@ from core.repository.edge_rule import (
 
 router = APIRouter(prefix="/api/edge-rules", tags=["edge-rules"])
 
-_MONTHLY_PROMOTE_CAP = 2  # 다중 가설 보정: live 승격 월 상한(README §5·계획 §4)
+# 다중 가설 보정: live 승격 월 상한(README §5·계획 §4).
+# 2026-07-28 에 2→3 으로 올렸다. 이유: experimental 정책(config.EDGE_PROMO_POLICY)이 이미
+# 통계 유의성 요구를 내려놓았으므로 같은 목적의 월 상한만 남겨두는 건 일관성이 없고, 무엇보다
+# **live selector 1종으로는 hybrid 모드가 legacy 와 거의 같은 종목을 산다**(실측 재현:
+# 1종 +0.016%p / 3종 +0.443%p / 8종 +0.810%p) — 상한 때문에 실험 자체가 성립하지 않는다.
+# strict 로 되돌릴 때 이 값도 2 로 함께 되돌릴 것.
+_MONTHLY_PROMOTE_CAP = 3
 
 
 class RuleCreate(BaseModel):
@@ -139,22 +146,25 @@ def promote_edge_rule(rule_id: int):
     # 판정 일정 규율(sql/39) — 확인창까지 통과한 rule 만 승격한다. 이걸 안 막으면 stats 는
     # 매일 재계산되므로, 판정에서 탈락한 rule 이 나중에 우연히 게이트를 통과하는 날 승격할 수
     # 있어 '시험 횟수 1회' 규율이 무의미해진다(오탐 2.4% → 22% 로 되돌아감).
-    decision = rule.get("decision") or {}
-    verdict = decision.get("verdict")
-    stage = decision_stage(rule)
-    if stage != "decided":
-        raise HTTPException(
-            status_code=409,
-            detail=(f"판정 미완료(현재 단계: {stage}) — 발견 후 확인창의 새 표본으로 확증돼야 "
-                    "승격할 수 있습니다. 매일 재평가로 통과를 노리는 경로를 막는 규율입니다."),
-        )
-    if verdict != "confirmed":
-        raise HTTPException(
-            status_code=409,
-            detail=(f"판정 결과 '{verdict}' — 승격 불가. 사유: "
-                    + " / ".join((decision.get("confirm") or {}).get("reasons")
-                                 or (decision.get("discovery") or {}).get("reasons") or ["기록 없음"])),
-        )
+    # **experimental 정책에서는 면제** — 그 정책의 취지가 "확신을 기다리지 않고 올려보고 강등"
+    # 이므로 판정 일정을 강제하면 앞뒤가 맞지 않는다(config.EDGE_PROMO_POLICY 주석 참조).
+    if EDGE_PROMO_POLICY != "experimental":
+        decision = rule.get("decision") or {}
+        verdict = decision.get("verdict")
+        stage = decision_stage(rule)
+        if stage != "decided":
+            raise HTTPException(
+                status_code=409,
+                detail=(f"판정 미완료(현재 단계: {stage}) — 발견 후 확인창의 새 표본으로 확증돼야 "
+                        "승격할 수 있습니다. 매일 재평가로 통과를 노리는 경로를 막는 규율입니다."),
+            )
+        if verdict != "confirmed":
+            raise HTTPException(
+                status_code=409,
+                detail=(f"판정 결과 '{verdict}' — 승격 불가. 사유: "
+                        + " / ".join((decision.get("confirm") or {}).get("reasons")
+                                     or (decision.get("discovery") or {}).get("reasons") or ["기록 없음"])),
+            )
 
     now = datetime.now()
     if count_promoted_in_month(now.year, now.month) >= _MONTHLY_PROMOTE_CAP:
@@ -164,7 +174,7 @@ def promote_edge_rule(rule_id: int):
         )
 
     controls = [r for r in list_rules(status="live") if rule_role(r) == "benchmark"]
-    gate = check_promotion(rule, controls)
+    gate = check_promotion(rule, controls, policy=EDGE_PROMO_POLICY)
     if not gate["eligible"]:
         raise HTTPException(status_code=409, detail=" / ".join(gate["stat_reasons"] + gate["exec_reasons"]))
 

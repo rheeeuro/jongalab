@@ -71,6 +71,20 @@ EDGE_COST_PCT = float(os.getenv('EDGE_COST_PCT', '0.25'))
 # veto(감액·제외) rule 은 모드와 무관하게 선정 직전 적용. 롤백: 이 값을 legacy 로 되돌리면 즉시 원복.
 EDGE_SELECTION_MODE = os.getenv('EDGE_SELECTION_MODE', 'legacy')
 
+# 승격 게이트 정책 (2026-07-28 사용자 결정) — core.edge_policy.check_promotion 이 읽는다.
+#   strict       : 통계 유의성 요구(ci_low_exc>0 + t_days_exc≥t분포임계값) + 판정 일정(발견→확인창)
+#                  강제. 오탐 2.4% 이지만 **현재 44종 중 통과 0종**.
+#   experimental : 유의성·판정 일정 면제. 남는 조건은 거래일≥10 · **절대 순수익>0** ·
+#                  초과수익>0 · 대조군 우위 · 선정 시점 실행 가능성.
+# experimental 을 택한 근거: 현행 legacy(점수 top-N) 선정이 **무엣지가 아니라 실제로 나쁘다** —
+# 실측(14거래일) 무작위 10종목이 legacy 를 이긴 비율 82.8%, 유니버스 평균 +0.071% vs legacy
+# -0.150%, 점수 최하위 10종이 legacy 보다 +0.556%p. 챔피언이 마이너스면 도전자 오탐의 기대
+# 비용이 0 에 가까우므로, 통계적 확신을 기다리는 것보다 올려보고 강등하는 편이 낫다는 판단.
+# ⚠️ 대가: 사전등록 규율이 약해진다(탈락한 rule 을 기준 완화로 되살리는 셈). 강등 감지가
+# 안전망이므로 최근 창 성적을 반드시 함께 감시한다(edge_policy.check_demotion, 최소 5거래일).
+# 롤백: 이 값을 strict 로 되돌리면 게이트가 즉시 원복된다(이미 live 인 rule 은 강등 API 로 별도 처리).
+EDGE_PROMO_POLICY = os.getenv('EDGE_PROMO_POLICY', 'experimental')
+
 # 키움 데이터 서버 (별도 FastAPI, localhost) — core.kiwoom_client 가 호출
 KIWOOM_BASE_URL = os.getenv('KIWOOM_BASE_URL', 'http://127.0.0.1:8001')
 

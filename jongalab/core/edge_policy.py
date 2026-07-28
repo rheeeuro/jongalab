@@ -150,6 +150,15 @@ CONFIRM_MIN_MEAN_EXC = 0.0
 
 DECISION_STAGES: tuple[str, ...] = ("discovery", "confirming", "decided")
 
+# ── 승격 게이트 정책 (2026-07-28) ──
+# strict       : 통계 유의성(ci_low_exc>0 + t_days_exc≥t분포임계값) 요구 + 판정 일정 강제.
+# experimental : 유의성·판정 일정 면제. 남는 조건은 거래일≥10 · **절대 순수익>0** ·
+#                초과수익>0 · 대조군 우위 · 선정 시점 실행 가능성.
+# 근거·대가·롤백은 core/config.py 의 EDGE_PROMO_POLICY 주석에 적었다(실측 근거 포함).
+# **기본값은 strict** — 호출부가 정책을 넘기지 않으면 엄격한 쪽으로 동작해야 한다(fail-safe).
+# 실제 운영 정책은 config.EDGE_PROMO_POLICY 이고, 라우터·평가기가 그 값을 명시로 넘긴다.
+POLICIES: tuple[str, ...] = ("strict", "experimental")
+
 
 def decision_stage(rule: dict) -> str:
     """rule 이 판정 일정상 어느 단계인가 — decision 컬럼(기록)만 보고 판단한다.
@@ -182,7 +191,7 @@ def decision_due(rule: dict, n_days: int) -> str | None:
     return None
 
 
-def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
+def check_promotion(rule: dict, control_rules: list[dict], policy: str = "strict") -> dict:
     """승격 자격 판정 — 라우터(409 사유)·평가기(알림·stats.promo_eligible)가 공유하는 단일 게이트.
 
     rule: stats 가 최신으로 갱신된 rule dict. control_rules: role=benchmark 인 live rule 목록.
@@ -242,19 +251,31 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
                 f"거래일 부족: n_days={n_days} < {PROMO_MIN_DAYS} — 같은 날 표본은 "
                 "시장 무브로 상관되어 종목-일 n 만으로는 과신"
             )
-        if ci_low is None or ci_low <= 0:
-            stat_reasons.append(f"신뢰구간 하한 미충족: ci_low_exc={ci_low}(>0 필요)")
-        # 일 클러스터 t — ci_low(종목-일 iid)의 과신을 거래일 단위로 교정. 문턱은 고정 1.65 가
-        # 아니라 **거래일 자유도의 t 분포 임계값**을 쓴다(소표본에서 1.65 는 너무 관대 — 거래일
-        # 10일이면 1.833). None(분산 추정 불가·초과 표본 부재)은 fail-closed.
-        t_days = stats.get("t_days_exc")
-        t_need = day_t_threshold(n_days) or PROMO_MIN_DAY_T
-        if t_days is None or t_days < t_need:
+        # 초과수익 방향 — 정책 무관 공통. 시장 몫을 걷어낸 알파가 양수여야 한다.
+        mean_exc = stats.get("mean_exc")
+        if mean_exc is None or mean_exc <= 0:
             stat_reasons.append(
-                f"일 클러스터 t 미충족: t_days_exc={t_days}(>={t_need} 필요, 거래일 {n_days}일 "
-                "자유도 기준) — 같은 날 종목은 시장 무브로 상관되어 거래일을 관측 단위로 묶어야 "
-                "실효 유의성이 나온다"
+                f"초과수익 미충족: mean_exc={mean_exc}%(>0 필요) — 같은 날 유니버스(자기 제외) "
+                "대비 초과분이 양수여야 시장 몫이 아닌 선정 실력이다"
             )
+        # ── 아래 두 조건(신뢰구간·일 클러스터 t)은 **통계 유의성** 요구다 ──
+        # experimental 정책에서는 면제한다: 현행 legacy 선정이 마이너스라 도전자 오탐의 기대
+        # 비용이 낮고(무작위가 legacy 를 82.8% 이김), 유의성을 기다리면 44종 중 통과가 0종이다.
+        # 안전망은 강등 감지(최근 창, 최소 5거래일)와 절대 순수익>0 하한이 맡는다.
+        if policy != "experimental":
+            if ci_low is None or ci_low <= 0:
+                stat_reasons.append(f"신뢰구간 하한 미충족: ci_low_exc={ci_low}(>0 필요)")
+            # 일 클러스터 t — ci_low(종목-일 iid)의 과신을 거래일 단위로 교정. 문턱은 고정 1.65 가
+            # 아니라 **거래일 자유도의 t 분포 임계값**을 쓴다(소표본에서 1.65 는 너무 관대 — 거래일
+            # 10일이면 1.833). None(분산 추정 불가·초과 표본 부재)은 fail-closed.
+            t_days = stats.get("t_days_exc")
+            t_need = day_t_threshold(n_days) or PROMO_MIN_DAY_T
+            if t_days is None or t_days < t_need:
+                stat_reasons.append(
+                    f"일 클러스터 t 미충족: t_days_exc={t_days}(>={t_need} 필요, 거래일 {n_days}일 "
+                    "자유도 기준) — 같은 날 종목은 시장 무브로 상관되어 거래일을 관측 단위로 묶어야 "
+                    "실효 유의성이 나온다"
+                )
         # 대조군 우위 — live benchmark 의 mean_net 최대값 이상. 대조군이 없거나 미평가면
         # fail-closed(승격 불가): '대조군 우위' 규율이 조용히 증발하는 fail-open 을 막는다.
         # **양쪽 모두 종목-일 가중(mean_net)** — 위 절대 하한과 같은 자여야 한다. 한쪽만 바꾸면
@@ -294,8 +315,9 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
         ok, missing = selection_executable(rule.get("predicate") or [])
         if not ok:
             exec_reasons.append(
-                f"선정 시점(13~15시) 실행 불가 피처 사용: {missing} — 19:50/익일 수집 컬럼은 "
-                "선정 때 NULL 이라 live 여도 무음 no-op 가 됩니다(집행 설계 변경 후 승격)"
+                # 콜론 앞부분은 화면 배지(stats.promo_blockers)로도 쓰이니 짧게 유지한다.
+                f"선정 시점 실행 불가: {missing} — 19:50/익일 수집 컬럼은 선정 때(13~15시) NULL 이라 "
+                "live 여도 무음 no-op 가 됩니다(집행 설계 변경 후 승격)"
             )
 
     return {

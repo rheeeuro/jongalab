@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { EdgeRuleWithDaily } from "@/types";
 import { EdgeSummaryStrip } from "@/components/EdgeSummaryStrip";
 import { EdgeRuleCard } from "@/components/EdgeRuleCard";
-import { ROLE_META, verifyProgress, isMeasurementOnly } from "@/lib/edge";
+import { ROLE_META, verifyProgress, isMeasurementOnly, promoPolicy, POLICY_META } from "@/lib/edge";
 
 // 이 화면은 읽기 전용 — 실전 투입/종료 등 관리는 /admin/edge-rules(관리자 인증)에서만 한다.
 const GROUPS: { status: "live" | "candidate" | "retired"; label: string; desc: string }[] = [
@@ -43,9 +43,24 @@ export function EdgeBoard({ rules }: { rules: EdgeRuleWithDaily[] }) {
   const measured = visible.filter(isMeasurementOnly);
   const pipeline = visible.filter((r) => !isMeasurementOnly(r));
 
+  // 적용 중인 심사 정책 — experimental 은 통계 유의성·확인창을 면제한 실험 모드라 반드시 알린다.
+  // (이걸 숨기면 신뢰도가 낮은 전략이 '적용 중'인 이유가 화면에 없어 오해를 준다.)
+  const policy = rules.map(promoPolicy).find((p): p is 'strict' | 'experimental' => p !== null);
+
   return (
     <div className="space-y-6">
       <EdgeSummaryStrip rules={rules} />
+
+      {policy === "experimental" && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-500/30 dark:bg-amber-500/5">
+          <p className="text-xs font-bold text-amber-700 dark:text-amber-300">
+            현재 심사 기준: {POLICY_META.experimental.label}
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-amber-700/80 dark:text-amber-300/80">
+            {POLICY_META.experimental.help}
+          </p>
+        </div>
+      )}
 
       {/* 역할 탭 — 모바일에서 넘치면 가로 스크롤 */}
       <div className="space-y-1.5">

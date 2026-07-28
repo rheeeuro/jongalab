@@ -71,7 +71,7 @@ export function roleMeta(role: string) {
 export const PROMO_MIN_DAYS = 10;
 
 export const STAT_META = {
-  n: { label: '검증 횟수', help: '이 전략 조건에 걸린 종목을 채점한 누적 횟수(종목×일). 40회를 넘어야 적용을 검토합니다.' },
+  n: { label: '검증 횟수', help: '이 전략 조건에 걸린 종목을 채점한 누적 횟수(종목×일). 참고 지표입니다 — 같은 날 여러 종목은 함께 움직이므로, 적용 검토 기준은 이 횟수가 아니라 아래 검증 거래일입니다.' },
   n_days: { label: '검증 거래일', help: '검증 횟수가 쌓인 서로 다른 거래일 수. 같은 날 여러 종목은 시장 흐름에 함께 움직여 우연을 걸러내기 어렵기 때문에, 횟수와 별개로 서로 다른 거래일이 10일 이상 쌓여야 적용을 검토합니다.' },
   mean_net: { label: '평균 수익', help: '조건에 걸린 종목을 다음날 팔았다고 가정한 회당 평균 수익률. 세금·수수료 등 거래비용(0.25%)을 뺀 값입니다.' },
   win_rate: { label: '성공률', help: '수익이 난 비율. 단, 성공률보다 평균 수익이 더 중요합니다(한 번의 큰 손실이 여러 번의 작은 수익을 지울 수 있음).' },
@@ -204,16 +204,57 @@ export const TONE_FILL: Record<Tone, string> = {
   flat: '#94a3b8',
 };
 
-// 검증 진행도(0~100) — 승격 게이트는 횟수(n≥min_sample)와 거래일(n_days≥PROMO_MIN_DAYS)을 모두
-// 요구하므로 둘 중 덜 찬 쪽으로 본다(횟수만 채워도 '완료'로 보이지 않게). 카드 진행바와 목록
-// 정렬이 같은 값을 쓰도록 여기 한 곳에서 계산한다.
+// 검증 진행도 — **표본 축적**만 나타낸다(거래일 기준). 게이트 통과 여부와 혼동하면 안 된다.
+//
+// 2026-07-28 정리: 예전엔 `min_sample`(종목-일 40회)도 진행률에 넣었는데, 그날 min_sample 이
+// 승격 게이트에서 빠지면서 **"진행바는 꽉 찼는데 여전히 검증 중"** 이라는 모순이 생겼다.
+// 게이트는 표본 외에도 절대 수익성·초과수익·유의성·대조군 우위를 보고, 그 조건은 백엔드만 안다.
+// → 진행바는 "언제 심사 대상이 되는가"(거래일 10일)만 보여주고, **무엇이 막고 있는지는 서버가
+//   내려주는 stats.promo_blockers 를 그대로 렌더링**한다(프론트에서 재계산 금지).
 export function verifyProgress(rule: EdgeRule): { n: number; nDays: number; progress: number } {
   const n = rule.stats?.n ?? 0;
   const nDays = rule.stats?.n_days ?? 0;
-  const cntPct = Math.min(100, Math.round((n / rule.min_sample) * 100));
-  const daysPct = Math.min(100, Math.round((nDays / PROMO_MIN_DAYS) * 100));
-  return { n, nDays, progress: Math.min(cntPct, daysPct) };
+  return { n, nDays, progress: Math.min(100, Math.round((nDays / PROMO_MIN_DAYS) * 100)) };
 }
+
+// 게이트를 막고 있는 항목 — 서버(stats.promo_blockers)가 계산한 라벨을 화면 문구로 옮긴다.
+// **판정은 서버가 하고 프론트는 표기만 바꾼다**(조건 재계산 금지). 매핑에 없는 값은 그대로 통과시켜
+// 백엔드에 새 조건이 생겨도 화면이 조용히 빠뜨리지 않게 한다.
+const BLOCKER_LABEL: Record<string, string> = {
+  '거래일 부족': '검증 거래일 부족',
+  '절대 수익성 미충족': '회당 순수익이 0% 이하',
+  '초과수익 미충족': '같은 날 다른 후보보다 못함',
+  '신뢰구간 하한 미충족': '보수적 수익이 0% 이하',
+  '일 클러스터 t 미충족': '날짜별 신뢰도 부족',
+  '대조군 우위 미충족': '기준선보다 못함',
+  '실익 미입증': '제외 효과 미입증',
+  '선정 시점 실행 불가': '매수 시점에 못 쓰는 조건',
+  '표본 부족': '검증 횟수 부족',
+};
+
+export function promoBlockers(rule: EdgeRule): string[] {
+  return (rule.stats?.promo_blockers ?? []).map((b) => BLOCKER_LABEL[b] ?? b);
+}
+
+// 적용 중인 승격 정책. experimental 은 통계 유의성·판정 일정을 면제한 실험 모드이므로
+// 화면에 반드시 표시한다 — 유의성이 약한 rule 이 '적용 중'인 이유가 화면에 없으면 오해를 준다.
+export function promoPolicy(rule: EdgeRule): 'strict' | 'experimental' | null {
+  return rule.stats?.promo_policy ?? null;
+}
+
+export const POLICY_META: Record<'strict' | 'experimental', { label: string; help: string }> = {
+  strict: {
+    label: '엄격 심사',
+    help: '성적이 우연이 아님을 통계로 확인(신뢰도 문턱·확인창 재검증)한 뒤에만 적용합니다.',
+  },
+  experimental: {
+    label: '실험 적용',
+    help:
+      '현행 점수 방식이 무작위 선정보다도 못하다는 실측에 따라, 통계적 확신을 기다리지 않고 ' +
+      '기대값이 양수인 전략을 먼저 적용해 보고 성적이 나빠지면 내리는 모드입니다. ' +
+      '수익성(회당 순수익 > 0)과 초과수익 조건은 그대로 요구합니다.',
+  },
+};
 
 // ── 측정용(benchmark) 룰: '검증 → 실전 투입' 파이프라인 밖 ──
 // 선정에 쓰지 않는 대조군·계측 도구라 승격 게이트가 전면 면제되고(promo_eligible 이 늘 true),
@@ -229,20 +270,21 @@ export const MEASURE_HELP =
 
 // 검증 통과 신호: 서버(core/edge_policy 게이트)가 계산해 stats.promo_eligible 에 저장한 값을
 // 렌더링만 한다. 조건을 프론트에서 재계산하지 않는다(단일 소스).
-// **판정 완료+확증(verdict=confirmed)이 아니면 후보로 표시하지 않는다** — 2026-07-28 판정 일정
-// 도입 후 실제 승격 자격은 확인창 확증까지 필요하다(stats 는 매일 재계산되므로 promo_eligible
-// 만 보면 이미 탈락한 rule 이 어느 날 우연히 초록불로 보인다).
+// **판정 일정(verdict) 조건을 프론트에서 따로 걸지 않는다** — 그 규율은 정책에 따라 적용 여부가
+// 달라지고(experimental 은 면제) 서버의 promo_eligible 에 이미 반영돼 있다. 프론트에서 한 번 더
+// 걸었더니 experimental 에서는 verdict 가 없어 **어떤 rule 도 '검증 통과'로 표시되지 않았다.**
 export function isPromotionCandidate(rule: EdgeRule): boolean {
   return (
     rule.status === 'candidate' &&
     rule.stats?.promo_eligible === true &&
-    rule.decision?.verdict === 'confirmed' &&
     !isMeasurementOnly(rule)
   );
 }
 
-// 판정 진행 상태 — 카드/관리자 화면이 "아직 심사 중"과 "이미 탈락"을 구분해 보여주기 위한 라벨.
-// 탈락한 candidate 를 그냥 'candidate' 로만 두면 계속 심사 중인 것처럼 읽힌다.
+// 판정 진행 상태 — "아직 심사 중"과 "이미 탈락"을 구분하는 라벨. 탈락한 candidate 를 그냥
+// 'candidate' 로만 두면 계속 심사 중인 것처럼 읽힌다.
+// **판정 일정을 면제하는 정책(experimental)에서는 표시하지 않는다** — 단계가 진행되지 않으므로
+// '발견 단계'가 영구 고정돼 잘못된 인상을 준다.
 export const DECISION_LABEL: Record<string, { text: string; tone: 'wait' | 'pass' | 'fail' }> = {
   discovery: { text: '발견 단계', tone: 'wait' },
   confirming: { text: '확인창 진행', tone: 'wait' },
@@ -253,6 +295,7 @@ export const DECISION_LABEL: Record<string, { text: string; tone: 'wait' | 'pass
 
 export function decisionLabel(rule: EdgeRule): { text: string; tone: 'wait' | 'pass' | 'fail' } | null {
   if (rule.status !== 'candidate' || isMeasurementOnly(rule)) return null;
+  if (promoPolicy(rule) === 'experimental') return null;
   const v = rule.decision?.verdict;
   if (v && DECISION_LABEL[v]) return DECISION_LABEL[v];
   return DECISION_LABEL[rule.decision?.discovery?.pass ? 'confirming' : 'discovery'];

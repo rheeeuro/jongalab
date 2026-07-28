@@ -310,9 +310,15 @@ export interface EdgeRuleStats {
   recent_n?: number;            // 강등 감시 최근 창(최근 10거래일) 표본 수
   recent_n_days?: number;       // 강등 감시 최근 창의 거래일 수
   recent_mean_net?: number | null;
+  recent_mean_net_days?: number | null; // 최근 창 일 등가중(진단값)
   // 승격 게이트(core/edge_policy.check_promotion) 통과 여부 — 평가기가 계산해 저장.
   // 프론트는 이 값을 렌더링만 한다(조건을 프론트에서 재계산하지 않음 — 단일 소스).
   promo_eligible?: boolean;
+  // 게이트를 막고 있는 항목의 짧은 라벨 + 적용 중인 정책. 프론트가 min_sample 등으로 조건을
+  // 재추정하다 게이트 변경과 어긋나는 것을 막기 위해 서버가 직접 내려준다(2026-07-28).
+  promo_blockers?: string[];
+  promo_policy?: 'strict' | 'experimental';
+  decision_stage?: 'discovery' | 'confirming' | 'decided';
 }
 
 export interface PredicateCond {

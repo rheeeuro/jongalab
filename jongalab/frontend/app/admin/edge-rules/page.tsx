@@ -111,9 +111,11 @@ export default function EdgeRulesAdminPage() {
       <div className="flex items-start gap-2 rounded-2xl border border-slate-100 bg-slate-50/60 px-4 py-3 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
         <Info className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
-          실전 투입 조건(검증 40회 이상 · 보수적 수익 &gt; 0% · 기준선보다 좋은 성적 · 매수 시점에
-          실행 가능한 조건)은 <b>서버가 검증</b>하며, 미충족 시 사유와 함께 거부됩니다(강제 불가).
-          과도한 투입을 막기 위해 실전 투입은 <b>월 2개까지</b>입니다.
+          실전 투입 조건(서로 다른 거래일 10일 이상 · 회당 순수익 &gt; 0% · 같은 날 다른 후보 대비
+          초과수익 &gt; 0% · 기준선보다 좋은 성적 · 매수 시점에 실행 가능한 조건)은{" "}
+          <b>서버가 검증</b>하며, 미충족 시 사유와 함께 거부됩니다(강제 불가). 각 카드의{" "}
+          <b>&ldquo;남은 조건&rdquo;</b>이 서버가 판단한 미충족 항목입니다. 과도한 투입을 막기 위해
+          실전 투입은 <b>월 3개까지</b>입니다.
         </span>
       </div>
 
