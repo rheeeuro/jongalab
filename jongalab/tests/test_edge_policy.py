@@ -54,10 +54,10 @@ def test_rule_role_falls_back_to_legacy_family_mapping():
 
 def test_role_and_family_registries():
     assert set(ROLES) == {"selector", "veto", "benchmark"}
-    # 도메인 9종 — family 추가 시 이 레지스트리부터 갱신(라우터 등록 검증이 참조)
+    # 도메인 10종 — family 추가 시 이 레지스트리부터 갱신(라우터 등록 검증이 참조)
     assert set(FAMILIES) == {
         "f1_news", "f2_global", "f3_nxt", "f4_laggard", "f5_supply", "f6_ah",
-        "f7_risk", "f8_value", "control",
+        "f7_risk", "f8_value", "f9_disc", "control",
     }
     assert "veto" not in FAMILIES  # 역할은 family 가 아니다(2026-07-09 분리)
 

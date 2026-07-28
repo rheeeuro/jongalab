@@ -17,7 +17,7 @@ ROLES: tuple[str, ...] = ("selector", "veto", "benchmark")
 # 도메인(family) — 가설이 어떤 데이터 축을 보는가. 역할과 독립(예: 수급 도메인의 veto).
 FAMILIES: tuple[str, ...] = (
     "f1_news", "f2_global", "f3_nxt", "f4_laggard", "f5_supply", "f6_ah", "f7_risk",
-    "f8_value", "control",
+    "f8_value", "f9_disc", "control",
 )
 
 # 구 체계 폴백 — role 컬럼 도입(sql/15) 전에는 family 가 역할을 겸했다. 마이그레이션 전
@@ -73,6 +73,10 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     "op_earnings_yield",
     # 호가 미시구조 스냅샷 (2026-07-22, sql/33) — ka10004 선정 시점 수집. 연속장 중만 유효.
     "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct",
+    # DART 공시 사건 라벨 (2026-07-28, sql/36) — disclosure_collector(30분 주기)가 적재한
+    # stock_event 를 closing_bet 선정 시점에 집계. 매 실행 재계산이라 저녁 재실행(19:00)에는
+    # 장 마감 후 공시(15:30~18:00)까지 반영된다 → NXT 매수(19:30) 직전 veto 가 실제로 동작.
+    "disc_count", "disc_bad_type", "disc_good_type",
 })
 
 _MARKET_PREFIX = "market."

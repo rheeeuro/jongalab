@@ -42,6 +42,28 @@ CREATE TABLE IF NOT EXISTS news_mention (
     INDEX idx_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 사건 계층 — 종목×사건 1행(정규화, 영구 보존). news_mention(원자료, 14일)의 상위 계층.
+-- 첫 소스는 DART 전자공시(workers/disclosure_collector, 평일 30분 주기). 상세는 sql/36.
+CREATE TABLE IF NOT EXISTS stock_event (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    ticker        VARCHAR(20)  NOT NULL,   -- 종목코드(6자리)
+    event_date    DATE         NOT NULL,   -- 접수일(DART rcept_dt)
+    source        VARCHAR(10)  NOT NULL,   -- dart (향후 news)
+    source_key    VARCHAR(40)  NOT NULL,   -- DART 접수번호(rcept_no) — 멱등 수집 근거
+    event_type    VARCHAR(24)  NOT NULL,   -- core.disclosure_events.classify 결과
+    direction     TINYINT      NOT NULL DEFAULT 0,  -- +1 호재 / 0 중립 / -1 악재
+    is_veto_type  TINYINT      NOT NULL DEFAULT 0,  -- 1 = 선정 제외 대상 악재
+    is_correction TINYINT      NOT NULL DEFAULT 0,  -- 1 = 정정공시(veto 집계 제외)
+    first_seen_at DATETIME     NOT NULL,   -- 수집기 최초 관측 시각(접수시각 근사)
+    title         VARCHAR(255) NOT NULL,   -- report_nm 원문
+    corp_name     VARCHAR(80)  DEFAULT NULL,
+    raw_url       VARCHAR(255) DEFAULT NULL,
+    created_at    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_source_key (source, source_key),
+    INDEX idx_ticker_date (ticker, event_date),
+    INDEX idx_date_type (event_date, event_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS telegram_channels (
     id INT AUTO_INCREMENT PRIMARY KEY,
     channel_identifier VARCHAR(100) NOT NULL COMMENT '채널 username(문자) 또는 ID(숫자)',
@@ -114,6 +136,10 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     news_sentiment TINYINT DEFAULT NULL,    -- LLM 재료 방향 0~100(요약 후보만)
     news_catalyst VARCHAR(20) DEFAULT NULL, -- LLM 재료 유형(실적/수주계약/임상승인/M&A/정책테마/증자감자/지분변동/기타)
     news_headlines JSON DEFAULT NULL,       -- 최근 헤드라인 목록(표시용)
+    -- DART 공시 사건 라벨 (sql/36) — disclosure_collector 가 적재한 stock_event 를 선정 시점 집계.
+    disc_count SMALLINT DEFAULT NULL,       -- 당일 공시 건수(정정 포함) — 관측·연구용
+    disc_bad_type VARCHAR(24) DEFAULT NULL, -- 당일 최우선 악재 공시 타입(정정 제외) — veto_disclosure_bad 가 참조
+    disc_good_type VARCHAR(24) DEFAULT NULL,-- 당일 대표 호재 공시 타입(정정 제외) — 관측·연구용
     score FLOAT DEFAULT 0.0,
     rank_no INT DEFAULT 0,
 

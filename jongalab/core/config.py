@@ -85,3 +85,10 @@ KIS_BASE_URL = os.getenv('KIS_BASE_URL', 'https://openapi.koreainvestment.com:94
 KIS_KOSPI200_FUT_CODE = os.getenv('KIS_KOSPI200_FUT_CODE', '')
 # KIS 실시간 WebSocket 접속 주소 (야간선물 실시간체결 H0MFCNT0 구독용).
 KIS_WS_URL = os.getenv('KIS_WS_URL', 'ws://ops.koreainvestment.com:21000')
+
+# DART 전자공시 OpenAPI — core.dart_client 가 공시검색(list.json)에 사용.
+# 키 발급: https://opendart.fss.or.kr 회원가입 → 인증키 신청(무료, 일 20,000콜).
+# 미설정이면 workers/disclosure_collector 가 조용히 종료하고, disc_* 라벨은 NULL 로 남는다
+# (공시 veto rule 은 NULL=매칭 실패라 미개입 — 수집이 멎어도 선정이 망가지지 않는다).
+DART_API_KEY = os.getenv('DART_API_KEY', '')
+DART_BASE_URL = os.getenv('DART_BASE_URL', 'https://opendart.fss.or.kr')

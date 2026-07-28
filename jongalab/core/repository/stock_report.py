@@ -18,6 +18,7 @@ _ANALYSIS_COLS = (
     "is_leader", "is_theme_stock", "content_score",
     "news_count", "news_unique_count", "news_pm_count", "news_first_today", "news_prior_avg",
     "news_summary", "news_sentiment", "news_catalyst", "news_headlines",
+    "disc_count", "disc_bad_type", "disc_good_type",
     "score", "rank_no", "selected", "sector_rel_ret", "sector_leader_chg",
     "foreign_brokers_buying", "afternoon_ret", "vol_ratio", "prog_buy_days",
     "first_seen", "theme_strength", "frgn_exhaust_rate", "frgn_exhaust_chg",

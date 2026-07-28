@@ -32,6 +32,8 @@ from core.repository.stock_report import (
 from core.repository.sector_report import save_sector_reports
 from core.repository.content import get_today_content_by_stock
 from core.repository.news import get_today_news_stats_by_stock, get_today_news_by_stock
+from core.repository.stock_event import get_events_by_date
+from core.disclosure_events import summarize as summarize_disclosures
 from core.repository.trade_signal import push_trade_signals
 from core.repository.edge_rule import list_rules
 from core.edge_selection import select_signals
@@ -59,6 +61,9 @@ class ClosingBetStrategy:
         # 종목코드 → 뉴스 연구 라벨(get_today_news_stats_by_stock 결과).
         # StockCandidate(가드 파일)를 건드리지 않고 Phase 2 → 리포트 저장으로 전달한다.
         self._news_stats: dict[str, dict] = {}
+        # 종목코드 → 당일 공시 라벨(core.disclosure_events.summarize 결과).
+        # disclosure_collector 가 적재한 stock_event 를 선정 시점에 집계한 것. 위와 같은 전달 패턴.
+        self._disc_stats: dict[str, dict] = {}
         # 종목코드 → F5 수급 구조 피처(외국계 거래원·오후 강세·거래량 배율·프로그램 연속·외인소진율).
         # 이미 조회 중인 키움 응답에서 캡처해 저장만 한다(점수 무영향) — 위와 같은 전달 패턴.
         self._feat: dict[str, dict] = {}
@@ -411,6 +416,22 @@ class ClosingBetStrategy:
             except Exception as e:
                 logger.warning(f"뉴스 언급 조회 실패 [{c.name}]: {e}")
 
+        # 공시 사건 라벨 (stock_event, DART) — 후보 전체분을 한 번에 조회해 캐시.
+        # 점수 무영향. disc_bad_type 만 live veto rule(veto_disclosure_bad)이 참조한다.
+        # 조회 실패 시 빈 dict → disc_* NULL → veto 미개입(수집이 멎어도 선정은 정상 동작).
+        self._disc_stats = {}
+        try:
+            codes = [c.code.split("_")[0] for c in filtered]
+            events = get_events_by_date(datetime.now().date(), codes)
+            for code, rows in events.items():
+                self._disc_stats[code] = summarize_disclosures(rows)
+            bad = {k: v["disc_bad_type"] for k, v in self._disc_stats.items()
+                   if v["disc_bad_type"]}
+            logger.info(f"공시 라벨: {len(events)}종목 사건 보유, 악재 타입 {len(bad)}종목"
+                        + (f" — {bad}" if bad else ""))
+        except Exception as e:
+            logger.warning(f"공시 사건 조회 실패(veto 미적용): {e}")
+
         for c in filtered:
             self.engine.score_candidate(c)
 
@@ -508,6 +529,10 @@ class ClosingBetStrategy:
                 "news_sentiment": news_ai.get("sentiment") if news_ai else None,
                 "news_catalyst": news_ai.get("catalyst") if news_ai else None,
                 "news_headlines": news_headlines,
+                # 공시 사건 라벨 (stock_event/DART) — disc_bad_type 만 veto rule 이 참조,
+                # 나머지는 관측·연구용. 사건 없음/수집 실패는 NULL(= veto 미개입).
+                **(self._disc_stats.get(code)
+                   or {"disc_count": None, "disc_bad_type": None, "disc_good_type": None}),
                 "score": c.score,
                 "rank_no": i,
                 "selected": is_top_score,  # 잠정값 — 아래 선정 레이어가 모드에 따라 다시 정함

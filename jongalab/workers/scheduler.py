@@ -86,6 +86,10 @@ JOBS = [
     # 평일 09:40 Edge Ledger 채점. catch-up 설계 → 유예 6h.
     Job("rule_evaluator", UV_RUN + ["workers/rule_evaluator.py"],
         timeout=1200, grace=21600, minute="40", hour="9", day_of_week="mon-fri"),
+    # 평일 08:20~20:50 매 30분 DART 공시 수집(:20/:50 — closing_bet :00/:30 직전 갱신).
+    # 멱등 적재라 지각 실행도 무해하지만, 늦게 도는 건 의미가 없어 유예 10분.
+    Job("disclosure_collector", UV_RUN + ["workers/disclosure_collector.py"],
+        timeout=600, grace=600, minute="20,50", hour="8-20", day_of_week="mon-fri"),
     # 평일 17:50 시간외/리스크 라벨. ka10087 이 16~18시에만 살아있어 유예 5분(18시 넘기면 무의미).
     Job("after_hours_labels", UV_RUN + ["workers/after_hours_labels.py"],
         timeout=900, grace=300, minute="50", hour="17", day_of_week="mon-fri"),
