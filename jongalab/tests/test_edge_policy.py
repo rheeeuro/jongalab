@@ -32,7 +32,9 @@ def _control(mean_net):
             "stats": {"mean_net": mean_net}}
 
 
-GOOD_STATS = {"n": 50, "n_days": 12, "ci_low": 0.1, "mean_net": 0.5, "t_days": 2.1}
+GOOD_STATS = {"n": 50, "n_days": 12, "mean_net": 0.5,
+              # 통계 게이트는 초과 계열을 본다(원시 ci_low/t_days 는 표시용).
+              "ci_low_exc": 0.1, "t_days_exc": 2.1}
 
 
 # ── rule 역할 ──
@@ -94,7 +96,8 @@ def test_selector_eligible_when_all_gates_pass():
 
 def test_selector_blocked_on_small_sample_and_ci():
     gate = check_promotion(
-        _rule(stats={"n": 10, "n_days": 12, "ci_low": -0.1, "mean_net": 0.5, "t_days": 2.1}),
+        _rule(stats={"n": 10, "n_days": 12, "mean_net": 0.5,
+                     "ci_low_exc": -0.1, "t_days_exc": 2.1}),
         [_control(0.2)],
     )
     assert not gate["eligible"]
@@ -248,7 +251,8 @@ def test_selector_blocked_on_weak_day_cluster_t():
     # t=0.37 — 수익이 시장 베타라 거래일 단위로는 유의하지 않다.
     gate = check_promotion(
         _rule(family="f4_laggard",
-              stats={"n": 52, "n_days": 10, "ci_low": 0.207, "mean_net": 1.192, "t_days": 0.37}),
+              stats={"n": 52, "n_days": 10, "mean_net": 1.192,
+                     "ci_low_exc": 0.207, "t_days_exc": 0.37}),
         [_control(-0.227)])
     assert not gate["eligible"]
     assert any("일 클러스터 t" in r for r in gate["stat_reasons"])
@@ -256,14 +260,14 @@ def test_selector_blocked_on_weak_day_cluster_t():
 
 def test_selector_day_cluster_t_is_fail_closed_when_missing():
     # 거래일 1일 등으로 분산 추정 불가(None) → 규율이 조용히 증발하지 않도록 차단.
-    stats = dict(GOOD_STATS); stats["t_days"] = None
+    stats = dict(GOOD_STATS); stats["t_days_exc"] = None
     gate = check_promotion(_rule(stats=stats), [_control(0.2)])
     assert not gate["eligible"]
     assert any("일 클러스터 t" in r for r in gate["stat_reasons"])
 
 
 def test_selector_passes_at_day_cluster_threshold():
-    stats = dict(GOOD_STATS); stats["t_days"] = PROMO_MIN_DAY_T
+    stats = dict(GOOD_STATS); stats["t_days_exc"] = PROMO_MIN_DAY_T
     assert check_promotion(_rule(stats=stats), [_control(0.2)])["eligible"]
 
 
@@ -272,6 +276,6 @@ def test_veto_exempt_from_day_cluster_t():
     # 은 대체효과 t=0.95 로 평균 유의성이 없는데도 HLB 하한가 때문에 유지가 맞았다).
     gate = check_promotion(
         _rule(family="f7_risk", role="veto",
-              stats={"n": 36, "n_days": 11, "mean_net": -0.203, "t_days": -0.4},
+              stats={"n": 36, "n_days": 11, "mean_net": -0.203, "t_days_exc": -0.4},
               predicate=[{"col": "is_bio", "op": "==", "value": 1}]), [])
     assert gate["eligible"]

@@ -37,6 +37,7 @@ from core.repository import (
     get_scored_dates,
     upsert_rule_daily,
     get_rule_daily_since,
+    get_universe_label_totals,
     update_rule_stats,
 )
 
@@ -78,25 +79,66 @@ def _score_rule_date(rule: dict, rows: list[dict], market: dict | None) -> dict 
     return {"n_matched": len(matched), "mean_net_ret": mean_net, "matched": matched}
 
 
-def _recompute_stats(daily_rows: list[dict]) -> dict:
-    """registered_at 이후 채점 결과에서 누적 통계 재계산(비용 차감 후 순수익 기준)."""
-    nets, lows, dated = [], [], []
+def _day_cluster_t(day_means: list[float]) -> tuple[float | None, float | None]:
+    """일 등가중 평균과 그 t. 거래일 1일이면 분산 추정 불가라 t=None(게이트 fail-closed)."""
+    if not day_means:
+        return None, None
+    mean_days = sum(day_means) / len(day_means)
+    if len(day_means) < 2:
+        return mean_days, None
+    sd = (sum((x - mean_days) ** 2 for x in day_means) / (len(day_means) - 1)) ** 0.5
+    if sd <= 0:
+        return mean_days, None
+    return mean_days, mean_days / (sd / math.sqrt(len(day_means)))
+
+
+def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> dict:
+    """registered_at 이후 채점 결과에서 누적 통계 재계산(비용 차감 후 순수익 기준).
+
+    두 계열을 함께 낸다 — 재는 자가 다르면 답도 다르기 때문에 이름으로 구분한다.
+      · 원시(mean_net·ci_low·t_days)     : 절대 순수익. **대조군 우위** 게이트와 veto
+        실익 게이트가 쓴다("현행 선정보다 나은가"는 절대값으로 물어야 답이 된다).
+      · 초과(mean_exc·ci_low_exc·t_days_exc): 그날 **유니버스 자기제외 평균** 대비 초과분.
+        selector 승격의 통계 유의성(ci_low_exc>0, t_days_exc≥PROMO_MIN_DAY_T)이 쓴다.
+
+    왜 '자기제외'인가(2026-07-28): 대조군(=selected top10)을 기준선으로 쓰면 rule 매칭
+    종목이 평균 54%(일부 100%) 그 안에 들어 있어 **자기 자신을 빼는** 꼴이 된다. 분산이
+    기계적으로 줄어 잡음 감소처럼 보이지만 실제로는 초과분을 0 쪽으로 누르는 편향이다.
+    유니버스에서 그 rule 의 매칭 종목을 제외한 나머지를 기준선으로 삼으면 편향이 0 이 되고,
+    실측 잡음 감소는 26%(필요 거래일 1.8배 단축)다.
+    비용(EDGE_COST_PCT)은 초과분에서 양쪽이 상쇄되므로 원시에만 적용한다.
+
+    uni_totals: {report_date: (라벨 합계, 종목 수)} — 없으면 초과 계열은 None(게이트 fail-closed).
+    """
+    nets, lows, dated, dated_exc = [], [], [], []
     updated_through = None
     for dr in daily_rows:
         updated_through = dr["report_date"]  # 오래된→최신 정렬이라 마지막이 최신
-        for m in dr.get("matched") or []:
-            if m.get("ret") is None:
-                continue
+        d = dr["report_date"]
+        matched = [m for m in (dr.get("matched") or []) if m.get("ret") is not None]
+        for m in matched:
             net = m["ret"] - EDGE_COST_PCT
             nets.append(net)
-            dated.append((dr["report_date"], net))
+            dated.append((d, net))
             if m.get("low") is not None:
                 lows.append(m["low"])
+        # 자기제외 기준선 — 유니버스 합계에서 이 rule 이 매칭한 종목의 원시 ret 을 뺀 평균.
+        # 매칭이 유니버스 전체면(나머지 0종목) 비교 대상이 없으므로 그날은 초과 표본에서 뺀다.
+        tot = (uni_totals or {}).get(d)
+        if tot and matched:
+            s, c = tot
+            rest_n = c - len(matched)
+            if rest_n > 0:
+                base = (s - sum(m["ret"] for m in matched)) / rest_n
+                for m in matched:
+                    dated_exc.append((d, m["ret"] - base))
 
     n = len(nets)
     if n == 0:
         return {"n": 0, "n_days": 0, "mean_net": None, "win_rate": None, "std": None,
                 "ci_low": None, "mean_net_days": None, "t_days": None,
+                "n_exc": 0, "mean_exc": None, "ci_low_exc": None,
+                "mean_exc_days": None, "t_days_exc": None,
                 "worst_low_ret": None, "updated_through": updated_through}
 
     mean_net = sum(nets) / n
@@ -117,16 +159,24 @@ def _recompute_stats(daily_rows: list[dict]) -> dict:
     #   f5_prog_persistent(7/27) iid t=1.82 → 일 t=0.47 / f4_sector_follower(7/28) 1.99 → 0.37.
     # mean_net_days(일 등가중 평균)는 mean_net(종목-일 가중)과 다르다 — 매칭 수가 많은 날에
     # 쏠린 평균을 드러낸다(f4: mean_net +1.19% vs 일 등가중 +0.45%).
-    day_means = {}
-    for d, net in dated:
-        day_means.setdefault(d, []).append(net)
-    dm = [sum(v) / len(v) for v in day_means.values()]
-    mean_days = sum(dm) / len(dm)
-    if len(dm) >= 2:
-        dm_std = (sum((x - mean_days) ** 2 for x in dm) / (len(dm) - 1)) ** 0.5
-        t_days = mean_days / (dm_std / math.sqrt(len(dm))) if dm_std > 0 else None
+    def _by_day(pairs):
+        acc = {}
+        for d, v in pairs:
+            acc.setdefault(d, []).append(v)
+        return [sum(v) / len(v) for v in acc.values()]
+
+    mean_days, t_days = _day_cluster_t(_by_day(dated))
+
+    # 초과 계열 — selector 승격 게이트가 보는 값. 표본이 없으면 전부 None → fail-closed.
+    n_exc = len(dated_exc)
+    if n_exc:
+        exc = [v for _, v in dated_exc]
+        mean_exc = sum(exc) / n_exc
+        std_exc = (sum((x - mean_exc) ** 2 for x in exc) / (n_exc - 1)) ** 0.5 if n_exc >= 2 else 0.0
+        ci_low_exc = mean_exc - _CI_Z * std_exc / math.sqrt(n_exc)
+        mean_exc_days, t_days_exc = _day_cluster_t(_by_day(dated_exc))
     else:
-        t_days = None  # 거래일 1일 — 분산 추정 불가(승격 게이트가 fail-closed 로 막는다)
+        mean_exc = ci_low_exc = mean_exc_days = t_days_exc = None
 
     return {
         "n": n,
@@ -137,9 +187,15 @@ def _recompute_stats(daily_rows: list[dict]) -> dict:
         "win_rate": round(win_rate, 3),
         "std": round(std, 3),
         "ci_low": round(ci_low, 3),
-        # 일 등가중 평균과 그 t — selector 승격 게이트(PROMO_MIN_DAY_T)가 t_days 를 쓴다.
-        "mean_net_days": round(mean_days, 3),
+        # 원시 일 등가중 평균과 그 t — 참고·표시용(쏠림 진단). 게이트는 아래 초과 계열을 본다.
+        "mean_net_days": round(mean_days, 3) if mean_days is not None else None,
         "t_days": round(t_days, 2) if t_days is not None else None,
+        # ── 유니버스 자기제외 초과 계열 — selector 승격 통계 게이트가 쓰는 값 ──
+        "n_exc": n_exc,
+        "mean_exc": round(mean_exc, 3) if mean_exc is not None else None,
+        "ci_low_exc": round(ci_low_exc, 3) if ci_low_exc is not None else None,
+        "mean_exc_days": round(mean_exc_days, 3) if mean_exc_days is not None else None,
+        "t_days_exc": round(t_days_exc, 2) if t_days_exc is not None else None,
         "worst_low_ret": round(min(lows), 3) if lows else None,
         "updated_through": updated_through,
         "recent_n": len(recent),
@@ -215,6 +271,17 @@ def run():
             mkt_cache[d] = get_market_snapshots([d]).get(d)
         return mkt_cache[d]
 
+    # 초과수익 기준선 — exit_label 별 날짜별 (유니버스 합계, 종목 수)를 1회 로드해 rule 간
+    # 공유한다. rule 마다 빼야 할 매칭 종목이 달라 평균이 아니라 합계·개수로 들고 있어야
+    # _recompute_stats 가 '자기제외' 평균을 만들 수 있다.
+    uni_totals_by_label: dict[str, dict] = {}
+    for label in {r.get("exit_label") or "exec_leg_ret" for r in rules}:
+        try:
+            uni_totals_by_label[label] = get_universe_label_totals(label)
+        except ValueError as e:
+            logger.warning(f"초과수익 기준선 로드 실패({label}): {e} — 해당 rule 은 원시 계열만 채점")
+            uni_totals_by_label[label] = {}
+
     logger.info(f"평가 시작 — 활성 rule {len(rules)}개 × 후보 {len(all_dates)}일 (비용 {EDGE_COST_PCT}%)")
 
     # ── pass 1: 채점 + 누적 통계 재계산 (rule dict 에 신선한 stats 를 실어 pass 2 로) ──
@@ -245,7 +312,9 @@ def run():
         low_refreshed = _refresh_missing_lows(rule["id"], daily_rows, _universe)
         if low_refreshed:
             logger.info(f"{rule['name']}: next_low_ret 소급 반영 {low_refreshed}일")
-        rule["stats"] = _recompute_stats(daily_rows)
+        rule["stats"] = _recompute_stats(
+            daily_rows, uni_totals_by_label.get(rule.get("exit_label") or "exec_leg_ret")
+        )
         rule["_new_scored"] = new_scored
 
     # ── pass 2: 승격/강등 게이트 (모든 rule 의 stats 가 신선해진 뒤 — 대조군 비교 정합) ──

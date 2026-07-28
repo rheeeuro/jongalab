@@ -249,8 +249,9 @@ export function EdgeRuleDetailContent({
                   { l: STAT_META.n_days.label, v: s.n_days != null ? `${s.n_days}일` : "—" },
                   { l: STAT_META.mean_net.label, v: fmtPct(s.mean_net), tone: retTone(s.mean_net) },
                   { l: STAT_META.win_rate.label, v: s.win_rate !== null ? `${Math.round(s.win_rate * 100)}%` : "—" },
-                  { l: STAT_META.ci_low.label, v: fmtPct(s.ci_low), tone: retTone(s.ci_low) },
-                  { l: STAT_META.t_days.label, v: fmtT(s.t_days), tone: dayTTone(s.t_days) },
+                  { l: STAT_META.mean_exc.label, v: fmtPct(s.mean_exc), tone: retTone(s.mean_exc) },
+                  { l: STAT_META.ci_low_exc.label, v: fmtPct(s.ci_low_exc), tone: retTone(s.ci_low_exc) },
+                  { l: STAT_META.t_days_exc.label, v: fmtT(s.t_days_exc), tone: dayTTone(s.t_days_exc) },
                 ].map((x) => (
                   <div key={x.l} className="rounded-xl bg-slate-50 p-3 dark:bg-[#202027]">
                     <p className="text-[10px] font-bold text-slate-400">{x.l}</p>

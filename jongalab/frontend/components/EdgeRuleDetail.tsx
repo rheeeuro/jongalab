@@ -137,7 +137,7 @@ export function EdgeRuleDetail({
                 { l: STAT_META.n.label, v: `${s.n}회` },
                 { l: STAT_META.mean_net.label, v: fmtPct(s.mean_net), tone: retTone(s.mean_net) },
                 { l: STAT_META.win_rate.label, v: s.win_rate !== null ? `${Math.round(s.win_rate * 100)}%` : "—" },
-                { l: STAT_META.ci_low.label, v: fmtPct(s.ci_low), tone: retTone(s.ci_low) },
+                { l: STAT_META.ci_low_exc.label, v: fmtPct(s.ci_low_exc), tone: retTone(s.ci_low_exc) },
               ].map((x) => (
                 <div key={x.l}>
                   <p className="text-[10px] text-slate-400">{x.l}</p>

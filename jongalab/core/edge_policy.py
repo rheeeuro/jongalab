@@ -102,7 +102,7 @@ PROMO_MIN_DAYS = 10
 
 # 일 클러스터 t 문턱 (2026-07-28) — `ci_low` 는 종목-일 iid 가정이라 같은 날 종목들이 시장
 # 무브로 상관된 만큼 유의성을 과신한다. PROMO_MIN_DAYS 는 문턱만 세우고 CI 는 그대로 iid 였다.
-# 거래일을 관측 단위로 묶은 t(stats.t_days)를 selector 승격 조건에 추가한다. 단측 95% ≈ 1.65.
+# 거래일을 관측 단위로 묶은 t(stats.t_days_exc)를 selector 승격 조건에 추가한다. 단측 95% ≈ 1.65.
 # 이 게이트 없이 후보로 올라와 재계산에서 뒤집힌 사례 2건:
 #   f5_prog_persistent(7/27) iid t=1.82 → 일 t=0.47 / f4_sector_follower(7/28) 1.99 → 0.37.
 # **veto 에는 적용하지 않는다** — reduce-only 라 최악이 기회비용이고, veto 의 가치는 평균이 아니라
@@ -116,8 +116,10 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
 
     rule: stats 가 최신으로 갱신된 rule dict. control_rules: role=benchmark 인 live rule 목록.
     반환: {"eligible": bool, "stat_reasons": [...], "exec_reasons": [...]}
-      - stat_reasons: selector 는 표본·거래일 수·신뢰구간·**일 클러스터 t**·대조군 우위,
-        veto 는 최소 실익 게이트(거래일 수 + 제외 종목 평균 음수) 미충족 사유(benchmark 는 면제)
+      - stat_reasons: selector 는 표본·거래일 수·신뢰구간·**일 클러스터 t**(셋 다 유니버스
+        자기제외 **초과** 계열)·**대조군 우위**(이건 **원시** mean_net — "현행보다 나은가"는
+        절대값 질문), veto 는 최소 실익 게이트(거래일 수 + 제외 종목 원시 평균 음수)
+        미충족 사유(benchmark 는 면제)
       - exec_reasons: 선정 시점 실행 불가 사유(benchmark 는 면제 — 선정에 안 쓰므로)
     월 승격 상한은 시점 의존 운영 제약이라 여기 넣지 않고 라우터가 별도 검사한다.
     """
@@ -130,7 +132,10 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
     # veto 는 아래 별도의 최소 실익 게이트만 적용한다.
     if role == "selector":
         n = stats.get("n") or 0
-        ci_low = stats.get("ci_low")
+        # 통계 유의성은 **초과 계열**(유니버스 자기제외 대비)로 본다 — 같은 날 시장 무브를
+        # 걷어내야 "우연이 아닌가"에 답이 된다. 반면 아래 '대조군 우위'는 **원시** mean_net
+        # 으로 남긴다: "현행 선정보다 나은가"는 절대 순수익으로 물어야 결정에 쓰인다.
+        ci_low = stats.get("ci_low_exc")
         mean_net = stats.get("mean_net")
         min_sample = rule.get("min_sample") or 0
         if n < min_sample:
@@ -142,13 +147,13 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
                 "시장 무브로 상관되어 종목-일 n 만으로는 과신"
             )
         if ci_low is None or ci_low <= 0:
-            stat_reasons.append(f"신뢰구간 하한 미충족: ci_low={ci_low}(>0 필요)")
+            stat_reasons.append(f"신뢰구간 하한 미충족: ci_low_exc={ci_low}(>0 필요)")
         # 일 클러스터 t — ci_low(종목-일 iid)의 과신을 거래일 단위로 교정. None(거래일 1일 등
-        # 분산 추정 불가)은 fail-closed: 검증 규율이 조용히 증발하는 fail-open 을 막는다.
-        t_days = stats.get("t_days")
+        # 분산 추정 불가, 초과 표본 부재)은 fail-closed: 규율이 조용히 증발하는 fail-open 방지.
+        t_days = stats.get("t_days_exc")
         if t_days is None or t_days < PROMO_MIN_DAY_T:
             stat_reasons.append(
-                f"일 클러스터 t 미충족: t_days={t_days}(>={PROMO_MIN_DAY_T} 필요) — 같은 날 "
+                f"일 클러스터 t 미충족: t_days_exc={t_days}(>={PROMO_MIN_DAY_T} 필요) — 같은 날 "
                 "종목은 시장 무브로 상관되어 거래일을 관측 단위로 묶어야 실효 유의성이 나온다"
             )
         # 대조군 우위 — live benchmark 의 mean_net 최대값 이상. 대조군이 없거나 미평가면

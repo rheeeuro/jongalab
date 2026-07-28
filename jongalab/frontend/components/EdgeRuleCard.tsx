@@ -110,12 +110,12 @@ export function EdgeRuleCard({
         </p>
       )}
 
-      {/* 하단 슬롯: 보수적 수익 + 스파크라인 — 항상 렌더해 높이 고정 */}
+      {/* 하단 슬롯: 보수적 초과수익 + 스파크라인 — 항상 렌더해 높이 고정 */}
       <div className="mt-0.5 flex h-6 items-center justify-between gap-3">
         <span className="shrink-0 text-[11px] text-slate-400 dark:text-slate-500">
-          {STAT_META.ci_low.label}{" "}
+          {STAT_META.ci_low_exc.label}{" "}
           {hasData && s ? (
-            <span className={`font-semibold tabular-nums ${TONE_TEXT[retTone(s.ci_low)]}`}>{fmtPct(s.ci_low)}</span>
+            <span className={`font-semibold tabular-nums ${TONE_TEXT[retTone(s.ci_low_exc)]}`}>{fmtPct(s.ci_low_exc)}</span>
           ) : (
             <span className="font-semibold tabular-nums">—</span>
           )}

@@ -278,15 +278,16 @@ function RuleRow({ rule, action }: { rule: EdgeRule; action?: React.ReactNode })
             {STAT_META.mean_net.label}{" "}
             <b className={`tabular-nums ${TONE_TEXT[retTone(s.mean_net)]}`}>{fmtPct(s.mean_net)}</b>
             {" · "}
-            {STAT_META.ci_low.label}{" "}
-            <b className={`tabular-nums ${TONE_TEXT[retTone(s.ci_low)]}`}>{fmtPct(s.ci_low)}</b>
-            {/* 일 클러스터 t — selector 승격 게이트. ci_low 만 보면 통과처럼 보이는 후보를
-                걸러내는 값이라 승격 판단 화면에는 반드시 함께 뜬다(제외 규칙은 면제라 미표기). */}
+            {STAT_META.ci_low_exc.label}{" "}
+            <b className={`tabular-nums ${TONE_TEXT[retTone(s.ci_low_exc)]}`}>{fmtPct(s.ci_low_exc)}</b>
+            {/* 초과 계열(유니버스 자기제외) — selector 승격 게이트가 보는 값. 원시 평균만
+                보면 통과처럼 보이는 후보를 걸러내므로 승격 판단 화면에는 반드시 함께 뜬다
+                (제외 규칙은 이 게이트가 면제라 미표기). */}
             {rule.role !== "veto" && (
               <>
                 {" · "}
-                {STAT_META.t_days.label}{" "}
-                <b className={`tabular-nums ${TONE_TEXT[dayTTone(s.t_days)]}`}>{fmtT(s.t_days)}</b>
+                {STAT_META.t_days_exc.label}{" "}
+                <b className={`tabular-nums ${TONE_TEXT[dayTTone(s.t_days_exc)]}`}>{fmtT(s.t_days_exc)}</b>
               </>
             )}
             {s.worst_low_ret !== null && (

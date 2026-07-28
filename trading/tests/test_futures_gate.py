@@ -109,6 +109,18 @@ def _state(ok, nq, kospi, label="야간선물"):
             "nq_note": "ok", "kospi_note": "ok"}
 
 
+def _no_us_ext(monkeypatch):
+    """US 확장 축을 끈다 — **선물 축만** 보려는 nxt 테스트에 필수.
+
+    `_us_ext_signals()` 는 jongalab `/api/us-extended` 로 실제 HTTP 를 친다. 모킹을 빼면
+    단위 테스트가 그 시각 미국장 상태에 좌우된다(2026-07-28: API 가 살아있고 market_state
+    =PREPRE·SOXX -0.81 이라 `all_up_no_cut` 의 keep 이 1.0 대신 0.803 으로 나와 실패).
+    US 축 자체를 검증하는 테스트는 아래에서 `_us_ext_signals` 를 직접 모킹한다."""
+    monkeypatch.setattr(fg, "_us_ext_signals", lambda: {
+        "semis_pct": None, "korea_pct": None, "fresh": False,
+        "market_state": None, "note": "test: us_ext disabled"})
+
+
 def test_keep_factors_unavailable(monkeypatch):
     monkeypatch.setattr(fg, "FUTURES_GATE_VENUES", {"nxt"})
     monkeypatch.setattr(fg, "_futures_state", lambda venue: _state(False, None, -1.0))
@@ -121,6 +133,7 @@ def test_keep_factors_both_down_differentiates_sectors(monkeypatch):
     monkeypatch.setattr(fg, "_futures_state", lambda venue: _state(True, -1.5, -1.2))
     monkeypatch.setattr(fg, "_sectors_for", lambda codes: {
         "AAA": "전기/전자", "BBB": "통신", "CCC": None})
+    _no_us_ext(monkeypatch)
     factors, diag = fg.sector_keep_factors("nxt", ["AAA", "BBB", "CCC"])
     assert diag["gated"] is True and diag["nq_down"] and diag["kospi_down"]
     # 전 종목 keep 반환, tech(AAA) < neutral(CCC) < defensive(BBB) 순으로 더 깎임
@@ -144,6 +157,7 @@ def test_keep_factors_all_up_no_cut(monkeypatch):
     monkeypatch.setattr(fg, "FUTURES_GATE_VENUES", {"nxt"})
     monkeypatch.setattr(fg, "_futures_state", lambda venue: _state(True, 0.8, 0.5))
     monkeypatch.setattr(fg, "_sectors_for", lambda codes: {"AAA": "전기/전자"})
+    _no_us_ext(monkeypatch)
     factors, diag = fg.sector_keep_factors("nxt", ["AAA"])
     assert diag["gated"] is True and factors["AAA"] == 1.0  # 상승이면 감액 없음
 

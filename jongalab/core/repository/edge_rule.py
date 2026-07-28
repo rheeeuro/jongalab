@@ -242,3 +242,29 @@ def get_rule_daily_since(rule_id: int, since: str) -> list[dict]:
             (rule_id, since),
         )
         return [_serialize(r) for r in cursor.fetchall()]
+
+
+def get_universe_label_totals(label: str) -> dict[str, tuple[float, int]]:
+    """날짜별 유니버스 전체의 (라벨 합계, 종목 수) — 초과수익 채점의 기준선.
+
+    rule_evaluator 가 '유니버스 자기제외 평균'(그날 유니버스에서 **그 rule 이 매칭한
+    종목을 뺀** 나머지의 평균)을 만들 때 쓴다. 합계·개수로 돌려주는 이유는 rule 마다
+    빼야 할 종목이 달라, 여기서 평균을 내면 leave-one-out 을 못 하기 때문이다.
+
+    label 은 ALLOWED_EXIT_LABELS 로 화이트리스트 검증한다(컬럼명이라 바인딩 불가).
+    """
+    if label not in ALLOWED_EXIT_LABELS:
+        raise ValueError(f"허용되지 않은 exit_label: {label}")
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"""SELECT report_date, SUM({label}) AS s, COUNT({label}) AS c
+                FROM daily_stock_report
+                WHERE {label} IS NOT NULL
+                GROUP BY report_date"""
+        )
+        out: dict[str, tuple[float, int]] = {}
+        for r in cursor.fetchall():
+            d = r["report_date"]
+            key = d.isoformat() if isinstance(d, (date, datetime)) else str(d)
+            out[key] = (float(r["s"]), int(r["c"]))
+        return out
