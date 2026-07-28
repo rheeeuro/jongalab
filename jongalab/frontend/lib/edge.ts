@@ -76,6 +76,7 @@ export const STAT_META = {
   mean_net: { label: '평균 수익', help: '조건에 걸린 종목을 다음날 팔았다고 가정한 회당 평균 수익률. 세금·수수료 등 거래비용(0.25%)을 뺀 값입니다.' },
   win_rate: { label: '성공률', help: '수익이 난 비율. 단, 성공률보다 평균 수익이 더 중요합니다(한 번의 큰 손실이 여러 번의 작은 수익을 지울 수 있음).' },
   ci_low: { label: '보수적 수익', help: '운이 나쁜 경우까지 감안한 수익 하한 추정치(통계적 신뢰구간). 이 값이 0%보다 커야 "우연이 아니다"라고 보고 적용 조건을 충족합니다.' },
+  t_days: { label: '날짜별 신뢰도', help: '하루를 한 판으로 세어 다시 계산한 신뢰도 점수. 같은 날 걸린 종목들은 시장이 좋으면 다 같이 오르기 때문에, 종목 수로 세면 실제보다 훨씬 믿을 만해 보입니다. 1.65 이상이어야 "시장 덕분이 아니라 전략 덕분"으로 보고 적용을 검토합니다(매수 전략에만 적용 — 제외 규칙은 평균보다 큰 사고를 막는 것이 목적이라 면제).' },
   worst_low_ret: { label: '최악 하락', help: '조건에 걸렸던 종목이 다음날 장중 기록한 가장 큰 하락률 — 이 전략의 최악의 날입니다.' },
 } as const;
 
@@ -171,6 +172,21 @@ export type Tone = 'up' | 'down' | 'flat';
 export function retTone(v: number | null | undefined): Tone {
   if (v === null || v === undefined || v === 0) return 'flat';
   return v > 0 ? 'up' : 'down';
+}
+
+// 일 클러스터 t 문턱 — 백엔드 core/edge_policy.PROMO_MIN_DAY_T 와 같은 값(표기 전용).
+export const PROMO_MIN_DAY_T = 1.65;
+
+export function fmtT(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '—';
+  return v.toFixed(2);
+}
+
+// t 는 수익률이 아니라 신뢰도 점수 — 부호가 아니라 **문턱 통과 여부**로 색을 준다
+// (retTone 을 쓰면 t=0.37 이 '상승 빨강'으로 보여 통과한 것처럼 읽힌다).
+export function dayTTone(v: number | null | undefined): Tone {
+  if (v === null || v === undefined) return 'flat';
+  return v >= PROMO_MIN_DAY_T ? 'up' : 'flat';
 }
 
 // 등락 색(한국 관례: 상승=빨강, 하락=파랑). Sparkline tone 과 일치.

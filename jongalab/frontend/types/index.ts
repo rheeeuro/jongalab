@@ -297,6 +297,8 @@ export interface EdgeRuleStats {
   win_rate: number | null;
   std: number | null;
   ci_low: number | null;        // 단측 95% 신뢰구간 하한 — 승격 게이트(>0)
+  mean_net_days?: number | null; // 일 등가중 평균 순수익(%) — 매칭 많은 날 쏠림을 드러냄
+  t_days?: number | null;        // 일 클러스터 t — selector 승격 게이트(>=PROMO_MIN_DAY_T)
   worst_low_ret: number | null; // 매칭 종목 익일 저가 최악값(꼬리)
   updated_through: string | null;
   recent_n?: number;            // 강등 감시 최근 창(최근 10거래일) 표본 수

@@ -14,8 +14,10 @@
      (라우터 승격 게이트와 **동일 단일 소스**)으로 자격 판정 → stats.promo_eligible 저장
      (프론트 '승격후보' 배지가 이 값을 렌더링) → 텔레그램 알림:
        승격 후보(게이트 전체 충족) / 집행 설계 필요(통계는 충족, 선정 시점 실행 불가 피처) /
-       강등 검토(live 비대조군, 최근 10거래일 창 n≥20·거래일≥5·mean_net<0 — benchmark 는
-       제외: live 대조군이 사라지면 승격 게이트가 fail-closed 로 전 후보를 막는다).
+       강등 검토(core.edge_policy.check_demotion — live 비대조군, 최근 10거래일 창
+       n≥20·거래일≥5 + **역할별 부호**: selector 는 매수 종목 mean_net<0, veto 는 제외 종목
+       mean_net>0(이기는 종목을 버리는 중)일 때. benchmark 는 제외 — live 대조군이 사라지면
+       승격 게이트가 fail-closed 로 전 후보를 막는다).
      실제 전이는 관리자 API 수동 승인.
 """
 import logging
@@ -25,7 +27,7 @@ from datetime import date
 from core.config import EDGE_COST_PCT
 from core.logging_setup import setup_logging
 from core.edge_predicate import evaluate
-from core.edge_policy import check_promotion, rule_role
+from core.edge_policy import check_demotion, check_promotion, rule_role
 from core.notifications import send_edge_rule_alert
 from core.repository import (
     list_rules,
@@ -42,9 +44,8 @@ setup_logging()
 logger = logging.getLogger("RuleEvaluator")
 
 _CI_Z = 1.64                     # 단측 95% 정규 근사
-_RECENT_DAYS = 10                # 강등 감시: 최근 창(거래일 수)
-_DEMOTE_MIN_N = 20               # 강등 감시 최소 표본(종목-일)
-_DEMOTE_MIN_DAYS = 5             # 강등 감시 최소 거래일 — 하루 시장 무브가 창을 뒤집는 오탐 방지
+_RECENT_DAYS = 10                # 강등 감시: 최근 창(거래일 수) — stats.recent_* 산출 폭
+                                 # 강등 판정 문턱(표본·거래일·부호)은 core.edge_policy.check_demotion
 _LABEL_RETRY_DEADLINE_DAYS = 14  # 결과 라벨 미도래 재시도 마감 — 초과 시 n=0 sentinel 로 종결
 
 
@@ -95,7 +96,8 @@ def _recompute_stats(daily_rows: list[dict]) -> dict:
     n = len(nets)
     if n == 0:
         return {"n": 0, "n_days": 0, "mean_net": None, "win_rate": None, "std": None,
-                "ci_low": None, "worst_low_ret": None, "updated_through": updated_through}
+                "ci_low": None, "mean_net_days": None, "t_days": None,
+                "worst_low_ret": None, "updated_through": updated_through}
 
     mean_net = sum(nets) / n
     win_rate = sum(1 for x in nets if x > 0) / n
@@ -109,6 +111,23 @@ def _recompute_stats(daily_rows: list[dict]) -> dict:
     recent = [net for d, net in dated if d in recent_dates]
     recent_mean = sum(recent) / len(recent) if recent else None
 
+    # ── 일 클러스터 통계 (2026-07-28) — 위 ci_low 는 종목-일 iid 가정이라 같은 날 종목들이
+    # 시장 무브로 상관된 만큼 유의성을 과신한다. 거래일을 관측 단위로 묶어(하루 1표본) 다시 재면
+    # 실효 유의성이 나온다. 두 selector 후보가 이 차이로 뒤집혔다:
+    #   f5_prog_persistent(7/27) iid t=1.82 → 일 t=0.47 / f4_sector_follower(7/28) 1.99 → 0.37.
+    # mean_net_days(일 등가중 평균)는 mean_net(종목-일 가중)과 다르다 — 매칭 수가 많은 날에
+    # 쏠린 평균을 드러낸다(f4: mean_net +1.19% vs 일 등가중 +0.45%).
+    day_means = {}
+    for d, net in dated:
+        day_means.setdefault(d, []).append(net)
+    dm = [sum(v) / len(v) for v in day_means.values()]
+    mean_days = sum(dm) / len(dm)
+    if len(dm) >= 2:
+        dm_std = (sum((x - mean_days) ** 2 for x in dm) / (len(dm) - 1)) ** 0.5
+        t_days = mean_days / (dm_std / math.sqrt(len(dm))) if dm_std > 0 else None
+    else:
+        t_days = None  # 거래일 1일 — 분산 추정 불가(승격 게이트가 fail-closed 로 막는다)
+
     return {
         "n": n,
         # 라벨 표본이 있는 서로 다른 거래일 수 — 같은 날 표본은 시장 무브로 상관되어
@@ -118,6 +137,9 @@ def _recompute_stats(daily_rows: list[dict]) -> dict:
         "win_rate": round(win_rate, 3),
         "std": round(std, 3),
         "ci_low": round(ci_low, 3),
+        # 일 등가중 평균과 그 t — selector 승격 게이트(PROMO_MIN_DAY_T)가 t_days 를 쓴다.
+        "mean_net_days": round(mean_days, 3),
+        "t_days": round(t_days, 2) if t_days is not None else None,
         "worst_low_ret": round(min(lows), 3) if lows else None,
         "updated_through": updated_through,
         "recent_n": len(recent),
@@ -250,14 +272,9 @@ def run():
                 # 집행 설계(선정 시점 이동 등) 검토 대상. 표본 미달엔 알리지 않는다(매일 스팸 방지).
                 exec_pending.append({**row, "reason": gate["exec_reasons"][0]})
         elif rule["status"] == "live":
-            # 대조군(benchmark)은 강등 감시 제외 — 페이퍼 기준선이라 유지 비용이 없고,
-            # live 대조군이 사라지면 승격 게이트(대조군 우위)가 fail-closed 로 전 후보를 막는다.
-            if (
-                rule_role(rule) != "benchmark"
-                and (stats.get("recent_n") or 0) >= _DEMOTE_MIN_N
-                and (stats.get("recent_n_days") or 0) >= _DEMOTE_MIN_DAYS
-                and (stats.get("recent_mean_net") or 0) < 0
-            ):
+            # 강등 게이트도 core.edge_policy 단일 소스 — 역할별 mean_net 부호가 반대다
+            # (selector 는 음수, veto 는 제외 종목이 양수일 때 강등 검토). benchmark 면제.
+            if check_demotion(rule)["demote_candidate"]:
                 demotions.append({
                     "name": rule["name"], "family": rule["family"],
                     "n": stats["recent_n"], "mean_net": stats["recent_mean_net"],

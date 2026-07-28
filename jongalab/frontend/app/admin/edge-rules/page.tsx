@@ -15,6 +15,8 @@ import {
   isPromotionCandidate,
   isMeasurementOnly,
   ROLE_META,
+  fmtT,
+  dayTTone,
 } from "@/lib/edge";
 
 /**
@@ -278,6 +280,15 @@ function RuleRow({ rule, action }: { rule: EdgeRule; action?: React.ReactNode })
             {" · "}
             {STAT_META.ci_low.label}{" "}
             <b className={`tabular-nums ${TONE_TEXT[retTone(s.ci_low)]}`}>{fmtPct(s.ci_low)}</b>
+            {/* 일 클러스터 t — selector 승격 게이트. ci_low 만 보면 통과처럼 보이는 후보를
+                걸러내는 값이라 승격 판단 화면에는 반드시 함께 뜬다(제외 규칙은 면제라 미표기). */}
+            {rule.role !== "veto" && (
+              <>
+                {" · "}
+                {STAT_META.t_days.label}{" "}
+                <b className={`tabular-nums ${TONE_TEXT[dayTTone(s.t_days)]}`}>{fmtT(s.t_days)}</b>
+              </>
+            )}
             {s.worst_low_ret !== null && (
               <>
                 {" · "}

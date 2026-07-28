@@ -100,14 +100,24 @@ def selection_executable(predicate: list) -> tuple[bool, list[str]]:
 # 가까우므로 서로 다른 거래일이 이만큼 쌓여야 승격 검토 대상이 된다.
 PROMO_MIN_DAYS = 10
 
+# 일 클러스터 t 문턱 (2026-07-28) — `ci_low` 는 종목-일 iid 가정이라 같은 날 종목들이 시장
+# 무브로 상관된 만큼 유의성을 과신한다. PROMO_MIN_DAYS 는 문턱만 세우고 CI 는 그대로 iid 였다.
+# 거래일을 관측 단위로 묶은 t(stats.t_days)를 selector 승격 조건에 추가한다. 단측 95% ≈ 1.65.
+# 이 게이트 없이 후보로 올라와 재계산에서 뒤집힌 사례 2건:
+#   f5_prog_persistent(7/27) iid t=1.82 → 일 t=0.47 / f4_sector_follower(7/28) 1.99 → 0.37.
+# **veto 에는 적용하지 않는다** — reduce-only 라 최악이 기회비용이고, veto 의 가치는 평균이 아니라
+# 꼬리 차단에 있다(veto_bio_kosdaq 은 대체효과 t=0.95 로 평균 유의성이 없는데도 HLB 하한가
+# 꼬리 때문에 유지가 맞았다). 평균 t 를 요구하면 정작 필요한 보호 veto 가 후보로도 못 올라온다.
+PROMO_MIN_DAY_T = 1.65
+
 
 def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
     """승격 자격 판정 — 라우터(409 사유)·평가기(알림·stats.promo_eligible)가 공유하는 단일 게이트.
 
     rule: stats 가 최신으로 갱신된 rule dict. control_rules: role=benchmark 인 live rule 목록.
     반환: {"eligible": bool, "stat_reasons": [...], "exec_reasons": [...]}
-      - stat_reasons: selector 는 표본·신뢰구간·대조군 우위, veto 는 최소 실익 게이트
-        (거래일 수 + 제외 종목 평균 음수) 미충족 사유(benchmark 는 면제)
+      - stat_reasons: selector 는 표본·거래일 수·신뢰구간·**일 클러스터 t**·대조군 우위,
+        veto 는 최소 실익 게이트(거래일 수 + 제외 종목 평균 음수) 미충족 사유(benchmark 는 면제)
       - exec_reasons: 선정 시점 실행 불가 사유(benchmark 는 면제 — 선정에 안 쓰므로)
     월 승격 상한은 시점 의존 운영 제약이라 여기 넣지 않고 라우터가 별도 검사한다.
     """
@@ -133,6 +143,14 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
             )
         if ci_low is None or ci_low <= 0:
             stat_reasons.append(f"신뢰구간 하한 미충족: ci_low={ci_low}(>0 필요)")
+        # 일 클러스터 t — ci_low(종목-일 iid)의 과신을 거래일 단위로 교정. None(거래일 1일 등
+        # 분산 추정 불가)은 fail-closed: 검증 규율이 조용히 증발하는 fail-open 을 막는다.
+        t_days = stats.get("t_days")
+        if t_days is None or t_days < PROMO_MIN_DAY_T:
+            stat_reasons.append(
+                f"일 클러스터 t 미충족: t_days={t_days}(>={PROMO_MIN_DAY_T} 필요) — 같은 날 "
+                "종목은 시장 무브로 상관되어 거래일을 관측 단위로 묶어야 실효 유의성이 나온다"
+            )
         # 대조군 우위 — live benchmark 의 mean_net 최대값 이상. 대조군이 없거나 미평가면
         # fail-closed(승격 불가): '대조군 우위' 규율이 조용히 증발하는 fail-open 을 막는다.
         control_means = [
@@ -179,3 +197,44 @@ def check_promotion(rule: dict, control_rules: list[dict]) -> dict:
         "stat_reasons": stat_reasons,
         "exec_reasons": exec_reasons,
     }
+
+
+# ── 강등 게이트 (live → retired) ──
+# 최근 창(rule_evaluator._RECENT_DAYS 거래일) 표본의 최소 요건. 종목-일 표본만 보면 하루
+# 시장 무브가 창을 통째로 뒤집는 오탐 강등이 난다(2026-07-20 control_legacy_top10 사례).
+DEMOTE_MIN_N = 20
+DEMOTE_MIN_DAYS = 5
+
+
+def check_demotion(rule: dict) -> dict:
+    """강등 검토 대상 판정 — 평가기 알림이 쓰는 단일 게이트.
+
+    **역할별로 mean_net 의 부호 의미가 반대다**(2026-07-28 오탐 수정):
+      - selector: 매수한 종목의 순수익 → 음수면 돈을 잃는 중 = 강등 검토
+      - veto    : **제외한** 종목의 순수익 → 양수면 이기는 종목을 버리는 중 = 강등 검토
+                  (음수는 veto 가 손실을 제대로 걸러냈다는 뜻 — check_promotion 의 승격 조건과
+                  같은 방향이다. 부호를 selector 와 공유하면 잘 작동하는 veto 를 매일 강등
+                  후보로 올린다: veto_bio_kosdaq 이 recent_mean_net=-0.158 로 오탐 알림.)
+      - benchmark: 강등 감시 제외 — 페이퍼 기준선이라 유지 비용이 없고, live 대조군이 사라지면
+                  check_promotion 의 '대조군 우위'가 fail-closed 로 전 후보를 막는다.
+    반환: {"demote_candidate": bool, "reasons": [...]} (reasons 는 해당 시 사람이 읽을 사유)
+    """
+    role = rule_role(rule)
+    if role not in ("selector", "veto"):
+        return {"demote_candidate": False, "reasons": []}
+
+    stats = rule.get("stats") or {}
+    n = stats.get("recent_n") or 0
+    n_days = stats.get("recent_n_days") or 0
+    mean_net = stats.get("recent_mean_net")
+    if n < DEMOTE_MIN_N or n_days < DEMOTE_MIN_DAYS or mean_net is None:
+        return {"demote_candidate": False, "reasons": []}
+
+    if role == "selector" and mean_net < 0:
+        return {"demote_candidate": True,
+                "reasons": [f"최근 {n_days}거래일 매수 종목 평균순수익 {mean_net}% < 0"]}
+    if role == "veto" and mean_net > 0:
+        return {"demote_candidate": True,
+                "reasons": [f"최근 {n_days}거래일 제외 종목 평균순수익 {mean_net}% > 0 — "
+                            "veto 가 이기는 종목을 버리는 중"]}
+    return {"demote_candidate": False, "reasons": []}

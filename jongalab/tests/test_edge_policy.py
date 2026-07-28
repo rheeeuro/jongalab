@@ -1,6 +1,6 @@
 """Edge Ledger 정책(core/edge_policy.py) 단위 테스트.
 
-rule 역할(role·구 family 폴백) · 선정 시점 실행 가능성 · 승격 게이트(check_promotion)의 계약 고정.
+rule 역할(role·구 family 폴백) · 선정 시점 실행 가능성 · 승격 게이트(check_promotion)·강등 게이트(check_demotion)의 계약 고정.
 게이트는 라우터(409 사유)·평가기(알림·promo_eligible)·프론트(배지)가 공유하는 단일 소스라
 여기가 깨지면 세 곳이 동시에 어긋난다. 순수 로직이라 DB 무의존.
 """
@@ -10,6 +10,8 @@ from core.edge_policy import (
     rule_role,
     selection_executable,
     check_promotion,
+    check_demotion,
+    PROMO_MIN_DAY_T,
 )
 
 
@@ -30,7 +32,7 @@ def _control(mean_net):
             "stats": {"mean_net": mean_net}}
 
 
-GOOD_STATS = {"n": 50, "n_days": 12, "ci_low": 0.1, "mean_net": 0.5}
+GOOD_STATS = {"n": 50, "n_days": 12, "ci_low": 0.1, "mean_net": 0.5, "t_days": 2.1}
 
 
 # ── rule 역할 ──
@@ -92,7 +94,8 @@ def test_selector_eligible_when_all_gates_pass():
 
 def test_selector_blocked_on_small_sample_and_ci():
     gate = check_promotion(
-        _rule(stats={"n": 10, "n_days": 12, "ci_low": -0.1, "mean_net": 0.5}), [_control(0.2)]
+        _rule(stats={"n": 10, "n_days": 12, "ci_low": -0.1, "mean_net": 0.5, "t_days": 2.1}),
+        [_control(0.2)],
     )
     assert not gate["eligible"]
     assert len(gate["stat_reasons"]) == 2  # 표본 부족 + CI 하한
@@ -201,3 +204,74 @@ def test_supply_band_as_benchmark_skips_selector_gates():
                  predicate=[{"col": "supply_score", "op": "between", "value": [0, 40]}])
     gate = check_promotion(band, [])
     assert gate["eligible"] and gate["stat_reasons"] == [] and gate["exec_reasons"] == []
+
+
+# ── 강등 게이트 (check_demotion) ──
+# 역할별로 recent_mean_net 의 부호 의미가 반대다. 부호를 공유하면 잘 작동하는 veto 를 매일
+# 강등 후보로 올린다(2026-07-28 veto_bio_kosdaq recent_mean_net=-0.158 오탐 알림).
+
+def _live(role, recent_mean_net, recent_n=29, recent_n_days=10, family="f7_risk"):
+    return {"name": "r", "family": family, "role": role, "status": "live",
+            "stats": {"recent_n": recent_n, "recent_n_days": recent_n_days,
+                      "recent_mean_net": recent_mean_net}}
+
+
+def test_veto_demotion_sign_is_inverted_vs_selector():
+    # veto 의 mean_net 은 '제외한' 종목의 순수익 — 음수는 손실을 제대로 걸러낸 것(승격 조건과
+    # 같은 방향)이라 강등이 아니고, 양수여야 이기는 종목을 버리는 중 = 강등 검토.
+    assert not check_demotion(_live("veto", -0.158))["demote_candidate"]
+    assert check_demotion(_live("veto", 0.42))["demote_candidate"]
+
+
+def test_selector_demoted_on_negative_recent_mean():
+    assert check_demotion(_live("selector", -0.5, family="f4_laggard"))["demote_candidate"]
+    assert not check_demotion(_live("selector", 0.5, family="f4_laggard"))["demote_candidate"]
+
+
+def test_benchmark_never_demote_candidate():
+    # live 대조군이 사라지면 check_promotion 의 '대조군 우위'가 fail-closed 로 전 후보를 막는다.
+    assert not check_demotion(_live("benchmark", -0.494, family="control"))["demote_candidate"]
+
+
+def test_demotion_requires_min_sample_and_days():
+    assert not check_demotion(_live("veto", 0.42, recent_n=19))["demote_candidate"]
+    assert not check_demotion(_live("veto", 0.42, recent_n_days=4))["demote_candidate"]
+    assert not check_demotion(_live("veto", None))["demote_candidate"]
+    assert not check_demotion({"name": "r", "family": "f7_risk", "role": "veto",
+                               "status": "live", "stats": None})["demote_candidate"]
+
+
+# ── 일 클러스터 t 게이트 (selector 전용, 2026-07-28) ──
+
+def test_selector_blocked_on_weak_day_cluster_t():
+    # f4_sector_follower 실례: iid ci_low(+0.21)·mean_net(+1.19%)은 통과인데 일 클러스터
+    # t=0.37 — 수익이 시장 베타라 거래일 단위로는 유의하지 않다.
+    gate = check_promotion(
+        _rule(family="f4_laggard",
+              stats={"n": 52, "n_days": 10, "ci_low": 0.207, "mean_net": 1.192, "t_days": 0.37}),
+        [_control(-0.227)])
+    assert not gate["eligible"]
+    assert any("일 클러스터 t" in r for r in gate["stat_reasons"])
+
+
+def test_selector_day_cluster_t_is_fail_closed_when_missing():
+    # 거래일 1일 등으로 분산 추정 불가(None) → 규율이 조용히 증발하지 않도록 차단.
+    stats = dict(GOOD_STATS); stats["t_days"] = None
+    gate = check_promotion(_rule(stats=stats), [_control(0.2)])
+    assert not gate["eligible"]
+    assert any("일 클러스터 t" in r for r in gate["stat_reasons"])
+
+
+def test_selector_passes_at_day_cluster_threshold():
+    stats = dict(GOOD_STATS); stats["t_days"] = PROMO_MIN_DAY_T
+    assert check_promotion(_rule(stats=stats), [_control(0.2)])["eligible"]
+
+
+def test_veto_exempt_from_day_cluster_t():
+    # veto 는 reduce-only + 가치가 꼬리 차단이라 평균 t 를 요구하지 않는다(veto_bio_kosdaq
+    # 은 대체효과 t=0.95 로 평균 유의성이 없는데도 HLB 하한가 때문에 유지가 맞았다).
+    gate = check_promotion(
+        _rule(family="f7_risk", role="veto",
+              stats={"n": 36, "n_days": 11, "mean_net": -0.203, "t_days": -0.4},
+              predicate=[{"col": "is_bio", "op": "==", "value": 1}]), [])
+    assert gate["eligible"]
