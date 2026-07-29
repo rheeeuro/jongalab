@@ -22,10 +22,12 @@
   `sector_rel_ret >= 0` (섹터 동조 = 착시 아님 방증) AND `change_pct between [0, 12]`
 - **경계 논리**: 하한 1% 미만은 노이즈, 상한 6% 초과는 이미 다 먹힌 갭(다음 매수자 몫 없음).
 
-### `f3_nxt_gap_thin` — **음의 가설 (착시 검증용)**
+### `f3_nxt_gap_thin` — **음의 가설 (착시 검증용, role=veto)**
 - **가설**: 섹터 동조 없는 단독 NXT 괴리(`nxt_gap_pct >= 3` AND `sector_rel_ret < 0`)는
   얇은 호가 착시라 익일 수익이 안 된다(기대: mean_net ≤ 0).
 - **의미**: F3 본가설의 대우 검증. 이게 양(+)으로 나오면 F3 의 인과 논리 자체를 재검토.
+- **role**: 2026-07-29 `selector` → **`veto`** 재분류(sql/42) — 아래 `f5_retail_solo_pump`
+  와 같은 이유(음의 가설을 selector 로 두면 게이트 부호가 반대로 붙는다).
 
 ## F1 — 뉴스 미반영형 (2순위: 라벨 인프라 기구축, 한계비용 ~0)
 
@@ -68,10 +70,18 @@
 - **predicate**: `inst_net_buy > 0` AND `frgn_net_buy > 0` AND `supply_days >= 3` AND
   `change_pct between [0, 10]`
 
-### `f5_retail_solo_pump` — **음의 가설 (착시 검증용)**
+### `f5_retail_solo_pump` — **음의 가설 (착시 검증용, role=veto)**
 - **가설**: 기관·외국인이 순매도하는데 개인 매수만으로 오른 급등(`change_pct >= 5`)은
   받아줄 다음 매수자가 없어 익일 되돌림(기대: mean_net ≤ 0).
 - **의미**: 검증되면 veto rule 전환 근거가 된다.
+- **role**: 2026-07-29 `selector` → **`veto`** 재분류(sql/42). 7/7 시드는 짝 가설
+  (`f5_inst_frgn_dual_buy`)과 같은 자로 재려고 음의 가설을 매수 축에 뒀는데, 그러면
+  **게이트 부호가 반대로 붙는다** — 가설대로 손실이면 게이트는 침묵(veto 전환 근거가 쌓여도
+  알림 없음)이고, 가설과 반대로 이익이면 🟢'승격 후보'로 실탄 매수 후보가 된다. 실제로
+  2026-07-29 그 상태가 됐다(n=12·10거래일, mean_net +1.90%, 일 t=1.18 — 평균의 전부가
+  7/15 HLB·7/28 코스모로보틱스 이틀에서 나오고 그 이틀을 빼면 초과 −0.31%).
+  7/19 배치의 음의 가설은 처음부터 veto 로 등록됐다(`veto_prior_high_wall` 등) — 이건 잔재였다.
+- **재분류 후 판정**: veto 실익 게이트(제외 종목 mean_net<0)에서 +1.90% 로 정상 탈락.
 - **predicate**: `indv_net_buy > 0` AND `inst_net_buy < 0` AND `frgn_net_buy < 0` AND
   `change_pct >= 5`
 

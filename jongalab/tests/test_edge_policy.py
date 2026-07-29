@@ -347,6 +347,32 @@ def test_confirmation_fail_closed_without_samples():
         assert not r["pass"] and r["reasons"]
 
 
+# ── 확인창 부호 (2026-07-29 수정) ──
+# 확인창이 role 을 안 보고 mean_exc>0 만 요구하면 veto 는 "제외할 종목이 시장을 이겨야 확증"이
+# 된다. 즉 **잘 작동하는 veto 가 그 이유로 종결**된다(veto_short_surge 실례: 확인창 표본
+# mean_exc -0.98%·제외 종목 mean_net -0.38% = veto 로선 정상 방향인데 confirm_failed 예정).
+
+def test_veto_confirmation_requires_negative_raw_mean_on_fresh_sample():
+    # veto 는 발견 게이트와 **같은 자**(제외 종목 원시 mean_net<0)로 재확인한다.
+    working = {"n_days": 10, "mean_net": -0.38, "mean_exc": -0.98}
+    assert check_confirmation(working, "veto")["pass"]
+    assert not check_confirmation(working, "selector")["pass"]   # selector 자로는 탈락(부호 반대)
+
+    # 새 표본에서 제외 대상이 오히려 벌었다면 실익 미재현 → 탈락.
+    broken = {"n_days": 10, "mean_net": 0.4, "mean_exc": 0.2}
+    assert not check_confirmation(broken, "veto")["pass"]
+    assert check_confirmation(broken, "selector")["pass"]
+
+    assert not check_confirmation({"n_days": 10, "mean_net": 0.0}, "veto")["pass"]  # 0 은 미달
+
+
+def test_veto_confirmation_fail_closed_without_raw_sample():
+    # 초과 표본만 있고 원시 평균이 없으면 veto 는 판정 불가 → fail-closed.
+    for s in (None, {}, {"n_days": 5}, {"n_days": 10, "mean_exc": -1.0}):
+        r = check_confirmation(s, "veto")
+        assert not r["pass"] and r["reasons"]
+
+
 # ── 절대 수익성 하한 (2026-07-28) ──
 # 초과수익만 보면 '유니버스보다 낫지만 돈은 잃는' rule 이 통과한다. 대조군 우위로도 막히지
 # 않는다 — 대조군(control_legacy_top10) 자체가 -0.227% 라 문턱이 음수이기 때문.

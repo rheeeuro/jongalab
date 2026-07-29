@@ -380,7 +380,7 @@ def run():
             ]
             stats["promo_policy"] = EDGE_PROMO_POLICY
             row = {
-                "name": rule["name"], "family": rule["family"],
+                "name": rule["name"], "family": rule["family"], "role": rule_role(rule),
                 "n": stats["n"], "mean_net": stats["mean_net"], "ci_low": stats["ci_low"],
             }
             # ── 판정 일정 (2026-07-28) — 게이트를 '매일' 검사하면 무기한 재시험이 되어
@@ -419,11 +419,14 @@ def run():
                 c_stats = _recompute_stats(
                     _slice_sample_days(rule["_daily_rows"], DISCOVERY_DAYS,
                                        DISCOVERY_DAYS + CONFIRM_DAYS), rule["_uni"])
-                conf = check_confirmation(c_stats)
+                # 확인창도 **role 별로 자·부호가 다르다**(2026-07-29) — veto 는 제외 종목 원시
+                # mean_net<0 을 본다. role 을 안 넘기면 veto 가 '잘 작동한다는 이유로' 종결된다.
+                conf = check_confirmation(c_stats, rule_role(rule))
                 dec = dict(rule.get("decision") or {})
                 dec["confirm"] = {
                     "at": str(date.today()), "n_days": conf["n_days"],
-                    "pass": conf["pass"], "mean_exc": conf["mean_exc"], "reasons": conf["reasons"],
+                    "pass": conf["pass"], "mean_exc": conf["mean_exc"],
+                    "mean_net": conf.get("mean_net"), "reasons": conf["reasons"],
                 }
                 dec["decided_at"] = str(date.today())
                 dec["verdict"] = "confirmed" if conf["pass"] else "confirm_failed"
@@ -431,7 +434,8 @@ def run():
                 update_rule_decision(rule["id"], dec)
                 logger.info(
                     f"[판정:확인] {rule['name']} — {'확증(승격 후보)' if conf['pass'] else '재현 실패(종결)'}"
-                    f" (확인창 거래일 {conf['n_days']}, 초과 {conf['mean_exc']}%)"
+                    f" (확인창 거래일 {conf['n_days']}, 초과 {conf['mean_exc']}%, "
+                    f"원시 {conf.get('mean_net')}%)"
                 )
                 if conf["pass"]:
                     # 확인창까지 통과 — 이때만 알린다. 실행 가능성은 여기서 다시 확인한다
@@ -445,7 +449,7 @@ def run():
             # (selector 는 음수, veto 는 제외 종목이 양수일 때 강등 검토). benchmark 면제.
             if check_demotion(rule)["demote_candidate"]:
                 demotions.append({
-                    "name": rule["name"], "family": rule["family"],
+                    "name": rule["name"], "family": rule["family"], "role": rule_role(rule),
                     # 알림에도 게이트가 판단한 값(종목-일 가중)을 그대로 보여준다
                     "n": stats["recent_n"], "mean_net": stats["recent_mean_net"],
                     # 일 등가중 최근 평균을 병기 — 두 가중의 부호가 갈리면 쏠림(몇 종목의

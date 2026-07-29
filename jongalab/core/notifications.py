@@ -292,6 +292,10 @@ def send_edge_rule_alert(
         return f"{v:+.2f}%" if v is not None else "—"  # 표본 0 등 미산출 값 방어
 
     def _rule_line(r: dict, prefix: str = "평균순수익") -> str:
+        # veto 는 mean_net 이 **제외한** 종목의 성적이라 음수가 정상(승격 조건과 같은 방향).
+        # 부호 방향을 줄에 못 박아 두지 않으면 잘 작동하는 veto 를 나쁜 성적으로 읽는다.
+        if r.get("role") == "veto":
+            prefix = f"제외 종목 {prefix}(음수=정상)"
         line = f"• *{r['name']}* (`{r['family']}`) — n={r['n']}, {prefix} {_pct(r.get('mean_net'))}"
         if "ci_low" in r:
             line += f", CI하한 {_pct(r.get('ci_low'))}"

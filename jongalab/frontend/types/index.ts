@@ -380,6 +380,9 @@ export interface EdgeRuleDecisionStep {
   n_days: number | null;
   pass: boolean;
   mean_exc: number | null;
+  // 확인창 원시 평균 — **veto 는 이 값(제외 종목 mean_net<0)으로 판정**한다(2026-07-29).
+  // 초과수익(mean_exc>0)은 selector 기준이라 veto 에 쓰면 부호가 뒤집힌다.
+  mean_net?: number | null;
   t_days_exc?: number | null;
   reasons: string[];
   exec_blocked?: string[] | null;  // 선정 시점 실행 불가 — 통계 탈락과 구분(설계 변경 시 재검토)

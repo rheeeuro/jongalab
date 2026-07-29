@@ -148,6 +148,13 @@ CONFIRM_DAYS = 10
 # '새 표본에서도 초과수익이 양수'만 요구한다. 이 조합이 오탐 2.4%·검출력 32%(+1%/일)다.
 CONFIRM_MIN_MEAN_EXC = 0.0
 
+# **veto 는 부호가 반대다** (2026-07-29 수정) — 확인창이 role 을 안 보고 mean_exc>0 만 요구해서
+# "제외할 종목이 시장을 이겨야 확증"이라는 뒤집힌 판정을 하고 있었다. veto 는 발견 게이트가
+# 제외 종목 원시 평균 음수(실익)를 보므로 확인창도 **같은 자(mean_net<0)** 로 재확인한다.
+# 실제 피해 사례: veto_short_surge(2026-07-29 confirming, 확인창 표본의 mean_exc -0.98%
+# = veto 로선 정상 방향)가 확인일에 confirm_failed 로 **잘 작동한다는 이유로 종결**될 상태였다.
+CONFIRM_VETO_MAX_MEAN_NET = 0.0
+
 DECISION_STAGES: tuple[str, ...] = ("discovery", "confirming", "decided")
 
 # ── 승격 게이트 정책 (2026-07-28) ──
@@ -327,18 +334,40 @@ def check_promotion(rule: dict, control_rules: list[dict], policy: str = "strict
     }
 
 
-def check_confirmation(confirm_stats: dict | None) -> dict:
+def check_confirmation(confirm_stats: dict | None, role: str = "selector") -> dict:
     """확인창 판정 — 발견에 **쓰지 않은 새 표본**으로만 재확인한다.
 
     confirm_stats: 확인창 구간(발견 이후 CONFIRM_DAYS 거래일)만으로 재계산한 stats.
     발견 단계와 같은 강도를 요구하면 진짜 엣지도 대부분 탈락하므로(검출력 붕괴),
-    '새 표본에서도 초과수익이 양수'만 본다. 표본 부재는 fail-closed.
+    '새 표본에서도 방향이 재현되는가'만 본다. 표본 부재는 fail-closed.
+
+    **role 별로 재는 자와 부호가 다르다** — 발견 게이트(check_promotion)와 같은 자를 쓴다:
+      selector : 초과수익 mean_exc > 0 (같은 날 유니버스 자기제외 대비 알파가 재현)
+      veto     : 제외 종목 원시 mean_net < 0 (제외가 여전히 손실을 걸러내고 있다)
+    role 기본값은 selector(구 동작) — 호출부는 rule_role(rule) 로 명시해 넘긴다.
     """
     s = confirm_stats or {}
+    n_days = s.get("n_days") or 0
+    if role == "veto":
+        mean_net = s.get("mean_net")
+        if mean_net is None:
+            return {"pass": False, "reasons": ["확인창 표본 없음 — 제외 종목 성적을 구할 수 없었습니다"],
+                    "mean_exc": s.get("mean_exc"), "mean_net": None, "n_days": n_days}
+        ok = mean_net < CONFIRM_VETO_MAX_MEAN_NET
+        return {
+            "pass": ok,
+            "reasons": [] if ok else [
+                f"확인창 실익 미재현: 제외 종목 mean_net={mean_net}"
+                f"(<{CONFIRM_VETO_MAX_MEAN_NET} 필요) — 새 표본에서는 제외 대상이 손실이 아니었습니다"
+            ],
+            "mean_exc": s.get("mean_exc"),
+            "mean_net": mean_net,
+            "n_days": n_days,
+        }
     mean_exc = s.get("mean_exc")
     if mean_exc is None:
         return {"pass": False, "reasons": ["확인창 초과 표본 없음 — 기준선을 구할 수 없었습니다"],
-                "mean_exc": None, "n_days": s.get("n_days") or 0}
+                "mean_exc": None, "mean_net": s.get("mean_net"), "n_days": n_days}
     ok = mean_exc > CONFIRM_MIN_MEAN_EXC
     return {
         "pass": ok,
@@ -347,7 +376,8 @@ def check_confirmation(confirm_stats: dict | None) -> dict:
             "발견 단계 성적이 새 표본에서 재현되지 않았습니다"
         ],
         "mean_exc": mean_exc,
-        "n_days": s.get("n_days") or 0,
+        "mean_net": s.get("mean_net"),
+        "n_days": n_days,
     }
 
 
