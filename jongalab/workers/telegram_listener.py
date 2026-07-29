@@ -183,7 +183,17 @@ def analyze_and_store(channel_name: str, text: str, msg_link: str) -> None:
     if result.sentiment_score is not None and 30 <= result.sentiment_score <= 80:
         logging.info(f"[알림 스킵] 점수 {result.sentiment_score}점(30~80 구간)으로 텔레그램 전송 생략")
     else:
-        send_analysis_alert(channel_name, result.title, result.content, result.sentiment_score, tickers)
+        # 원문을 인용블록으로 그대로 싣고 tldr 한 줄만 덧붙인다(요약본만 보내던 방식 대체)
+        send_analysis_alert(
+            channel_name,
+            result.title,
+            result.content,
+            result.sentiment_score,
+            tickers,
+            original_text=text,
+            tldr=result.tldr,
+            source_url=msg_link,
+        )
 
 
 while True:

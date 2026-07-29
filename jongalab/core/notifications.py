@@ -1,7 +1,9 @@
 """
 알림 모듈 - 텔레그램 메시지 전송 로직 통합
 """
+import html
 import logging
+import re
 from datetime import datetime
 
 import requests
@@ -24,23 +26,23 @@ _session = requests.Session()
 _session.mount("https://", HTTPAdapter(max_retries=_retry))
 
 
-def _post(chat_id: str, message: str):
+def _post(chat_id: str, message: str, parse_mode: str = "Markdown"):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": chat_id,
         "text": message,
-        "parse_mode": "Markdown",
+        "parse_mode": parse_mode,
         "disable_web_page_preview": True,
     }
     resp = _session.post(url, data=data, timeout=10)
     resp.raise_for_status()
 
 
-def _send_telegram_message(message: str):
+def _send_telegram_message(message: str, parse_mode: str = "Markdown"):
     """활성 상태인 모든 유저에게 전송"""
     chat_ids = get_active_chat_ids()
     for chat_id in chat_ids:
-        _post(chat_id, message)
+        _post(chat_id, message, parse_mode)
     return len(chat_ids)
 
 
@@ -91,38 +93,97 @@ def send_news_veto_alert(stk_nm: str, stk_cd: str, category: str, confidence: in
         logging.error(f"❌ 뉴스 베토 경보 전송 실패: {e}")
 
 
-def send_analysis_alert(channel: str, title: str, analysis: str, score: int = 50, related_tickers: list[dict] | None = None):
-    """콘텐츠 분석 결과 텔레그램 전송 (YouTube/Telegram 공통)"""
+TELEGRAM_MAX_LEN = 4096   # sendMessage text 상한. 초과하면 400 이라 알림이 통째로 누락된다
+ORIGINAL_MAX_LEN = 2500   # 원문 인용 상한. 텔레그램 4096자 제한 안에서 헤더·요약 자리를 남긴다
+BODY_MAX_LEN = 800        # 덧붙이는 코멘트 상한(원문 없는 YouTube 경로의 분석 본문)
+
+
+def _esc(text: str) -> str:
+    """HTML parse_mode 용 이스케이프. 원문에 `*`·`_`·`[` 가 있어도 안전하다.
+
+    Markdown 이던 시절엔 LLM/원문의 짝 안 맞는 `*`·`_` 하나가 400 을 만들어 알림이
+    조용히 누락됐다(예외를 삼키고 로그만 남기는 구조라 눈에 띄지 않았다).
+    """
+    return html.escape(str(text or ""), quote=False)
+
+
+def _md_bold_to_html(text: str) -> str:
+    """이스케이프된 텍스트의 `**강조**` 만 <b> 로 바꾼다(짝이 맞는 쌍만 — 잘린 `**` 는 그대로 남겨
+    태그 미종료로 400 이 나는 걸 막는다)."""
+    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text, flags=re.S)
+
+
+def _clip(text: str, limit: int) -> str:
+    text = text.strip()
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def send_analysis_alert(
+    channel: str,
+    title: str,
+    analysis: str,
+    score: int = 50,
+    related_tickers: list[dict] | None = None,
+    original_text: str | None = None,
+    tldr: str | None = None,
+    source_url: str | None = None,
+):
+    """콘텐츠 분석 결과 텔레그램 전송 (YouTube/Telegram 공통).
+
+    `original_text` 가 오면(텔레그램 채널 경로) **원문을 접히는 인용블록으로 그대로 싣고**
+    코멘트를 덧붙인다 — 봇은 자기가 멤버가 아닌 채널의 메시지를 forwardMessage 할 수 없어
+    (원문 수집은 Telethon 사용자 세션, 발송은 봇) 네이티브 '전달'은 불가능하고, 인용블록이
+    같은 읽기 경험을 준다. 원문이 있으면 코멘트는 `tldr` 한 줄만 붙인다(원문이 이미 실려
+    있어 분석 전문까지 넣으면 모바일에서 스크롤만 길어진다). 없으면 기존대로 분석 본문.
+
+    parse_mode 는 이 함수만 HTML 이다(원문의 임의 문자 때문 — 다른 알림은 Markdown 유지).
+    """
     try:
         if score >= 80:
-            status = "🔥 *강력 매수* (탐욕)"
+            status = "🔥 <b>강력 매수</b> (탐욕)"
         elif score >= 60:
-            status = "📈 *긍정적* (매수)"
+            status = "📈 <b>긍정적</b> (매수)"
         elif score <= 20:
-            status = "🥶 *공포* (현금화)"
+            status = "🥶 <b>공포</b> (현금화)"
         elif score <= 40:
-            status = "📉 *부정적* (보수적)"
+            status = "📉 <b>부정적</b> (보수적)"
         else:
-            status = "😐 *중립* (관망)"
-
-        short_analysis = analysis[:800] + "..." if len(analysis) > 800 else analysis
+            status = "😐 <b>중립</b> (관망)"
 
         ticker_display = ", ".join(
-            f"{t['name']}({t['ticker']})" for t in (related_tickers or [])
+            f"{_esc(t['name'])}(<code>{_esc(t['ticker'])}</code>)"
+            for t in (related_tickers or [])
         )
 
-        formatted_analysis = short_analysis.replace("**", "*")
-        message = (
-            f"🚨 *[{channel}] 분석 완료!*\n"
-            f"📊 관점: {score}점 - {status}\n\n"
-            f"📺 {title}\n"
-            f"관련 종목: {ticker_display}\n"
-            f"──────────────────\n"
-            f"{formatted_analysis}\n\n"
-            f"👉 [대시보드 바로가기](https://jongalab.com)"
-        )
+        head = f"📨 <b>{_esc(channel)}</b>" if original_text else f"🚨 <b>[{_esc(channel)}] 분석 완료!</b>"
+        lines = [head, f"📊 관점: {score}점 - {status}", ""]
+        if not original_text:
+            lines.append(f"📺 {_esc(title)}")
+        if ticker_display:
+            lines.append(f"관련 종목: {ticker_display}")
 
-        count = _send_telegram_message(message)
+        footer = ['👉 <a href="https://jongalab.com">대시보드 바로가기</a>']
+        if source_url:
+            footer.append(f'<a href="{_esc(source_url)}">원문 보기</a>')
+        tail = "\n" + " · ".join(footer)
+
+        if original_text:
+            body = f"\n🤖 {_md_bold_to_html(_esc(_clip(tldr or analysis, BODY_MAX_LEN)))}"
+            quoted = _esc(_clip(original_text, ORIGINAL_MAX_LEN))
+            # 이스케이프(&→&amp;)로 부푼 드문 원문에서 4096자를 넘기지 않게 인용분만 더 깎는다
+            budget = TELEGRAM_MAX_LEN - len("\n".join(lines)) - len(body) - len(tail) - 40
+            if len(quoted) > budget:
+                # 자를 때 `&amp;` 중간에서 끊기면 엔티티가 깨지므로 꼬리 조각을 떼어낸다
+                quoted = re.sub(r"&[#a-zA-Z0-9]{0,6}$", "", quoted[: max(200, budget)]) + "…"
+            # expandable: 4줄 넘으면 텔레그램이 접어서 보여준다(긴 리서치 원문 대응)
+            lines.append(f"\n<blockquote expandable>{quoted}</blockquote>")
+            lines.append(body)
+        else:
+            lines.append("──────────────────")
+            lines.append(_md_bold_to_html(_esc(_clip(analysis, BODY_MAX_LEN))))
+
+        lines.append(tail)
+        count = _send_telegram_message("\n".join(lines), parse_mode="HTML")
         logging.info(f"📨 텔레그램 전송 성공: {title} ({score}점) -> {count}개 채팅방")
 
     except Exception as e:
