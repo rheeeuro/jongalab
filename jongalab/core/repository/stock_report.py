@@ -14,7 +14,19 @@ _FIRST_WRITE_WINS = frozenset({"prog_am_net"})
 #  · ob_* — 호가 미시구조는 연속장 중에만 유효(장 종료 후 잔량 0→파생값 None). 세션 중
 #    마지막 실행(종가 직전 ~15시)이 last-write-wins 로 남고, 장 종료 후 재실행의 NULL 은
 #    무시해 근사 '매수 당시' 스냅샷을 보존한다.
-_PRESERVE_ON_NULL = frozenset({"prog_pm_net", "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct"})
+#  · news_* 재료 지속성 라벨 — LLM 판정은 새 헤드라인이 있을 때만 재호출하므로(비용·처리량),
+#    판정을 건너뛴 실행이나 LLM 실패는 None 을 보낸다. 그때 그날의 판정이 지워지면 안 된다.
+#    (정상 경로에서는 closing_bet 이 기존 라벨을 읽어 in-memory 로도 이어붙인다 — rule 평가가
+#     메모리 dict 를 보므로 캐리포워드가 필수고, 이 집합은 DB 쪽 백스톱이다.)
+#    ⚠️ LLM 라벨 컬럼은 **하나도 빠짐없이** 이 집합과 _NEWS_LABEL_COLS 양쪽에 있어야 한다.
+#    2026-07-29 첫 실행에서 news_summary/news_sentiment/news_catalyst 를 빼먹어, 캐시 스킵
+#    실행이 그 3개만 NULL 로 덮었다(4축은 살아남아 한 행 안에서 라벨이 어긋났다).
+_PRESERVE_ON_NULL = frozenset({
+    "prog_pm_net", "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct",
+    "news_summary", "news_sentiment", "news_catalyst",
+    "news_next_milestone", "news_amount_locked", "news_driver_scope", "news_stage",
+    "news_durability", "news_label_reason", "news_judge_max_at",
+})
 
 
 def _analysis_row(c: dict) -> dict:
@@ -62,6 +74,15 @@ def _analysis_row(c: dict) -> dict:
         "news_summary": c.get("news_summary"),
         "news_sentiment": c.get("news_sentiment"),
         "news_catalyst": c.get("news_catalyst"),
+        # 재료 지속성 라벨 (sql/40) — LLM 사실 4축 + 코드 합성 등급 + 판정 근거·캐시 기준.
+        # 전부 _PRESERVE_ON_NULL 대상(판정 스킵/실패의 NULL 이 그날 판정을 지우지 않는다).
+        "news_next_milestone": c.get("news_next_milestone"),
+        "news_amount_locked": c.get("news_amount_locked"),
+        "news_driver_scope": c.get("news_driver_scope"),
+        "news_stage": c.get("news_stage"),
+        "news_durability": c.get("news_durability"),
+        "news_label_reason": c.get("news_label_reason"),
+        "news_judge_max_at": c.get("news_judge_max_at"),
         "news_headlines": json.dumps(
             c.get("news_headlines") or [], ensure_ascii=False
         ) if c.get("news_headlines") else None,
@@ -656,6 +677,74 @@ def save_after_hours_labels(report_date: str, rows: list[dict]) -> int:
                 f"""UPDATE daily_stock_report SET {sets}
                     WHERE report_date = %s AND stock_code = %s""",
                 (*(r.get(c) for c in _AFTER_HOURS_COLS), report_date, r["stock_code"]),
+            )
+            n += cursor.rowcount
+        conn.commit()
+    return n
+
+
+# ── 뉴스 재료 지속성 라벨 (closing_bet 판정 캐시 + outcome_backfill 채점) ──
+
+# LLM 이 한 번의 판정으로 함께 만드는 라벨 전부 — 요약·방향·유형도 같은 호출 산출물이므로
+# 캐리포워드 대상이다(빠지면 캐시 스킵 실행이 그 컬럼만 지워 한 행 안에서 라벨이 어긋난다).
+_NEWS_LABEL_COLS = (
+    "news_summary", "news_sentiment", "news_catalyst",
+    "news_next_milestone", "news_amount_locked", "news_driver_scope", "news_stage",
+    "news_durability", "news_label_reason", "news_judge_max_at",
+)
+
+
+def get_today_news_labels(stock_codes: list[str]) -> dict[str, dict]:
+    """오늘 행에 이미 있는 재료 지속성 라벨 — 재판정 스킵 판단 + in-memory 캐리포워드용.
+
+    closing_bet 은 30분마다 재실행되고 rule 평가는 **메모리 dict** 를 보므로, 판정을 건너뛴
+    실행에서도 라벨이 행에 실려 있어야 veto/selector 가 같은 판단을 한다.
+    반환: {code: {<_NEWS_LABEL_COLS...>}}
+    """
+    codes = [c.split("_")[0].split(".")[0] for c in stock_codes if c]
+    if not codes:
+        return {}
+    placeholders = ", ".join(["%s"] * len(codes))
+    cols = ", ".join(_NEWS_LABEL_COLS)
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"""SELECT stock_code, {cols} FROM daily_stock_report
+                 WHERE report_date = CURDATE() AND stock_code IN ({placeholders})""",
+            tuple(codes),
+        )
+        return {r.pop("stock_code"): r for r in cursor.fetchall()}
+
+
+def get_rows_for_news_followup(window_days: int) -> list[dict]:
+    """후속 재료 채점 대상 — 지속성 라벨이 있고 채점 창이 아직 열려 있는 과거 행.
+
+    창이 닫힌(리포트일 + window_days 가 지난) 행은 값이 확정되므로 다시 계산하지 않는다.
+    창이 열려 있는 동안은 매 실행 재계산(멱등) — 날짜 수는 창이 자라며 단조 증가한다.
+    news_mention 보존이 14일이므로 창을 14일 넘게 잡으면 앞쪽 표본이 잘린다(config 주석 참조).
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT report_date, stock_code FROM daily_stock_report
+                WHERE news_durability IS NOT NULL
+                  AND report_date < CURDATE()
+                  AND report_date >= CURDATE() - INTERVAL %s DAY
+                ORDER BY report_date ASC""",
+            (int(window_days),),
+        )
+        return cursor.fetchall()
+
+
+def save_news_followup(rows: list[dict]) -> int:
+    """news_followup_days UPDATE. rows: [{report_date, stock_code, news_followup_days}]."""
+    if not rows:
+        return 0
+    n = 0
+    with get_db() as (conn, cursor):
+        for r in rows:
+            cursor.execute(
+                """UPDATE daily_stock_report SET news_followup_days = %s
+                    WHERE report_date = %s AND stock_code = %s""",
+                (r["news_followup_days"], r["report_date"], r["stock_code"]),
             )
             n += cursor.rowcount
         conn.commit()

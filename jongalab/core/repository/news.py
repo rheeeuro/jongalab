@@ -153,6 +153,91 @@ def get_news_since(stock_code: str, since_dt: datetime, limit: int = 30) -> list
         return cursor.fetchall()
 
 
+def get_recent_news_by_stocks(
+    stock_codes: list[str], days: int = 5
+) -> dict[str, list[dict]]:
+    """여러 종목의 최근 days 일(오늘 포함) 헤드라인을 **한 번의 쿼리**로 묶어 반환.
+
+    재료 지속성 판정(core/news_material_judge)은 당일 헤드라인만으로는 `stage`(첫 발표인지
+    후속 보도인지)를 알 수 없어 다일 룩백이 필요하다. 종목마다 따로 조회하면 유니버스
+    전건 판정 시 쿼리가 종목 수만큼 늘어나므로 벌크로 받는다.
+
+    반환: {code: [{"d": date, "headline": str, "created_at": datetime}, ...]}
+          (종목별 created_at 오름차순 — 프롬프트 블록이 시간순이어야 stage 판정이 된다)
+    """
+    codes = [c.split(".")[0].split("_")[0] for c in stock_codes if c]
+    if not codes:
+        return {}
+    placeholders = ", ".join(["%s"] * len(codes))
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"""
+            SELECT ticker, DATE(created_at) AS d, headline, created_at
+            FROM news_mention
+            WHERE ticker IN ({placeholders})
+              AND created_at >= CURDATE() - INTERVAL %s DAY
+            ORDER BY ticker, created_at ASC
+            """,
+            (*codes, int(max(0, days - 1))),
+        )
+        out: dict[str, list[dict]] = {}
+        for row in cursor.fetchall():
+            out.setdefault(row["ticker"], []).append({
+                "d": row["d"],
+                "headline": row["headline"],
+                "created_at": row["created_at"],
+            })
+        return out
+
+
+def get_news_max_at_by_stocks(stock_codes: list[str]) -> dict[str, datetime]:
+    """종목별 오늘 마지막 언급 시각 — 재료 판정 캐시 기준(news_judge_max_at 비교용).
+
+    closing_bet 은 30분마다 재실행되므로 새 헤드라인이 없으면 LLM 을 다시 부르지 않는다
+    (news_veto_verdict.news_max_at 선례).
+    """
+    codes = [c.split(".")[0].split("_")[0] for c in stock_codes if c]
+    if not codes:
+        return {}
+    placeholders = ", ".join(["%s"] * len(codes))
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"""SELECT ticker, MAX(created_at) AS max_at FROM news_mention
+                 WHERE ticker IN ({placeholders}) AND DATE(created_at) = CURDATE()
+                 GROUP BY ticker""",
+            tuple(codes),
+        )
+        return {r["ticker"]: r["max_at"] for r in cursor.fetchall() if r["max_at"]}
+
+
+def get_news_days_by_stocks(
+    stock_codes: list[str], start_date, end_date
+) -> dict[str, list[dict]]:
+    """여러 종목의 [start_date, end_date] 언급을 날짜·헤드라인만 벌크 조회.
+
+    후속 재료 실현 채점(outcome_backfill 의 news_followup_days)용 — 행마다 창이 달라
+    Python 에서 창을 자르므로 여기서는 넉넉한 구간을 한 번에 받는다.
+    반환: {code: [{"d": date, "headline": str}, ...]}
+    """
+    codes = [c.split(".")[0].split("_")[0] for c in stock_codes if c]
+    if not codes:
+        return {}
+    placeholders = ", ".join(["%s"] * len(codes))
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"""SELECT ticker, DATE(created_at) AS d, headline FROM news_mention
+                 WHERE ticker IN ({placeholders})
+                   AND DATE(created_at) BETWEEN %s AND %s""",
+            (*codes, start_date, end_date),
+        )
+        out: dict[str, list[dict]] = {}
+        for row in cursor.fetchall():
+            out.setdefault(row["ticker"], []).append(
+                {"d": row["d"], "headline": row["headline"]}
+            )
+        return out
+
+
 def get_news_heat(hours: int = 24, limit: int = 20) -> list[dict]:
     """최근 N시간 뉴스 언급이 많은 종목 순위 (프론트 '뉴스 재료' 카드용)."""
     with get_db() as (conn, cursor):

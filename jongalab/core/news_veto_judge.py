@@ -7,7 +7,8 @@
 news_veto_verdict 에 기록하면 trading monitor 가 severe=1 종목을 개장 즉시 전량 매도한다.
 
 돈이 걸린 판정이라 로컬 Ollama 가 아닌 OpenAI(complete_json)를 temperature=0 으로 쓴다.
-프롬프트는 가드 파일(core/prompts.py)이 아니라 여기 둔다(news_summary.py 선례).
+프롬프트는 가드 파일(core/prompts.py)이 아니라 여기 둔다 — 뉴스 판정 프롬프트는 쓰는 모듈에
+같이 두는 것이 이 프로젝트 관례다(core/news_material_judge.py 도 동일).
 오탐 완충: severe 발동은 confidence >= NEWS_GUARD_MIN_CONFIDENCE 일 때만(is_actionable) —
 오탐 비용은 '그날 갭상승 이익 상실' 정도로 제한적(어차피 당일 오전 전량청산)이지만,
 확신 낮은 판정으로 프리마켓 얇은 호가에 던지는 것은 피한다.

@@ -135,6 +135,16 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     news_summary TEXT DEFAULT NULL,         -- 후보 소수만 배치 LLM 재료 요약
     news_sentiment TINYINT DEFAULT NULL,    -- LLM 재료 방향 0~100(요약 후보만)
     news_catalyst VARCHAR(20) DEFAULT NULL, -- LLM 재료 유형(실적/수주계약/임상승인/M&A/정책테마/증자감자/지분변동/기타)
+    -- 재료 지속성 라벨 (sql/40) — 뉴스 있는 유니버스 전건을 OpenAI 벌크 판정(news_material_judge).
+    -- 사실 4축을 LLM 이 내고 등급(news_durability)은 코드가 합성한다(derive_durability).
+    news_next_milestone TINYINT(1) DEFAULT NULL, -- 남은 다음 예정 사건 있는가(NULL=미판정)
+    news_amount_locked TINYINT(1) DEFAULT NULL,  -- 재료 수치가 이미 확정·소진됐는가
+    news_driver_scope VARCHAR(12) DEFAULT NULL,  -- 종목단독/산업사이클/불명
+    news_stage VARCHAR(12) DEFAULT NULL,         -- 첫발표/진행/마무리/불명
+    news_durability VARCHAR(6) DEFAULT NULL,     -- 파생 등급: 연속/중립/소진
+    news_label_reason VARCHAR(255) DEFAULT NULL, -- 지속성 판정 근거(육안 감사용)
+    news_judge_max_at DATETIME DEFAULT NULL,     -- 판정 반영 마지막 언급 시각(30분 재실행 캐시 기준)
+    news_followup_days TINYINT DEFAULT NULL,     -- 채점: +1~+N일 중 시세보도 제외 언급 있던 날짜 수
     news_headlines JSON DEFAULT NULL,       -- 최근 헤드라인 목록(표시용)
     -- DART 공시 사건 라벨 (sql/36) — disclosure_collector 가 적재한 stock_event 를 선정 시점 집계.
     disc_count SMALLINT DEFAULT NULL,       -- 당일 공시 건수(정정 포함) — 관측·연구용

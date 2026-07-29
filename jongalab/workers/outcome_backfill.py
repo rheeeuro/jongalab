@@ -1,4 +1,4 @@
-"""익일 결과 라벨 백필 워커 — 일봉 결과 라벨 4종 + 실집행 레그 라벨 채우기.
+"""익일 결과 라벨 백필 워커 — 일봉 결과 라벨 4종 + 실집행 레그 라벨 + 후속 재료 실현 일수.
 
 엣지 연구용: 선정(selected=1)/비선정(0) 유니버스 전 종목에 '리포트일 종가 → 다음 거래일
 (시가·고가·저가·종가)' 등락률(%)을 **균일 기준**으로 부여한다(종가베팅은 종가 매수라 종가
@@ -21,11 +21,17 @@
   - exec_leg_ret 은 NXT 양 끝(19:50·08:03) 가격이 모두 있으면 NXT, 아니면 KRX(15:20·09:03)로 계산한다.
   - exec_leg_ret 은 활성 rule 의 registered_at 이후만 백필한다(평가에 안 쓰는 과거 분봉 조회 방지).
 
+[후속 재료 실현 채점 — news_followup_days]
+  뉴스 재료 지속성 라벨(news_durability, sql/40)이 **맞았는지** 채점하는 유일한 사후 값이다.
+  리포트일 +1 ~ +NEWS_FOLLOWUP_WINDOW_DAYS 일 사이에 그 종목의 **시세보도가 아닌** 언급이 있던
+  날짜 수를 센다(DB·순수 로직만, API 콜 0). 창이 열려 있는 동안 매 실행 재계산(멱등)하고
+  창이 닫히면 값이 확정된다. 시세보도 제외와 '일수' 채점의 이유는 sql/40 주석 참조.
+
 [cron] 매 거래일 09:30 (전 거래일 리포트에 당일 시가가 반영된 뒤). 단발 실행: python workers/outcome_backfill.py [YYYY-MM-DD]
 """
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from core.logging_setup import setup_logging
 from core.kiwoom_client import KiwoomRestClient
@@ -37,6 +43,9 @@ from core.daily_ohlc import (
     first_price_at_or_after,
     ret_pct,
 )
+from core.config import NEWS_FOLLOWUP_WINDOW_DAYS
+from core.news_material_judge import count_followup_days
+from core.repository.news import get_news_days_by_stocks
 from core.repository.stock_report import (
     get_dates_missing_outcome,
     get_rows_missing_outcome,
@@ -44,6 +53,8 @@ from core.repository.stock_report import (
     get_dates_missing_exec_leg,
     get_rows_missing_exec_leg,
     save_exec_leg_labels,
+    get_rows_for_news_followup,
+    save_news_followup,
 )
 from core.repository.edge_rule import list_rules
 
@@ -216,7 +227,47 @@ def _run_exec_leg(
     return total
 
 
+def _run_news_followup(window_days: int = NEWS_FOLLOWUP_WINDOW_DAYS) -> int:
+    """news_followup_days 채점 — DB·순수 로직만(키움 API 콜 0).
+
+    창이 열려 있는 행은 매 실행 재계산한다(창이 자라며 값이 단조 증가). 종목별 언급은 필요한
+    전 구간을 **한 번에** 받아 행마다 Python 에서 창을 자른다 — 행마다 쿼리하면 하루 16종목 ×
+    창 일수만큼 쿼리가 늘어난다.
+    """
+    rows = get_rows_for_news_followup(window_days)
+    if not rows:
+        logger.info("후속 재료 채점 대상 없음 — 건너뜀")
+        return 0
+
+    codes = sorted({r["stock_code"].split("_")[0].split(".")[0] for r in rows})
+    start = min(r["report_date"] for r in rows) + timedelta(days=1)
+    end = max(r["report_date"] for r in rows) + timedelta(days=window_days)
+    mentions = get_news_days_by_stocks(codes, start, end)
+
+    results = []
+    for r in rows:
+        code = r["stock_code"].split("_")[0].split(".")[0]
+        lo = r["report_date"] + timedelta(days=1)
+        hi = r["report_date"] + timedelta(days=window_days)
+        window = [m for m in mentions.get(code, []) if lo <= m["d"] <= hi]
+        results.append({
+            "report_date": r["report_date"],
+            "stock_code": r["stock_code"],
+            "news_followup_days": count_followup_days(window),
+        })
+    n = save_news_followup(results)
+    logger.info(f"후속 재료 채점 {n}행 (창 {window_days}일, 대상 {len(rows)}행)")
+    return n
+
+
 def run(min_date: str | None = None):
+    # 후속 재료 채점은 키움 API 를 안 쓰므로 일봉 백필 대상이 없어도(또는 토큰이 없어도) 돈다.
+    # 실패해도 가격 라벨 백필을 막지 않는다(연구 라벨 vs 결과 라벨 분리).
+    try:
+        _run_news_followup()
+    except Exception as e:
+        logger.warning(f"후속 재료 채점 실패(가격 라벨 백필은 계속): {e}")
+
     outcome_dates = get_dates_missing_outcome(min_date)
     exec_min_date = min_date or _earliest_exec_label_registered_at()
     if exec_min_date:
@@ -227,7 +278,7 @@ def run(min_date: str | None = None):
         exec_dates = []
         logger.info("exec_leg_ret 활성 rule 없음 — 실집행 레그 백필 건너뜀")
     if not outcome_dates and not exec_dates:
-        logger.info("백필 대상 없음 — 종료")
+        logger.info("일봉·실집행 백필 대상 없음 — 종료")
         return
 
     api = KiwoomRestClient()

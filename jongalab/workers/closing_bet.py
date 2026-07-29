@@ -28,25 +28,28 @@ from core.repository.stock_report import (
     get_recent_report_codes,
     get_prev_frgn_exhaust_map,
     get_today_prog_am_map,
+    get_today_news_labels,
 )
 from core.repository.sector_report import save_sector_reports
 from core.repository.content import get_today_content_by_stock
-from core.repository.news import get_today_news_stats_by_stock, get_today_news_by_stock
+from core.repository.news import (
+    get_today_news_stats_by_stock,
+    get_today_news_by_stock,
+    get_recent_news_by_stocks,
+    get_news_max_at_by_stocks,
+)
 from core.repository.stock_event import get_events_by_date
 from core.disclosure_events import summarize as summarize_disclosures
 from core.repository.trade_signal import push_trade_signals
 from core.repository.edge_rule import list_rules
 from core.edge_selection import select_signals
 from core.edge_policy import rule_role
-from core.news_summary import summarize_news
+from core.news_material_judge import judge_materials
+from core.config import NEWS_JUDGE_ENABLED, NEWS_JUDGE_LOOKBACK_DAYS
 from core.notifications import send_report_save_alert
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ClosingBet")
-
-# 뉴스 배치 요약: 언급이 이만큼 이상인 후보만, 한 실행당 최대 이 개수만 LLM 요약(비용 절감)
-NEWS_SUMMARY_MIN_COUNT = 3
-MAX_NEWS_SUMMARIES = 5
 
 # 실제 매매(trade_signal)로 핸드오프하는 최대 종목 수.
 # Phase 2 유니버스는 전체 저장하고, 선정 레이어가 음전 후보를 제외한 뒤 selected 를 확정한다.
@@ -515,11 +518,9 @@ class ClosingBetStrategy:
             code = c.code.split("_")[0]
             is_top_score = 1 if i <= TRADED_TOP_N else 0
             news_count = getattr(c, "news_count", 0)
-            # 유니버스 전체에 뉴스 헤드라인까지 저장한다.
-            # LLM 요약·방향·재료유형은 selected 확정 후 실제 핸드오프 후보에만 채운다.
-            news_headlines, news_ai = self._build_news_fields(
-                c, code, news_count, MAX_NEWS_SUMMARIES
-            )
+            # 유니버스 전체에 뉴스 헤드라인(표시용)까지 저장한다. LLM 라벨은 여기서 만들지 않는다
+            # — 뉴스 있는 전건을 모아 아래에서 벌크 1~2회 호출로 판정한다(_fill_news_material_labels).
+            news_headlines = self._build_news_headlines(c, code, news_count)
             news_stats = self._news_stats.get(code) or {}
             feat = self._feat.get(code) or {}
             fer = feat.get("frgn_exhaust_rate")
@@ -550,9 +551,7 @@ class ClosingBetStrategy:
                 "news_pm_count": news_stats.get("pm_count", 0),
                 "news_first_today": news_stats.get("first_today", 0),
                 "news_prior_avg": news_stats.get("prior_avg"),
-                "news_summary": news_ai["content"] if news_ai else None,
-                "news_sentiment": news_ai.get("sentiment") if news_ai else None,
-                "news_catalyst": news_ai.get("catalyst") if news_ai else None,
+                # LLM 재료 라벨(요약·방향·유형·지속성 4축)은 _fill_news_material_labels 가 채운다.
                 "news_headlines": news_headlines,
                 # 공시 사건 라벨 (stock_event/DART) — disc_bad_type 만 veto rule 이 참조,
                 # 나머지는 관측·연구용. 사건 없음/수집 실패는 NULL(= veto 미개입).
@@ -608,14 +607,12 @@ class ClosingBetStrategy:
                 "ob_spread_pct": feat.get("ob_spread_pct"),
             })
 
-        # 선정 전 매매 후보 풀(음전 제외)에 뉴스 LLM 라벨을 붙여 veto 가 활용할 수 있게 한다.
-        summarized = self._fill_selected_news_ai(reports, selected_only=False)
+        # 선정 전에 뉴스 있는 전건의 LLM 재료 라벨을 채운다 — veto/selector rule 이 이 컬럼을
+        # 보고 판단하므로 반드시 _apply_selection 앞이어야 한다.
+        self._fill_news_material_labels(reports)
 
         # 선정 레이어(모드 스위치) — selected/핸드오프 대상만 정한다. 점수·rank_no·저장은 불변.
         rule_names_by_code = self._apply_selection(reports)
-        self._fill_selected_news_ai(
-            reports, budget=max(0, MAX_NEWS_SUMMARIES - summarized)
-        )
 
         try:
             save_stock_reports(reports)
@@ -642,43 +639,96 @@ class ClosingBetStrategy:
             logger.error(f"trade_signal 핸드오프 실패(trading DB 미설정?): {e}")
 
     @staticmethod
-    def _fill_selected_news_ai(
-        reports: list[dict], selected_only: bool = True, budget: int = MAX_NEWS_SUMMARIES
-    ) -> int:
-        """매매 후보에 LLM 뉴스 요약·방향·재료유형을 예산만큼 채운다."""
-        if budget <= 0:
-            return 0
-        summarized = 0
-        for r in reports:
-            if summarized >= budget:
-                break
-            if selected_only and not r.get("selected"):
+    def _fill_news_material_labels(reports: list[dict]) -> None:
+        """뉴스 있는 유니버스 **전건**에 LLM 재료 라벨을 붙인다 (OpenAI 벌크, 점수 무영향).
+
+        예전엔 Ollama 로 하루 최대 5행(요약 후보만) 라벨링해서 4주에 46행/12거래일밖에 안 쌓여
+        `veto_bad_news`(live) 의 근거조차 검증할 수 없었다. 벌크 판정으로 대상을 '뉴스 있는 전건'
+        (실측 ~16행/일)으로 넓힌다 — 커버리지가 이 변경의 목적이다.
+        ⚠️ 그래서 `veto_bad_news`(news_sentiment<=30 & news_unique_count>=2) 의 **실효 커버리지가
+        같이 넓어진다**(rule 의 설계 의도대로지만 표본은 이 날부터 성질이 달라진다).
+
+        30분 재실행 대비: 새 헤드라인이 없으면(저장된 news_judge_max_at ≥ 오늘 마지막 언급 시각)
+        재호출하지 않고, 기존 라벨을 메모리 dict 로 캐리포워드한다 — rule 평가가 메모리 행을
+        보므로 캐리포워드 없이는 스킵한 실행에서 veto 판단이 달라진다.
+        실패는 전부 '라벨 없음'(NULL)으로 흘린다 — predicate 는 NULL 을 매칭 실패로 보므로
+        LLM·DB 장애가 선정을 흔들지 않는다.
+        """
+        targets = [r for r in reports if int(r.get("news_count") or 0) > 0]
+        if not targets:
+            return
+        codes = [r["stock_code"] for r in targets]
+
+        # ① 오늘 이미 있는 라벨 캐리포워드 (판정 스킵 실행에서도 rule 이 같은 값을 본다)
+        try:
+            existing = get_today_news_labels(codes)
+        except Exception as e:
+            logger.warning(f"뉴스 라벨 기존 값 조회 실패(재판정으로 진행): {e}")
+            existing = {}
+        for r in targets:
+            for col, val in (existing.get(r["stock_code"]) or {}).items():
+                if val is not None:
+                    r[col] = val
+
+        if not NEWS_JUDGE_ENABLED:
+            logger.info("뉴스 재료 지속성 판정 비활성(NEWS_JUDGE_ENABLED=0) — 라벨 스킵")
+            return
+
+        # ② 새 헤드라인이 있는 종목만 판정 대상. 룩백은 재료 stage(첫 발표/후속) 판정 근거다.
+        try:
+            max_at = get_news_max_at_by_stocks(codes)
+            bundles = get_recent_news_by_stocks(codes, NEWS_JUDGE_LOOKBACK_DAYS)
+        except Exception as e:
+            logger.warning(f"뉴스 헤드라인 룩백 조회 실패(재료 라벨 스킵): {e}")
+            return
+
+        stale: list[dict] = []
+        for r in targets:
+            code = r["stock_code"]
+            items = bundles.get(code)
+            if not items:
                 continue
-            if not selected_only and (r.get("change_pct") or 0) < 0:
+            latest = max_at.get(code) or items[-1].get("created_at")
+            judged_at = r.get("news_judge_max_at")
+            if judged_at and latest and judged_at >= latest:
+                continue  # 새 헤드라인 없음 — LLM 재호출 불필요
+            stale.append({
+                "ticker": code, "name": r["stock_name"], "items": items, "latest": latest,
+            })
+
+        if not stale:
+            logger.info(f"뉴스 재료 라벨: 신규 헤드라인 없음 — 판정 스킵({len(targets)}종목 캐시)")
+            return
+
+        labels = judge_materials(stale)
+        by_code = {r["stock_code"]: r for r in targets}
+        latest_by_code = {s["ticker"]: s["latest"] for s in stale}
+        filled = 0
+        for code, lb in labels.items():
+            r = by_code.get(code)
+            if not r:
                 continue
-            if r.get("news_summary") or r.get("news_sentiment") is not None:
-                continue
-            if int(r.get("news_count") or 0) < NEWS_SUMMARY_MIN_COUNT:
-                continue
-            headlines = r.get("news_headlines") or []
-            if not headlines:
-                continue
-            try:
-                news_ai = summarize_news(r["stock_name"], r["stock_code"], headlines)
-                if not news_ai:
-                    continue
-                r["news_summary"] = news_ai.get("content")
-                r["news_sentiment"] = news_ai.get("sentiment")
-                r["news_catalyst"] = news_ai.get("catalyst")
-                summarized += 1
-                scope = "selected" if r.get("selected") else "후보"
-                logger.info(
-                    f"[{r['stock_name']}] {scope} 뉴스 재료 요약 생성 "
-                    f"(방향 {news_ai.get('sentiment')}·유형 {news_ai.get('catalyst')})"
-                )
-            except Exception as e:
-                logger.warning(f"뉴스 요약 실패 [{r.get('stock_name')}]: {e}")
-        return summarized
+            r["news_summary"] = lb.get("summary") or r.get("news_summary")
+            r["news_sentiment"] = lb.get("sentiment")
+            r["news_catalyst"] = lb.get("catalyst")
+            r["news_next_milestone"] = lb.get("next_milestone")
+            r["news_amount_locked"] = lb.get("amount_locked")
+            r["news_driver_scope"] = lb.get("driver_scope")
+            r["news_stage"] = lb.get("stage")
+            r["news_durability"] = lb.get("durability")
+            r["news_label_reason"] = lb.get("reason")
+            r["news_judge_max_at"] = latest_by_code.get(code)
+            filled += 1
+            logger.info(
+                f"[{r['stock_name']}] 재료 {lb.get('durability') or '미판정'} "
+                f"(유형 {lb.get('catalyst')}·방향 {lb.get('sentiment')}·"
+                f"다음사건 {lb.get('next_milestone')}·수치확정 {lb.get('amount_locked')}·"
+                f"{lb.get('driver_scope')}·{lb.get('stage')}) {lb.get('reason') or ''}"
+            )
+        logger.info(
+            f"뉴스 재료 라벨: {filled}/{len(stale)}종목 판정 완료 "
+            f"(뉴스 보유 {len(targets)}종목, 캐시 {len(targets) - len(stale)})"
+        )
 
     # ── 선정 레이어 (모드 스위치) ──
     def _apply_selection(self, reports: list[dict]) -> dict[str, str]:
@@ -817,31 +867,17 @@ class ClosingBetStrategy:
             logger.warning("테마 API 응답 없음 — 관심섹터 보강 없이 진행")
 
     @staticmethod
-    def _build_news_fields(c: StockCandidate, code: str, news_count: int, summarized: int):
-        """뉴스 헤드라인 목록 + (조건 충족 시) 배치 LLM 재료 요약·라벨을 만든다.
-        반환: (headlines: list[str] | None,
-               news_ai: {"content","sentiment","catalyst"} | None)."""
+    def _build_news_headlines(c: StockCandidate, code: str, news_count: int) -> list[str] | None:
+        """당일 뉴스 헤드라인 목록(표시용). LLM 은 여기서 부르지 않는다 —
+        재료 라벨은 뉴스 있는 전건을 모아 _fill_news_material_labels 가 벌크로 판정한다."""
         if news_count <= 0:
-            return None, None
-        headlines = None
-        news_ai = None
+            return None
         try:
             items = get_today_news_by_stock(code)
-            headlines = [it["headline"] for it in items if it.get("headline")] or None
+            return [it["headline"] for it in items if it.get("headline")] or None
         except Exception as e:
             logger.warning(f"뉴스 헤드라인 조회 실패 [{c.name}]: {e}")
-        if (news_count >= NEWS_SUMMARY_MIN_COUNT and headlines
-                and summarized < MAX_NEWS_SUMMARIES):
-            try:
-                news_ai = summarize_news(c.name, code, headlines)
-                if news_ai:
-                    logger.info(
-                        f"[{c.name}] 뉴스 재료 요약 생성 "
-                        f"(방향 {news_ai.get('sentiment')}·유형 {news_ai.get('catalyst')})"
-                    )
-            except Exception as e:
-                logger.warning(f"뉴스 요약 실패 [{c.name}]: {e}")
-        return headlines, news_ai
+            return None
 
     @staticmethod
     def _calc_content_score(c: StockCandidate) -> float:

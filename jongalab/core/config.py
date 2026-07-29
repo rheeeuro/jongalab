@@ -52,6 +52,17 @@ NEWS_GUARD_POLL_SEC = int(os.getenv('NEWS_GUARD_POLL_SEC', '300'))            # 
 NEWS_GUARD_MIN_CONFIDENCE = int(os.getenv('NEWS_GUARD_MIN_CONFIDENCE', '85'))
 NEWS_GUARD_MAX_HEADLINES = int(os.getenv('NEWS_GUARD_MAX_HEADLINES', '30'))   # 종목당 판정 헤드라인 상한
 
+# ── 뉴스 재료 지속성 라벨 (core/news_material_judge.py, closing_bet 이 호출) ──
+# 뉴스가 있는 유니버스 전건을 OpenAI 로 벌크 판정해 daily_stock_report 에 적재(점수 무영향).
+# 끄면 라벨이 NULL 로 남고 선정은 그대로 동작한다(rule 은 NULL=매칭 실패로 미개입).
+NEWS_JUDGE_ENABLED = os.getenv('NEWS_JUDGE_ENABLED', '1') == '1'
+NEWS_JUDGE_BATCH_SIZE = int(os.getenv('NEWS_JUDGE_BATCH_SIZE', '8'))          # 1회 호출 종목 수
+NEWS_JUDGE_LOOKBACK_DAYS = int(os.getenv('NEWS_JUDGE_LOOKBACK_DAYS', '5'))    # 헤드라인 룩백(재료 stage 판정 근거)
+NEWS_JUDGE_MAX_HEADLINES = int(os.getenv('NEWS_JUDGE_MAX_HEADLINES', '20'))   # 종목당 헤드라인 상한(최신 우선)
+# 후속 재료 실현 채점 창(거래일 아닌 달력일) — outcome_backfill 이 news_followup_days 를 채운다.
+# news_mention 보존이 14일이므로 창 + 백필 지연이 14일을 넘으면 표본이 잘린다(10 + 여유 3).
+NEWS_FOLLOWUP_WINDOW_DAYS = int(os.getenv('NEWS_FOLLOWUP_WINDOW_DAYS', '10'))
+
 # 스코어/선정 로직 유효 시작일(YYYY-MM-DD, inclusive) — 이 날짜 이전은 구 로직이라
 # 가중치 튜닝 백테스트 표본에서 제외한다. weight_tuner 가 분석 주 시작을 이 날짜로 클램프.
 # (trading 쪽 레짐 게이트의 REGIME_MIN_DATE 와 같은 로직 변경을 가리킴 — 도메인 분리라 값만 맞춘다.)
