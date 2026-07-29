@@ -218,7 +218,10 @@ def send_edge_rule_alert(
                   승격이 막힌 candidate(집행 시점 재설계 후보). 통계 탈락이 아니므로 종결이 아니다.
     demotions:    강등 검토 — live rule 의 최근 창 성적. **역할별 부호가 반대**다
                   (selector 는 매수 종목 mean_net<0, veto 는 제외 종목 mean_net>0).
-    각 항목: {name, family, n, mean_net, ci_low[, mean_exc, reason]}. 전부 비면 전송하지 않는다.
+                  승격과 달리 **판정 일정 밖이라 매 평일 재검사**된다 — 조건이 유지되는 동안
+                  같은 알림이 반복된다(그 사실을 푸터에 명시).
+    각 항목: {name, family, n, mean_net, ci_low[, mean_net_days, mean_exc, reason]}.
+    전부 비면 전송하지 않는다.
     """
     exec_pending = exec_pending or []
     if not promotions and not demotions and not exec_pending:
@@ -234,6 +237,17 @@ def send_edge_rule_alert(
         # 확인창 초과수익 — 승격 후보의 핵심 근거(발견에 쓰지 않은 새 표본에서의 성적)
         if r.get("mean_exc") is not None:
             line += f", 확인창 초과 {_pct(r.get('mean_exc'))}"
+        # 일 등가중 최근 평균(강등 검토 전용) — 게이트는 종목-일 가중을 보지만, 두 가중의
+        # **부호가 갈리면 몇 종목의 급등이 평균을 만든 쏠림**이라 강등 근거가 되지 못한다.
+        # 게이트 조건은 2026-07-28 결정(효과 크기는 종목-일)대로 두고 판단 재료만 노출한다.
+        # 실례: veto_bio_kosdaq 2026-07-29 알림 +0.18%(종목-일) vs -0.20%(일 등가중) — 상위
+        # 3건(HLB +10.7·펩트론 +7.8·디앤디파마텍 +3.9)을 빼면 -0.70%, 대체효과는 veto 이득 방향.
+        mnd = r.get("mean_net_days")
+        if mnd is not None:
+            line += f", 일등가중 {_pct(mnd)}"
+            mn = r.get("mean_net")
+            if mn is not None and (mn > 0) != (mnd > 0):
+                line += " ⚠️쏠림(부호 상충 — 대체효과·꼬리 재계산 필요)"
         return line
 
     try:
@@ -253,10 +267,16 @@ def send_edge_rule_alert(
                 "🔴 *강등 검토 (live→retired 판단)*\n"
                 + "\n".join(_rule_line(r, prefix="최근 평균순수익") for r in demotions)
             )
+        # 재평가 주기 안내는 실린 섹션에만 붙인다 — 승격만 온 날 강등 안내를 붙이면
+        # 반대로 읽힌다(2026-07-29 이전엔 '판정일에만' 한 줄이 강등에도 붙어 오해를 샀다).
+        notes = ["_전이는 관리자 API 수동 승인 — 아래는 후보일 뿐입니다._"]
+        if promotions or exec_pending:
+            notes.append("_승격/집행설계는 판정일 1회만 옵니다(매일 재평가 폐지, sql/39)._")
+        if demotions:
+            notes.append("_강등 검토는 판정 일정 밖(매 평일 감시) — 조건이 유지되면 매일 반복됩니다._")
         message = (
             "🧪 *[Edge Ledger] 상태 전이 알림*\n"
-            "_전이는 관리자 API 수동 승인 — 아래는 후보일 뿐입니다._\n"
-            "_판정일에만 오는 알림입니다(매일 재평가 폐지, sql/39)._\n"
+            + "\n".join(notes) + "\n"
             "──────────────────\n\n"
             + "\n\n".join(sections)
         )

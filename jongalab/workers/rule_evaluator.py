@@ -17,7 +17,9 @@
        강등 검토(core.edge_policy.check_demotion — live 비대조군, 최근 10거래일 창
        n≥20·거래일≥5 + **역할별 부호**: selector 는 매수 종목 mean_net<0, veto 는 제외 종목
        mean_net>0(이기는 종목을 버리는 중)일 때. benchmark 는 제외 — live 대조군이 사라지면
-       승격 게이트가 fail-closed 로 전 후보를 막는다).
+       승격 게이트가 fail-closed 로 전 후보를 막는다). 승격/집행설계는 판정일 1회지만
+       **강등은 판정 일정(sql/39) 밖이라 매 평일 재검사**되어 조건이 유지되는 동안 반복된다 —
+       알림에 일 등가중 최근 평균을 병기해 쏠림(부호 상충)을 눈으로 걸러낸다.
      실제 전이는 관리자 API 수동 승인.
 """
 import logging
@@ -446,6 +448,10 @@ def run():
                     "name": rule["name"], "family": rule["family"],
                     # 알림에도 게이트가 판단한 값(종목-일 가중)을 그대로 보여준다
                     "n": stats["recent_n"], "mean_net": stats["recent_mean_net"],
+                    # 일 등가중 최근 평균을 병기 — 두 가중의 부호가 갈리면 쏠림(몇 종목의
+                    # 급등이 만든 평균)이라 강등 근거가 못 된다. 게이트 조건은 바꾸지 않고
+                    # 판단 재료만 노출한다(notifications._rule_line 이 ⚠️ 표시).
+                    "mean_net_days": stats["recent_mean_net_days"],
                 })
 
         update_rule_stats(rule["id"], stats)
