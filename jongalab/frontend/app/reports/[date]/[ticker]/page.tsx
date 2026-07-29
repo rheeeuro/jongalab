@@ -2,8 +2,8 @@ import { StockReportDetail, SupplyHistoryItem } from "@/types";
 import { StockPriceBadge } from "@/components/StockPriceBadge";
 import { CandlestickChart } from "@/components/CandlestickChart";
 import { MaterialBadge, materialAxisLabels } from "@/components/MaterialBadge";
-import { apiFetch } from "@/lib/api";
-import { splitHeadlineUrl } from "@/lib/news";
+import { apiFetch, getEdgeRules } from "@/lib/api";
+import { humanizeMaterialReason, splitHeadlineUrl } from "@/lib/news";
 import { Metadata } from "next";
 import Link from "next/link";
 import {
@@ -39,6 +39,24 @@ async function getReportDetail(
   ticker: string
 ): Promise<StockReportDetail | null> {
   return apiFetch(`/api/stock-report/${date}/${ticker}`, null, fetchOptions(date));
+}
+
+/** 선정 근거 룰 → 화면에 낼 한글 제목 + 링크 경로.
+ *
+ * `rule_names` 는 코드 슬러그(f5_prog_persistent)라 사용자에게 그대로 보여줄 값이 아니다.
+ * 실험실 카드와 같은 한글 제목(edge_rule.title)을 쓰고, 슬러그는 링크 경로로만 남긴다
+ * (title 이 비어 있으면 실험실 화면과 동일하게 슬러그로 폴백).
+ */
+async function getRuleChips(
+  ruleNames: string[]
+): Promise<{ name: string; label: string }[]> {
+  if (ruleNames.length === 0) return [];
+  const rules = await getEdgeRules();
+  const titleByName = new Map(rules.map((x) => [x.name, x.title]));
+  return ruleNames.map((name) => ({
+    name,
+    label: titleByName.get(name) || name,
+  }));
 }
 
 export async function generateMetadata({
@@ -181,6 +199,9 @@ export default async function StockReportPage({
 
   const { report: r, content_analyses: contentAnalyses = [] } = data;
   const supplyHistory = r.supply_history ?? [];
+  const ruleChips = await getRuleChips(
+    (r.rule_names ?? "").split(",").filter(Boolean)
+  );
 
   const contentCount = contentAnalyses.length;
   const contentAvgScore =
@@ -224,19 +245,20 @@ export default async function StockReportPage({
               {r.score.toFixed(0)}점 / 100
             </span>
             {/* 룰 선정 종목(hybrid) — 점수 순위와 무관하게 실험실 룰이 뽑았다. 근거 룰로 넘어간다. */}
-            {(r.rule_names ?? "")
-              .split(",")
-              .filter(Boolean)
-              .map((name) => (
-                <Link
-                  key={name}
-                  href={`/lab/${encodeURIComponent(name)}`}
-                  className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-3 py-1 text-sm font-extrabold text-violet-700 hover:bg-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:hover:bg-violet-900/60"
-                >
-                  <FlaskConical className="h-3.5 w-3.5" />
-                  룰 선정 · {name}
-                </Link>
-              ))}
+            {ruleChips.map((c) => (
+              <Link
+                key={c.name}
+                href={`/lab/${encodeURIComponent(c.name)}`}
+                title="실험실에서 검증한 규칙이 이 종목을 골랐습니다 (점수 순위와 무관) — 눌러서 규칙 성적 보기"
+                className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-3 py-1 text-sm font-extrabold text-violet-700 hover:bg-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:hover:bg-violet-900/60"
+              >
+                <FlaskConical className="h-3.5 w-3.5 shrink-0" />
+                <span className="break-keep">{c.label}</span>
+                <span className="font-bold text-violet-500 dark:text-violet-400">
+                  선정
+                </span>
+              </Link>
+            ))}
           </div>
         </header>
 
@@ -647,13 +669,18 @@ export default async function StockReportPage({
                   </div>
                   {r.news_label_reason && (
                     <p className="mt-2 break-words text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                      {r.news_label_reason}
+                      {/* 내부 필드명이 섞인 과거 판정문을 사람 말로 바꿔서 낸다(lib/news) */}
+                      {humanizeMaterialReason(r.news_label_reason)}
                     </p>
                   )}
                   {r.news_followup_days != null && (
                     <p className="mt-1.5 text-[11px] font-medium text-slate-400 dark:text-slate-500">
-                      이후 10일 중 후속 재료 <span className="tabular-nums">{r.news_followup_days}</span>일
-                      <span className="text-slate-300 dark:text-slate-600"> (시세 기사 제외)</span>
+                      이 재료가 다시 기사에 등장한 날{" "}
+                      <span className="tabular-nums">{r.news_followup_days}</span>일
+                      <span className="text-slate-300 dark:text-slate-600">
+                        {" "}
+                        / 이후 10일 (주가 등락 기사 제외)
+                      </span>
                     </p>
                   )}
                 </div>

@@ -371,11 +371,14 @@ def save_nxt_snapshot(report_date: str, rows: list[dict]):
 
 
 def get_gap_stats_by_dates(dates: list[str]) -> dict[str, dict]:
-    """여러 날짜의 Top 10 갭 체크 승률 통계를 한 번에 조회.
+    """여러 날짜의 선정 종목 갭 체크 승률 통계를 한 번에 조회.
 
     반환: {date: {wins, losses, flats, total}}
       - KRX 우선, 없으면 NXT 등락률 기준.
       - 갭 체크가 안 된 날짜는 키 없음.
+      - 모집단은 **selected=1**(그날 리포트에 실린 종목 = gap_check 대상). rank_no 로
+        자르면 안 된다 — hybrid/rules 모드의 룰 선정 종목은 점수 순위가 10위 밖이라
+        리포트에는 있는데 승패 집계에서 빠져 캘린더와 리포트가 어긋난다(2026-07-30 수정).
     """
     if not dates:
         return {}
@@ -387,7 +390,7 @@ def get_gap_stats_by_dates(dates: list[str]) -> dict[str, dict]:
                        COALESCE(gap_krx_pct, gap_nxt_pct) AS pct
                   FROM daily_stock_report
                  WHERE report_date IN ({placeholders})
-                   AND rank_no BETWEEN 1 AND 10
+                   AND selected = 1
                    AND (gap_krx_pct IS NOT NULL OR gap_nxt_pct IS NOT NULL)""",
             tuple(dates),
         )

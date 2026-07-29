@@ -51,10 +51,12 @@ export async function generateMetadata({
   };
 }
 
+// 그날 리포트에 실린 종목(=API 가 selected=1 만 반환) 전체의 갭 승패.
+// rank_no 로 자르지 않는다 — 룰 선정 종목은 점수 순위가 10위 밖이라 아래 카드에는 보이는데
+// 승패에서만 빠져 배지와 카드 색이 어긋났다(2026-07-30 수정, 캘린더 집계와 같은 모집단).
 function gapWinRate(reports: StockReport[]) {
-  const top10 = reports.filter((r) => r.rank_no >= 1 && r.rank_no <= 10);
   let wins = 0, losses = 0, flats = 0;
-  for (const r of top10) {
+  for (const r of reports) {
     const pct = finalGapPct(r);
     if (pct === null) continue;
     if (pct > 0) wins++;
@@ -247,7 +249,7 @@ export default async function ReportPage({
             {gapStat.total > 0 && (
               <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
                 <span className="text-base">🌅</span>
-                <span>다음날 아침 갭 체크 (Top 10):</span>
+                <span>다음날 아침 갭 체크 (선정 {gapStat.total}종목):</span>
                 <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-extrabold text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
                   {gapStat.wins}승
                 </span>

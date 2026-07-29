@@ -139,7 +139,9 @@ export function StockReportCard({
         <div className="flex min-w-0 items-center gap-1.5">
           {ruleNames.length > 0 && (
             <span
-              title={`실험실 룰 선정: ${ruleNames.join(", ")}`}
+              // 목록 카드에는 룰 이름을 넣지 않는다 — 코드 슬러그(f5_prog_persistent)를 쓸 수는
+              // 없고 한글 제목은 카드마다 별도 조회가 필요하다. 어떤 규칙인지는 상세에서 본다.
+              title="실험실에서 검증한 규칙이 고른 종목입니다 (점수 순위와 무관) — 상세에서 어떤 규칙인지 볼 수 있습니다"
               className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-extrabold text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
             >
               룰 선정
