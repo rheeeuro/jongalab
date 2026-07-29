@@ -238,28 +238,58 @@ def get_news_days_by_stocks(
         return out
 
 
+# 서프라이즈 배수의 분모 하한. 직전 7일 일평균이 이보다 작아도 1로 본다 —
+# 이력이 없는 종목의 배수가 무한정 커지는 것을 막고, 값이 그대로 '오늘 건수'가 되게 한다.
+_SURPRISE_FLOOR = 1.0
+
+
 def get_news_heat(hours: int = 24, limit: int = 20) -> list[dict]:
-    """최근 N시간 뉴스 언급이 많은 종목 순위 (프론트 '뉴스 재료' 카드용)."""
+    """최근 N시간 뉴스가 몰린 종목 순위 (프론트 '오늘 새로 뜬 재료' 카드용).
+
+    **정렬은 건수가 아니라 자기 기저 대비 배수(surprise)다.** 건수 랭킹은 사실상 시총
+    랭킹이라(실측 2026-07-29: 하이닉스 95·현대차 57·삼성전자 43건이 상단 고정) 매일 같은
+    대형주만 보였다. 직전 7일 일평균으로 나누면 "평소 조용했는데 오늘 시끄러운 종목"이 올라온다.
+    건수·기저는 함께 반환해 화면이 근거를 같이 보여줄 수 있게 한다.
+
+    오늘 유니버스에 든 종목이면 재료 지속성 라벨(durability/catalyst/summary)을 함께 실어
+    카드가 '무슨 재료인지'까지 보여줄 수 있게 한다(유니버스 밖 종목은 NULL).
+    """
     with get_db() as (conn, cursor):
         cursor.execute(
             """
-            SELECT ticker,
-                   MAX(company_name) AS company_name,
+            SELECT n.ticker,
+                   MAX(n.company_name) AS company_name,
                    COUNT(*) AS mention_count,
-                   MAX(created_at) AS last_at
-            FROM news_mention
-            WHERE created_at >= NOW() - INTERVAL %s HOUR
-            GROUP BY ticker
-            ORDER BY mention_count DESC, last_at DESC
-            LIMIT %s
+                   MAX(n.created_at) AS last_at,
+                   (SELECT COUNT(*) FROM news_mention p
+                     WHERE p.ticker = n.ticker
+                       AND p.created_at < CURDATE()
+                       AND p.created_at >= CURDATE() - INTERVAL 7 DAY) / 7 AS prior_avg,
+                   MAX(r.news_durability) AS durability,
+                   MAX(r.news_catalyst) AS catalyst,
+                   MAX(r.news_summary) AS summary,
+                   MAX(r.rank_no) AS rank_no
+            FROM news_mention n
+            LEFT JOIN daily_stock_report r
+                   ON r.stock_code = n.ticker AND r.report_date = CURDATE()
+            WHERE n.created_at >= NOW() - INTERVAL %s HOUR
+            GROUP BY n.ticker
             """,
-            (int(hours), int(limit)),
+            (int(hours),),
         )
         results = cursor.fetchall()
-        for row in results:
-            if isinstance(row.get("last_at"), datetime):
-                row["last_at"] = row["last_at"].isoformat()
-        return results
+
+    for row in results:
+        if isinstance(row.get("last_at"), datetime):
+            row["last_at"] = row["last_at"].isoformat()
+        prior = float(row.get("prior_avg") or 0.0)
+        row["prior_avg"] = round(prior, 2)
+        row["surprise"] = round(int(row["mention_count"]) / max(prior, _SURPRISE_FLOOR), 1)
+        row["in_universe"] = 1 if row.get("rank_no") is not None else 0
+        row.pop("rank_no", None)
+
+    results.sort(key=lambda r: (-r["surprise"], -r["mention_count"], r["last_at"] or ""))
+    return results[:int(limit)]
 
 
 def delete_old_news_mentions(days: int = 14) -> int:

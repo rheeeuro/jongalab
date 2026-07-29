@@ -715,6 +715,29 @@ def get_today_news_labels(stock_codes: list[str]) -> dict[str, dict]:
         return {r.pop("stock_code"): r for r in cursor.fetchall()}
 
 
+def get_news_material_rows(report_date: str) -> list[dict]:
+    """그 날 뉴스가 있던 유니버스 행의 **재료 라벨 슬림 목록** (뉴스 화면·탭용).
+
+    `get_stock_reports_by_date` 는 SELECT * 라 hourly_candles·supply_history 같은 무거운 JSON
+    까지 실어 목록 화면에는 과하다. 비선정(selected=0) 후보도 포함한다 — 뉴스 화면은 '오늘 뜬
+    재료' 전체를 보여주는 곳이고, 매매 선정 여부와 축이 다르다.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT stock_code, stock_name, sector, change_pct, market_cap, trading_value,
+                      rank_no, selected, score,
+                      news_count, news_unique_count, news_pm_count, news_first_today,
+                      news_prior_avg, news_summary, news_sentiment, news_catalyst,
+                      news_next_milestone, news_amount_locked, news_driver_scope,
+                      news_stage, news_durability, news_label_reason, news_followup_days
+                 FROM daily_stock_report
+                WHERE report_date = %s AND news_count > 0
+                ORDER BY rank_no ASC""",
+            (report_date,),
+        )
+        return cursor.fetchall()
+
+
 def get_rows_for_news_followup(window_days: int) -> list[dict]:
     """후속 재료 채점 대상 — 지속성 라벨이 있고 채점 창이 아직 열려 있는 과거 행.
 

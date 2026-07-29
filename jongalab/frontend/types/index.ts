@@ -145,6 +145,15 @@ export interface StockReport {
   news_summary?: string | null;     // 배치 LLM 재료 요약 (후보 소수만)
   news_sentiment?: number | null;   // LLM 재료 방향 0~100 (요약 후보만)
   news_catalyst?: string | null;    // LLM 재료 유형 (실적/수주계약/임상승인/M&A/정책테마/증자감자/지분변동/기타)
+  // 재료 지속성 라벨 (sql/40) — ⚠️ candidate rule 표본(관찰 전용, 미검증). 화면에서 매수 신호처럼
+  // 보이면 안 된다(색을 손익 방향으로 쓰지 말 것 — MaterialBadge 참조).
+  news_next_milestone?: boolean | null; // 재료에 남은 다음 예정 사건이 있는가
+  news_amount_locked?: boolean | null;  // 수치가 이미 확정·소진됐는가
+  news_driver_scope?: string | null;    // 종목단독 / 산업사이클 / 불명
+  news_stage?: string | null;           // 첫발표 / 진행 / 마무리 / 불명
+  news_durability?: NewsDurability;     // 파생 등급 (연속/중립/소진), NULL=미판정
+  news_label_reason?: string | null;    // 판정 근거 한 문장 (육안 감사용)
+  news_followup_days?: number | null;   // 채점: +1~+10일 중 시세보도 제외 언급 있던 날짜 수
   news_headlines?: string[];        // 최근 헤드라인 목록
   score: number;
   reason: string;  // 종합 점수 구성요소로 자동 생성된 매수 이유
@@ -170,11 +179,47 @@ export interface ContentAnalysisItem {
   created_at?: string;
 }
 
+// 재료 지속성 등급 — null/undefined = 미판정(억지로 채우지 않는다)
+export type NewsDurability = '연속' | '중립' | '소진' | null;
+
+// /api/news/heat — 정렬은 건수가 아니라 자기 기저 대비 배수(surprise).
+// 건수 정렬은 시총 랭킹이 되어 대형주가 상단에 고정된다.
 export interface NewsHeatItem {
   ticker: string;
   company_name: string | null;
   mention_count: number;
   last_at: string | null;
+  prior_avg?: number;          // 직전 7일 일평균 언급 수 (배수의 분모, 하한 1)
+  surprise?: number;           // mention_count / max(prior_avg, 1)
+  durability?: NewsDurability; // 오늘 유니버스 종목만 (밖이면 null)
+  catalyst?: string | null;
+  summary?: string | null;
+  in_universe?: number;        // 1 = 오늘 유니버스에 든 종목
+}
+
+// /api/news/materials — 그 날 뉴스가 있던 유니버스 종목의 재료 라벨 슬림 행
+export interface NewsMaterialRow {
+  stock_code: string;
+  stock_name: string;
+  sector: string | null;
+  change_pct: number | null;
+  rank_no: number;
+  selected: number;
+  news_count: number;
+  news_unique_count?: number | null;
+  news_pm_count?: number | null;
+  news_first_today?: boolean | null;
+  news_prior_avg?: number | null;
+  news_summary?: string | null;
+  news_sentiment?: number | null;
+  news_catalyst?: string | null;
+  news_next_milestone?: boolean | null;
+  news_amount_locked?: boolean | null;
+  news_driver_scope?: string | null;
+  news_stage?: string | null;
+  news_durability?: NewsDurability;
+  news_label_reason?: string | null;
+  news_followup_days?: number | null;
 }
 
 // 종목별 당일 뉴스 헤드라인 (/api/news/{ticker}, news_mention 원천)
@@ -183,6 +228,7 @@ export interface NewsMentionItem {
   source_url: string | null;
   channel_name: string | null;
   created_at: string | null;
+  is_price_report?: boolean;   // 재료가 아니라 그날 시세를 옮긴 기사 (화면에서 접는다)
 }
 
 export interface StockReportDetail {

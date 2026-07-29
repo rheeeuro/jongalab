@@ -13,6 +13,7 @@ import {
   FileText,
   FlaskConical,
   Settings,
+  MessagesSquare,
   X,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -25,7 +26,8 @@ const PRIMARY_TABS = [
 ];
 
 const MORE_ITEMS = [
-  { href: "/feed", label: "콘텐츠", icon: Newspaper, desc: "유튜브·텔레그램 분석" },
+  { href: "/news", label: "뉴스", icon: Newspaper, desc: "오늘 뜬 재료·지속성" },
+  { href: "/feed", label: "콘텐츠", icon: MessagesSquare, desc: "유튜브·텔레그램 분석" },
   { href: "/sectors", label: "섹터", icon: Layers, desc: "섹터 트렌드 보기" },
   {
     href: "/reports",
@@ -70,6 +72,7 @@ export function MobileBottomTabs() {
   }
 
   const isMoreActive =
+    pathname.startsWith("/news") ||
     pathname.startsWith("/feed") ||
     pathname.startsWith("/sectors") ||
     pathname.startsWith("/reports") ||

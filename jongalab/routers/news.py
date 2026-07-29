@@ -1,7 +1,11 @@
-"""뉴스 재료 라우트 — 뉴스 속보 채널 언급 집계(news_mention)."""
+"""뉴스 재료 라우트 — 뉴스 속보 채널 언급 집계(news_mention) + 재료 지속성 라벨."""
+from datetime import datetime
+
 from fastapi import APIRouter, Query
 
+from core.news_material_judge import is_price_report
 from core.repository import get_news_heat, get_today_news_by_stock
+from core.repository.stock_report import get_news_material_rows
 
 router = APIRouter(prefix="/api/news", tags=["news"])
 
@@ -11,21 +15,49 @@ def get_news_heat_ranking(
     hours: int = Query(24, ge=1, le=168, description="집계 윈도우 (시간)"),
     limit: int = Query(20, ge=1, le=100, description="상위 종목 수"),
 ):
-    """최근 N시간 뉴스 언급이 많은 종목 순위 (재료 히트맵/랭킹용)."""
+    """최근 N시간 뉴스가 몰린 종목 순위 — **자기 기저 대비 배수(surprise) 정렬**.
+
+    건수 정렬은 시총 랭킹이 되어(대형주 상단 고정) 카드가 정보를 주지 못했다. 상세는
+    core.repository.news.get_news_heat 주석 참조. 오늘 유니버스 종목이면 재료 라벨도 함께 온다.
+    """
     try:
         return {"success": True, "data": get_news_heat(hours=hours, limit=limit)}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-# 주의: "/heat" 보다 뒤에 등록해야 한다 (FastAPI 는 등록 순서대로 매칭).
+@router.get("/materials")
+def get_news_materials(
+    date: str | None = Query(None, description="리포트 날짜 YYYY-MM-DD (기본: 오늘)"),
+):
+    """그 날 뉴스가 있던 유니버스 종목의 재료 라벨 목록 (뉴스 화면용).
+
+    비선정 후보도 포함한다 — 뉴스 화면의 축은 '오늘 뜬 재료'이고 매매 선정 여부와 다르다.
+    라벨은 candidate rule 표본(관찰 전용)이므로 화면은 '미검증' 톤으로 노출해야 한다.
+    """
+    try:
+        report_date = date or datetime.now().strftime("%Y-%m-%d")
+        return {"success": True, "data": get_news_material_rows(report_date)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# 주의: "/heat"·"/materials" 보다 뒤에 등록해야 한다 (FastAPI 는 등록 순서대로 매칭).
 @router.get("/{ticker}")
 def get_today_news(
     ticker: str,
     limit: int = Query(15, ge=1, le=50, description="최대 헤드라인 수"),
 ):
-    """특정 종목의 오늘 뉴스 헤드라인 목록 (최신순, 종목 상세 페이지용)."""
+    """특정 종목의 오늘 뉴스 헤드라인 목록 (최신순, 종목 상세 페이지용).
+
+    각 항목에 `is_price_report`(그날 시세를 옮긴 기사인가)를 실어 화면이 재료 기사를 먼저
+    보여주고 시세 기사는 접을 수 있게 한다 — 실측 21%가 "급등/상한가/특징주" 류라 재료가 묻힌다.
+    판별 규칙은 후속 재료 채점과 **같은 함수**를 쓴다(화면과 채점의 기준이 갈리면 안 된다).
+    """
     try:
-        return {"success": True, "data": get_today_news_by_stock(ticker, limit=limit)}
+        items = get_today_news_by_stock(ticker, limit=limit)
+        for it in items:
+            it["is_price_report"] = is_price_report(it.get("headline") or "")
+        return {"success": True, "data": items}
     except Exception as e:
         return {"success": False, "error": str(e)}

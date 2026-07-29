@@ -12,6 +12,7 @@ import {
   FileText,
   FlaskConical,
   Settings,
+  MessagesSquare,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -21,7 +22,8 @@ const NAV_ITEMS = [
   { href: "/market", label: "시장", icon: LineChart },
   { href: "/stocks", label: "종목", icon: CandlestickChart },
   { href: "/sectors", label: "섹터", icon: Layers },
-  { href: "/feed", label: "콘텐츠", icon: Newspaper },
+  { href: "/news", label: "뉴스", icon: Newspaper },
+  { href: "/feed", label: "콘텐츠", icon: MessagesSquare },
   { href: "/reports", label: "리포트", icon: FileText },
 ];
 

@@ -67,6 +67,14 @@ class StockReport(BaseModel):
     news_summary: Optional[str] = None
     news_sentiment: Optional[int] = None
     news_catalyst: Optional[str] = None
+    # 재료 지속성 라벨 (sql/40) — 관찰 전용(candidate rule 표본). 화면은 '미검증' 톤으로 노출한다.
+    news_next_milestone: Optional[bool] = None
+    news_amount_locked: Optional[bool] = None
+    news_driver_scope: Optional[str] = None
+    news_stage: Optional[str] = None
+    news_durability: Optional[str] = None
+    news_label_reason: Optional[str] = None
+    news_followup_days: Optional[int] = None
     news_headlines: List[str] = []
     score: float = 0.0
     reason: str = ""

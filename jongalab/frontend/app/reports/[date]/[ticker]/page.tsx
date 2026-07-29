@@ -1,6 +1,7 @@
 import { StockReportDetail, SupplyHistoryItem } from "@/types";
 import { StockPriceBadge } from "@/components/StockPriceBadge";
 import { CandlestickChart } from "@/components/CandlestickChart";
+import { MaterialBadge, materialAxisLabels } from "@/components/MaterialBadge";
 import { apiFetch } from "@/lib/api";
 import { splitHeadlineUrl } from "@/lib/news";
 import { Metadata } from "next";
@@ -610,6 +611,38 @@ export default async function StockReportPage({
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
+              {/* 재료 지속성 — 등급 + 사실 4축 + 판정 근거.
+                  등급만 보여주면 왜 그렇게 판정됐는지 알 수 없어 화면에서 오탐 감사가 안 된다.
+                  근거 문장(news_label_reason)이 감사 도구다. 관찰 라벨이므로 '미검증'을 명시한다. */}
+              {(r.news_durability || r.news_label_reason) && (
+                <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-800/40">
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                    <MaterialBadge durability={r.news_durability} showUnjudged />
+                    {materialAxisLabels(r).map((t) => (
+                      <span
+                        key={t}
+                        className="text-[11px] font-medium text-slate-500 dark:text-slate-400"
+                      >
+                        · {t}
+                      </span>
+                    ))}
+                    <span className="ml-auto text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                      관찰 중 · 미검증
+                    </span>
+                  </div>
+                  {r.news_label_reason && (
+                    <p className="mt-2 break-words text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                      {r.news_label_reason}
+                    </p>
+                  )}
+                  {r.news_followup_days != null && (
+                    <p className="mt-1.5 text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                      이후 10일 중 후속 재료 <span className="tabular-nums">{r.news_followup_days}</span>일
+                      <span className="text-slate-300 dark:text-slate-600"> (시세 기사 제외)</span>
+                    </p>
+                  )}
+                </div>
+              )}
               {(r.news_catalyst || r.news_sentiment != null) && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   {r.news_catalyst && (
