@@ -87,6 +87,29 @@ def get_ai_client() -> Client:
     return _client
 
 
+def _log_llm_cost(model: str, response) -> None:
+    """호출 1건의 토큰·시간 계측 로그.
+
+    입력(prefill)과 출력(decode) 중 어디가 시간을 먹는지 알아야 개선 방향이 갈린다 —
+    입력이면 원문 길이 상한, 출력이면 프롬프트가 요구하는 필드 축소가 답이다.
+    `prompt_eval_count` 가 모델 컨텍스트에 근접하면 긴 원문이 잘리고 있다는 신호이기도 하다
+    (지시문이 프롬프트 앞쪽이라 잘리면 JSON 형식 지시부터 사라져 파싱 실패로 나타난다).
+    계측 실패가 분석을 막지 않도록 전부 방어적으로 읽는다.
+    """
+    try:
+        in_tok = response.get("prompt_eval_count") or 0
+        in_sec = (response.get("prompt_eval_duration") or 0) / 1e9
+        out_tok = response.get("eval_count") or 0
+        out_sec = (response.get("eval_duration") or 0) / 1e9
+        out_rate = f"{out_tok / out_sec:.1f}" if out_sec else "?"
+        logging.info(
+            f"⏱️ LLM 비용 [{model}] 입력 {in_tok}토큰/{in_sec:.0f}s + "
+            f"출력 {out_tok}토큰/{out_sec:.0f}s (출력 {out_rate} tok/s)"
+        )
+    except Exception:
+        pass
+
+
 def analyze_content(prompt: str, model: str | None = None,
                     raise_on_timeout: bool = False, **chat_options) -> AnalysisResult | None:
     """
@@ -106,6 +129,7 @@ def analyze_content(prompt: str, model: str | None = None,
             kwargs["options"] = chat_options
 
         response = _client.chat(**kwargs)
+        _log_llm_cost(model, response)
         raw_content = response["message"]["content"]
         data = parse_ai_json(raw_content)
 
