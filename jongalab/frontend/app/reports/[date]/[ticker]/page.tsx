@@ -20,6 +20,7 @@ import {
   Youtube,
   MessageCircle,
   Sunrise,
+  FlaskConical,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { FixedLossCalculator } from "@/components/FixedLossCalculator";
@@ -222,6 +223,20 @@ export default async function StockReportPage({
             <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-extrabold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-200">
               {r.score.toFixed(0)}점 / 100
             </span>
+            {/* 룰 선정 종목(hybrid) — 점수 순위와 무관하게 실험실 룰이 뽑았다. 근거 룰로 넘어간다. */}
+            {(r.rule_names ?? "")
+              .split(",")
+              .filter(Boolean)
+              .map((name) => (
+                <Link
+                  key={name}
+                  href={`/lab/${encodeURIComponent(name)}`}
+                  className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-3 py-1 text-sm font-extrabold text-violet-700 hover:bg-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:hover:bg-violet-900/60"
+                >
+                  <FlaskConical className="h-3.5 w-3.5" />
+                  룰 선정 · {name}
+                </Link>
+              ))}
           </div>
         </header>
 

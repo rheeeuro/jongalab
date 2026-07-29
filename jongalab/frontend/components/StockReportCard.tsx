@@ -60,6 +60,12 @@ export function StockReportCard({
 }) {
   const isUp = r.change_pct > 0;
   const isDown = r.change_pct < 0;
+  // 룰 선정 종목(hybrid 모드)은 점수 순위와 무관하게 목록에 든다 — 표시 순번만 보면 점수로
+  // 뽑힌 것처럼 읽히므로 배지 + 실제 점수 순위를 함께 낸다. (룰 상세 링크는 리포트 상세에서
+  // — 카드 전체가 이미 Link 라 중첩할 수 없다.)
+  const ruleNames = r.rule_names
+    ? r.rule_names.split(",").filter(Boolean)
+    : [];
   const gapLines = resolveGapLines(r);
   const totalPct = finalGapPct(r);
   const gapTone =
@@ -101,6 +107,10 @@ export function StockReportCard({
               maximumFractionDigits: 0,
             })}
             억
+            {/* 표시 순번과 점수 순위가 갈릴 때만 — 같으면 중복 노이즈 */}
+            {ruleNames.length > 0 &&
+              (displayRank ?? r.rank_no) !== r.rank_no &&
+              ` · 점수 ${r.rank_no}위`}
           </p>
         </div>
         <div className="shrink-0 text-right tabular-nums">
@@ -127,6 +137,14 @@ export function StockReportCard({
 
       <div className="mt-3 flex items-center justify-between">
         <div className="flex min-w-0 items-center gap-1.5">
+          {ruleNames.length > 0 && (
+            <span
+              title={`실험실 룰 선정: ${ruleNames.join(", ")}`}
+              className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-extrabold text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
+            >
+              룰 선정
+            </span>
+          )}
           <span
             className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
               GRADE_TONE[r.supply_grade] || GRADE_TONE.D

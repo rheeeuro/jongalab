@@ -771,6 +771,10 @@ class ClosingBetStrategy:
         sel_set = set(selected_codes)
         for r in reports:
             r["selected"] = 1 if r["stock_code"] in sel_set else 0
+            # 선정 근거를 리포트 행에도 태깅한다(sql/43) — 예전엔 trading DB 의 trade_signal 에만
+            # 남아서, hybrid 가 점수 62위 종목을 뽑아도 종목 탭은 그 이유를 알 수 없었다.
+            # selected 와 같은 루프에서 정해야 둘이 어긋나지 않는다.
+            r["rule_names"] = rule_names_by_code.get(r["stock_code"])
 
         for v in veto_log:
             logger.info(f"veto 제외: {v['name']}({v['code']}) — {','.join(v['rules'])}")

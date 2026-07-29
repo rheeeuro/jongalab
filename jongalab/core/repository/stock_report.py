@@ -92,6 +92,11 @@ def _analysis_row(c: dict) -> dict:
         "score": c["score"],
         "rank_no": c["rank_no"],
         "selected": c.get("selected", 1),
+        # 선정 근거(sql/43) — selected 와 한 몸으로 매 실행 재판정된다. hybrid/rules 모드에서
+        # 매칭된 live selector rule name 콤마 목록, 점수순 선정·비선정은 None.
+        # ⚠️ _PRESERVE_ON_NULL 에 넣지 말 것: legacy 폴백 실행의 None 은 '그 실행은 점수순
+        #   선정이었다'는 사실이라, 이전 실행의 rule 태그를 남겨두면 화면이 거짓말을 한다.
+        "rule_names": c.get("rule_names"),
         "sector_rel_ret": c.get("sector_rel_ret"),
         "sector_leader_chg": c.get("sector_leader_chg"),
         "foreign_brokers_buying": c.get("foreign_brokers_buying"),

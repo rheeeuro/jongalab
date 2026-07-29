@@ -77,6 +77,9 @@ class StockReport(BaseModel):
     news_followup_days: Optional[int] = None
     news_headlines: List[str] = []
     score: float = 0.0
+    # 선정 근거(sql/43) — hybrid/rules 모드에서 이 종목을 뽑은 live selector rule name 콤마 목록.
+    # NULL 이면 점수순 선정. 화면은 이 값으로 '룰 선정' 배지 + 실제 점수 순위를 함께 낸다.
+    rule_names: Optional[str] = None
     reason: str = ""
     rank_no: int = 0
     gap_nxt_price: Optional[int] = None

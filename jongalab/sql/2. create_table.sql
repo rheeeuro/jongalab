@@ -166,10 +166,14 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     exec_leg_venue VARCHAR(3) DEFAULT NULL COMMENT 'exec_leg_ret 산출 venue: NXT 또는 KRX',
 
     -- 엣지 연구용: 상위 후보만이 아니라 Phase 2 통과 유니버스 전체를 저장한다.
-    --   selected=1 은 실제 매매 핸드오프된 상위 종목(rank_no<=TRADED_TOP_N), 0 은 비선정 후보.
+    --   selected=1 은 실제 매매 핸드오프된 종목, 0 은 비선정 후보. 판정은 선정 레이어
+    --   (core.edge_selection.select_signals, EDGE_SELECTION_MODE)가 한다 — legacy 는 점수
+    --   rank_no<=TRADED_TOP_N 이지만 hybrid/rules 모드에선 **점수 순위와 무관하게** live selector
+    --   rule 매칭 종목이 우선 들어온다(rule_names 로 근거를 태깅). veto rule 은 제외만 한다.
     --   next_open_ret 은 리포트일 종가 → '다음 거래일 시가' 등락률(%). selected 무관 전 종목 균일
     --   백필(outcome_backfill 워커, 수정주가 차트로 분할 상쇄). 선정/비선정을 가르는 요인 측정용 라벨.
     selected TINYINT(1) DEFAULT 1 COMMENT '실매매 핸드오프 종목(1) / 비선정 후보(0)',
+    rule_names VARCHAR(255) DEFAULT NULL COMMENT '선정 근거 edge_rule name 콤마 목록(hybrid/rules 모드) — NULL=점수순 선정 또는 비선정',
     next_open_ret FLOAT DEFAULT NULL COMMENT '리포트일 종가 → 다음 거래일 시가 등락률(%), 백필',
     -- 결과 라벨 다중화 (Phase 2, 2026-07-04) — 앵커=KRX 확정 종가로 통일. 청산창 rule 비교용.
     --   일봉 백필 3종(outcome_backfill, 과거 소급 가능):

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { Activity, BarChart3, CalendarDays, ListChecks, Target } from "lucide-react";
 import {
   BarChart,
@@ -210,7 +211,13 @@ export function EdgeRuleDetailContent({
                         {day.matched.map((m) => (
                           <div key={m.code} className="contents">
                             <span className="flex min-w-0 items-center gap-1.5">
-                              <span className="truncate font-semibold text-slate-700 dark:text-slate-200">{m.name}</span>
+                              {/* 그 날짜의 종목 리포트로 — 룰이 무엇을 보고 걸렸는지 원본 확인용 */}
+                              <Link
+                                href={`/reports/${day.report_date}/${m.code}`}
+                                className="truncate font-semibold text-slate-700 underline decoration-slate-300 decoration-dotted underline-offset-2 hover:text-indigo-600 dark:text-slate-200 dark:decoration-slate-600 dark:hover:text-indigo-400"
+                              >
+                                {m.name}
+                              </Link>
                               {m.selected === 1 && (
                                 <span className="shrink-0 rounded bg-rose-100 px-1 text-[9px] font-bold text-rose-600 dark:bg-rose-500/15 dark:text-rose-300" title="현행 점수 상위 10 선정 종목">
                                   톱10
@@ -290,13 +297,14 @@ export function EdgeRuleDetailContent({
             <Panel title={`최근 매칭 ${latestMatched.report_date}`} icon={<Target className="h-4 w-4" />}>
               <div className="flex flex-wrap gap-1.5">
                 {latestMatched.matched!.slice(0, 12).map((m) => (
-                  <span
+                  <Link
                     key={m.code}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] dark:border-slate-700 dark:bg-[#202027]"
+                    href={`/reports/${latestMatched.report_date}/${m.code}`}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] hover:border-indigo-300 dark:border-slate-700 dark:bg-[#202027] dark:hover:border-indigo-700"
                   >
                     <span className="text-slate-600 dark:text-slate-300">{m.name}</span>
                     <span className={`font-semibold tabular-nums ${TONE_TEXT[retTone(m.ret)]}`}>{fmtPct(m.ret)}</span>
-                  </span>
+                  </Link>
                 ))}
               </div>
             </Panel>

@@ -158,6 +158,10 @@ export interface StockReport {
   score: number;
   reason: string;  // 종합 점수 구성요소로 자동 생성된 매수 이유
   rank_no: number;
+  // 선정 근거 (sql/43) — hybrid/rules 모드에서 이 종목을 뽑은 live 룰 name 콤마 목록.
+  // ⚠️ 값이 있으면 **점수 순위와 무관하게** 룰이 뽑은 종목이다(점수 62위가 목록에 들 수 있다).
+  // null = 점수순 선정. 화면은 이 구분을 반드시 드러낸다(StockReportCard 참조).
+  rule_names?: string | null;
   gap_nxt_price?: number | null;
   gap_nxt_pct?: number | null;
   gap_krx_price?: number | null;
