@@ -257,7 +257,11 @@ while True:
 
         async def news_handler(event):
             """뉴스 속보 채널 전용 경량 경로: LLM 없이 종목 사전매칭만 → news_mention 적재.
-            하루 1000+건이라 메시지당 LLM 분석은 하지 않는다(재료 감지 신호로만 사용)."""
+            하루 1000+건이라 메시지당 LLM 분석은 하지 않는다(재료 감지 신호로만 사용).
+
+            매칭 실패분은 content_skip(platform='news', reason='no_match') 에 남긴다 —
+            적재분/(적재분+no_match) 가 채널별 수집률이다(2026-07-30 추가).
+            """
             chat = await event.get_chat()
             channel_name = chat.title if getattr(chat, 'title', None) else "Unknown"
 
@@ -265,11 +269,17 @@ while True:
             if not text:
                 return
 
+            headline = text.replace("\n", " ").strip()[:500]
+
             matches = match_companies(text)
             if not matches:
+                # 분모 계측 — 사명이 없어 떨어진 메시지를 흔적 없이 버리면 '수집률'을 알 수 없다
+                # (채널이 원래 적게 보내는지, 우리가 많이 버리는지 구분 불가). content_skip 에
+                # 남겨 ① 채널별 수집률 ② 놓친 헤드라인 코퍼스(테마 계층 설계 근거)를 확보한다.
+                # 정책·지역·제품 뉴스가 여기 쌓인다(예: "호남권 반도체 국가산단 후보지 지정").
+                mark_content_skipped(msg_link, 'news', channel_name, headline, 'no_match')
                 return
 
-            headline = text.replace("\n", " ").strip()[:500]
             published_at = None
             if getattr(event.message, 'date', None):
                 # UTC aware → 로컬 naive (created_at·CURDATE 기준과 정합)
