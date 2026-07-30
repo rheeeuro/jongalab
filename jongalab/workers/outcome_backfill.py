@@ -63,13 +63,14 @@ logger = logging.getLogger("OutcomeBackfill")
 
 
 def _earliest_exec_label_registered_at() -> str | None:
-    """exec_leg_ret 를 실제로 쓰는 활성 rule 의 가장 이른 registered_at.
+    """exec_leg_ret 를 실제로 쓰는 rule 의 가장 이른 registered_at.
 
     exec_leg_ret 은 분봉 조회 비용이 커서, evaluator 가 채점하지 않을 과거 날짜는 백필하지 않는다.
+    retired 도 evaluator 가 계속 채점하므로(2026-07-31) 여기서도 포함한다.
     """
     dates = [
         str(r["registered_at"])
-        for r in list_rules(exclude_retired=True)
+        for r in list_rules()
         if r.get("exit_label") == "exec_leg_ret" and r.get("registered_at")
     ]
     return min(dates) if dates else None

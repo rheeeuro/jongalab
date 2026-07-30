@@ -64,7 +64,11 @@ def create_rule(
 
 
 def list_rules(status: str | None = None, exclude_retired: bool = False) -> list[dict]:
-    """rule 목록. status 지정 시 그 상태만, exclude_retired 면 retired 제외(evaluator 용)."""
+    """rule 목록. status 지정 시 그 상태만, exclude_retired 면 retired 제외.
+
+    ⚠️ evaluator·백필은 **retired 를 포함**한다(2026-07-31) — retire 는 '판정 종결(알림·게이트
+    대상 아님)'이고 채점은 계속한다. 실매매 개입은 `status='live'` 조회만 하므로 안전하다.
+    """
     cond, params = "", []
     if status:
         cond, params = " WHERE status = %s", [status]

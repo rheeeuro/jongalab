@@ -289,7 +289,9 @@ def _past_deadline(d: str) -> bool:
 
 
 def run():
-    rules = list_rules(exclude_retired=True)
+    # retired 도 채점한다(2026-07-31 사용자 결정) — retire 는 '판정 종결'이고 관측은 계속이다.
+    # pass 2 의 게이트 분기가 candidate/live 만 타므로 알림·승격·강등에는 올라오지 않는다.
+    rules = list_rules()
     if not rules:
         logger.info("활성 rule 없음 — 종료")
         return
