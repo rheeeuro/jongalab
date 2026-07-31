@@ -178,6 +178,27 @@ MACRO_PROXY_MAX_CUT = float(os.getenv('MACRO_PROXY_MAX_CUT', '0.5'))  # 관찰 k
 NEWS_VETO_ENABLED = os.getenv('NEWS_VETO_ENABLED', '1') == '1'
 NEWS_VETO_CACHE_SEC = int(os.getenv('NEWS_VETO_CACHE_SEC', '60'))  # 15초 폴링의 jongalab DB 조회 캐시 TTL
 
+# ── 실시간 WebSocket 피드 (core.realtime_feed + workers/monitor.py) ──
+# 키움 WS(0B 주식체결 · 00 주문체결통보)를 구독해 손절 판정을 틱 즉시로 올리고 REST 폴링을 없앤다.
+# 근거: 15초 폴링은 노이즈 필터가 아니라 무작위 샘플링이다 — 진짜 하락이면 손절선보다 낮게 팔리고
+#   (확실한 손실), 순간 급락이면 운에 맡긴다. 2026-07-18 백테스트에서 '확인틱'(지연 추가)이 현행보다
+#   나빴던 것과 같은 방향이고, 그 백테스트는 1분봉이라 15초/1초를 애초에 구분할 수 없었다.
+# ⚠️ 항상 옵셔널 — 연결 실패·틱 없음·TTL 초과면 기존 REST 경로로 폴백한다(WS 사망 = 현행 동작).
+REALTIME_FEED_ENABLED = os.getenv('REALTIME_FEED_ENABLED', '1') == '1'
+KIWOOM_WS_URL = os.getenv('KIWOOM_WS_URL', 'wss://api.kiwoom.com:10000/api/dostk/websocket')
+KIWOOM_WS_MOCK_URL = os.getenv('KIWOOM_WS_MOCK_URL', 'wss://mockapi.kiwoom.com:10000/api/dostk/websocket')
+# 캐시 신선도 한계(초). 초과 시 get_fresh 가 None → REST 폴백. 조용히 끊긴 WS 의 stale 가격으로
+# 손절이 미발동하는 최악 실패를 이 값 하나가 막는다(짧게 유지할 것).
+REALTIME_TTL_SEC = float(os.getenv('REALTIME_TTL_SEC', '5'))
+# 틱 대기 상한(초) — 틱이 없어도 최소 이 주기로는 판정한다(하한가 등 체결 없는 종목 백스톱).
+MONITOR_TICK_WAIT_SEC = float(os.getenv('MONITOR_TICK_WAIT_SEC', '1.0'))
+# 종목별 매도 재시도 쿨다운(초). 판정은 틱마다지만 **주문 전송은 이 간격 이하로 반복하지 않는다**.
+# 근거: 2026-07-10 HLB 하한가 때 15초 주기로도 매도 거부가 238건 쌓였다. 판정 주기를 그대로
+#   주문에 물리면 시간당 수천 건이 되어 키움 유량 제한에 걸리고, 하한가가 풀리는 순간 정작
+#   주문이 막힌다. 재시도 자체는 하한가 풀림 포착을 위해 유지(백오프 기각, 2026-07-10)하되
+#   간격만 현행 폴링 주기로 고정한다.
+SELL_RETRY_COOLDOWN_SEC = float(os.getenv('SELL_RETRY_COOLDOWN_SEC', '15'))
+
 # ── ⚠️ 매매 안전장치 ──
 # 'paper': 모의(주문 미전송, 의도만 로깅·기록) / 'live': 실주문 전송. 기본값은 paper.
 TRADING_MODE = os.getenv('TRADING_MODE', 'paper').lower()

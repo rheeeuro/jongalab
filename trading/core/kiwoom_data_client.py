@@ -47,6 +47,14 @@ def to_int(v) -> int:
 class KiwoomDataClient:
     def __init__(self, base_url: str | None = None):
         self.base_url = (base_url or KIWOOM_BASE_URL).rstrip("/")
+        self._feed = None  # 선택적 실시간 피드(core.realtime_feed) — 없으면 전부 REST
+
+    def attach_feed(self, feed) -> None:
+        """실시간 WS 피드를 주입한다(덕 타이핑 — get_fresh(stk_cd, prefer_nxt) 만 요구).
+
+        붙이면 `get_market_price` 가 캐시를 먼저 보고, 신선한 값이 없을 때만 REST 를 탄다.
+        피드를 안 붙이거나 None 을 넣으면 기존 동작(전부 REST)과 완전히 동일하다."""
+        self._feed = feed
 
     def _post(self, path: str, body: dict) -> dict:
         resp = requests.post(f"{self.base_url}{path}", json=body, timeout=_TIMEOUT)
@@ -136,5 +144,18 @@ class KiwoomDataClient:
         (=전일 KRX 종가)를 돌려주므로, 그대로 쓰면 settle/monitor 가 NXT 실시간가를
         못 보고 죽은 기준가로 손절·스탑·트레일링을 판정한다. get_display_price 와
         동일한 NXT-aware 판정(정규장 외 + NXT 가능 → NXT 최근 체결가, 그 외 KRX)을
-        써서 실제 거래 가능한 시세를 돌려준다."""
+        써서 실제 거래 가능한 시세를 돌려준다.
+
+        실시간 피드가 붙어 있으면 **같은 거래소 판정 규칙으로** 캐시를 먼저 본다
+        (정규장이면 KRX 보드, 밖이면 NXT 보드). 피드에 그 보드의 신선한 틱이 없으면
+        — 미구독·NXT 불가 종목·체결 없는 하한가·WS 끊김 — 아래 REST 경로로 폴백한다.
+        `is_nxt_enabled` REST 조회도 캐시 히트 시엔 함께 생략된다."""
+        if self._feed is not None:
+            try:
+                cached = self._feed.get_fresh(stk_cd, prefer_nxt=not _in_krx_session())
+            except Exception as e:  # 피드 이상이 시세 조회를 막지 않는다
+                logger.warning("실시간 피드 조회 실패 [%s] — REST 폴백: %s", stk_cd, e)
+                cached = None
+            if cached:
+                return cached
         return self.get_display_price(stk_cd)[0]

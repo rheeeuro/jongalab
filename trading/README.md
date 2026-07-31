@@ -46,7 +46,8 @@ trading/
 │   ├── news_veto.py            # 뉴스 베토 조회: jongalab news_veto_verdict(severe=1, 밤사이 중대 악재 판정) 읽기 전용 — monitor 가 해당 종목 개장 즉시 전량매도. 실패 시 미개입, 60s TTL 캐시
 │   ├── market_calendar.py      # 거래일 판별(jongalab 복제): XKRX 달력 + EXTRA_HOLIDAYS 수동 오버라이드. 모든 워커가 진입부에서 휴장일이면 exit 0 (2026-07-17 제헌절 휴장일 오실행 사고 재발 방지 — 달력에 없는 신규 공휴일은 jongalab 쪽과 함께 추가)
 │   ├── kiwoom_order_client.py  # 키움 REST 직접 호출(kt10000~3 주문, kt00018 잔고, ka10074~6)
-│   ├── kiwoom_data_client.py   # kiwoom 데이터 서버(:8001) 읽기(현재가·NXT·차트)
+│   ├── kiwoom_data_client.py   # kiwoom 데이터 서버(:8001) 읽기(현재가·NXT·차트) + 실시간 피드 캐시 우선(attach_feed)
+│   ├── realtime_feed.py        # 키움 WS 실시간 구독(0B 주식체결 · 00 주문체결통보). 백그라운드 스레드가 메모리 캐시만 갱신하고 DB·주문은 전부 호출부에서. **항상 옵셔널** — 끊김·무틱·TTL 초과 시 REST 폴백
 │   ├── fill_sync.py            # 실거래 체결 동기화(ka10076 → fill/position)
 │   ├── order_maintenance.py    # 스테일 주문 취소·미체결(dead) 정리
 │   ├── position_manager.py     # 포지션 조회·평가손익(청산 후보는 미구현)
@@ -88,6 +89,10 @@ signal_executor (KRX 15:00 / NXT 19:30)
   · NXT 는 최유리 IOC 특성상 부분체결 가능 — 주문 직후 ka10076 체결내역으로 목표 수량 대비 체결량을 확인하고,
     체결 row 가 확인된 부분체결이면 19:50 전 잔량을 최대 2회 별도 멱등키(`:partial:N`)로 재시도한다
     (체결내역이 아직 안 보이면 과매수 방지를 위해 재시도하지 않고 19:55 fills_sync/알림에서 미체결로 드러나게 둔다)
+  · **체결통보(WS `00`)로 대기 단축**(2026-07-31): 데드라인 집행 직전에 체결통보만 구독(`_start_fill_feed`,
+    시세 0B 는 구독 안 함)하고, 고정 3초 대기 대신 통보를 기다린다(오면 즉시). 통보를 받았는데 ka10076 이
+    아직 반영 전이면 0.5초 뒤 한 번 더 조회한다 — 종전엔 이 경우를 '체결내역 미확인'으로 보고 재시도를
+    포기해 잔량을 놓쳤다. 구독 실패·통보 미수신이면 종전 고정 대기와 완전히 동일하게 동작한다.
   · 마감 시각(데드라인)에 전 종목 시장가/IOC 집행 → 신호 status 갱신(done/skipped/rejected)
   · 주문 직전 live 주문가능금액(100stk_ord_alow_amt) 재조회로 수량 보정 — 시드는 윈도우 시작
     1회 스냅샷이라, 앞선 종목 체결·증거금 선반영으로 줄어든 현금에 마지막 종목이 '증거금
@@ -102,7 +107,31 @@ settle --venue krx_open (09:03) · NXT 미상장 종목: KRX 개장가로 갭 �
   · 집행 시각 :03 근거(실측): NXT 는 프리마켓 갭상승이 첫 5분간 식어 08:03 이 08:05 대비 평균 +0.35%
     (08:00~08:01 은 얇은 단발 호가 허수가 끼어 제외). KRX 불가 종목은 개장 드리프트가 없어(평균 ≈0%)
     시점 중립이라 :03 으로 통일. KRX 상장 종목과 달리 NXT 불가 종목엔 "1분이 더 높다"가 성립하지 않는다.
-monitor (08:01~09:30, 15초 폴링)
+monitor (08:00~09:30, 실시간 틱 판정 + 15초 유지보수 — 2026-07-31 WS 전환)
+  · **판정 주기를 동작 성격별로 분리**한다. 손절 판정은 지연이 곧 손실이라 틱 즉시로 올리고,
+    주문 전송·트레일링 상향·유지보수는 기존 15초 주기를 유지한다:
+      - 뉴스베토·하드손절·스탑 breach **판정** → WS 틱 즉시(틱 없으면 1초 백스톱, `check_ticks`)
+        근거: 15초 폴링은 노이즈 필터가 아니라 **무작위 샘플링**이다 — 진짜 하락이면 손절선보다
+        낮은 가격에 팔리고(확실한 손실), 순간 급락이면 운에 맡긴다. 2026-07-18 백테스트에서
+        '확인틱'(지연 추가)이 현행보다 나빴던 것과 같은 방향이고, 그 백테스트는 1분봉이라
+        15초/1초를 애초에 구분할 수 없었다.
+      - 매도 주문 **전송·재시도** → 종목별 15초 쿨다운(`SELL_RETRY_COOLDOWN_SEC`).
+        2026-07-10 HLB 하한가 때 15초 주기로도 거부가 238건 쌓였다. 판정 주기를 그대로 주문에
+        물리면 시간당 수천 건이 되어 키움 유량 제한에 걸리고 하한가 풀림을 놓친다. 재시도 자체는
+        유지(백오프 기각 결정 불변)하되 간격만 종전 폴링 주기로 고정한다. 거부도 전송이라 성공·거부 무관하게 카운트.
+      - 트레일링 스탑 **상향** → 15초(기존). TRAIL_PCT=0.75 는 15초 주기 백테스트로 튜닝된 값이라,
+        상향을 촘촘히 하면 실효 TRAIL_PCT 가 좁아져(비채택된 0.5 쪽으로) 파라미터가 무단 변경된다.
+        **breach 감지는 즉시**이므로 스탑선은 그대로 두고 청산가만 선에 붙는다(순 개선).
+      - 유지보수(체결동기화·미체결정리) → 15초. 단 **체결통보(WS `00`) 수신 시 즉시** 동기화.
+  · 틱 판정은 DB 를 읽지 않는다 — 포지션·플랜·베토 스냅샷(`MonitorState`)은 15초 주기에만 읽고
+    틱은 스냅샷+캐시 가격으로 순수 계산만 한다(삼성전자 단독 32틱/초라 틱마다 DB 조회는 불가).
+    실제 매도 시점엔 `_exit_confirmed`/`execute_sell` 이 DB·브로커를 다시 보므로 과매도로 이어지지 않는다.
+  · 구독 시작 시 종목별 `is_nxt_enabled` 를 **1회만** 조회한다 → 폴링마다 반복하던 ka10100 호출이 사라진다.
+  · ⚠️ **WS 는 항상 옵셔널**: 연결 실패·무틱·TTL(5초) 초과면 `check_once`(15초 REST 경로)가 그대로
+    판정하므로 WS 가 죽어도 종전 동작이 유지된다. `REALTIME_FEED_ENABLED=0` 으로 완전 비활성 가능.
+  · 하트비트(`monitor_poll`)에 `ws` 상태(연결·틱수·재연결수·마지막 틱 나이)와 `cooldown_skips` 를 담아
+    대시보드에서 피드 가동 여부를 확인한다. 손절/스탑/베토 audit 에는 `path`(tick|slow)와
+    `slow_wait_ms`(15초 폴링이었다면 더 기다렸을 시간)를 남겨 **즉시 판정의 실이득을 사후 채점**한다.
   · **0순위 뉴스 베토**: jongalab news_guard(07:00~09:25)가 밤사이 중대 악재(FDA 불승인·계약 파기류)로
     판정한 종목(news_veto_verdict severe=1)은 **가격 무관 즉시 전량 매도**(tag=newsveto) — 하드손절보다
     앞이라 갭이 가격에 반영되기 전에도 탈출. 매도 전송 성공 시 관리자 텔레그램, 체결 확인 후 plan 해제.
@@ -143,6 +172,8 @@ watchdog 은 **jongalab 통합 스케줄러의 dead-man's switch 도 겸한다**
 | 하드 한도 | `risk_engine.py` | 일일 주문수(기본 20, **매수만 카운트** — 청산 매도는 제외). 종목당 명목금액·동시 보유종목수 상한은 제거됨(상위 종목 집중 배분을 위해 — `MAX_NOTIONAL_PER_NAME`/`MAX_POSITIONS` 는 `execution_engine` 폴백 사이징 용도로만 존치) |
 | 멱등키 | `execution_engine.py`, `order.py` | `YYYYMMDD:signal_id:side` UNIQUE — cron 재실행 중복 방지(거부 `:x<id>`, dead `:dead:<id>` 접미사로 키 해제 — id 로 고유성 보장) |
 | 하드 손절 / 트레일링 | `monitor.py`, `settle_plan.py` | HARD_STOP_LOSS_PCT 즉시 전량 / TRAIL_PCT 단조 상승 스톱. 지난밤 US 정규장 급락이면 하드손절 폭을 보수적으로 좁힘(`US_STOP_TIGHTEN_ENABLED`, 위 monitor 흐름) |
+| 실시간 피드 폴백 | `realtime_feed.py`, `kiwoom_data_client.py` | WS 캐시는 **TTL 5초**(`REALTIME_TTL_SEC`) 안의 값만 유효. 초과·무틱·미구독·다른 보드·피드 예외면 `get_fresh`→None 이라 기존 REST 경로로 폴백한다. 보드(KRX/NXT)가 다르면 **다른 보드로 폴백하지 않는다** — 잘못된 보드 가격으로 손절을 판정하는 것이 값이 없는 것보다 위험. 조용히 끊긴 WS 의 stale 가격으로 손절이 미발동하는 최악 실패를 이 TTL 하나가 막는다. WS 스레드는 메모리 캐시만 갱신하고 DB·주문은 전부 메인 루프에서 일어난다(재진입·락 없음) |
+| 매도 재시도 쿨다운 | `monitor.MonitorState` | 판정은 틱 즉시지만 **주문 전송은 종목별 `SELL_RETRY_COOLDOWN_SEC`(15초) 간격**. 거부도 전송이라 성공·거부 무관하게 카운트. 하한가 매도 거부가 초당 반복돼 유량 제한에 걸리고 정작 하한가 풀림을 놓치는 것을 막는다(2026-07-10 HLB 238건 → 초당 재시도면 시간당 수천 건) |
 | 불변 감사로그 | `audit_log.py` | append-only(UPDATE/DELETE 없음) |
 | 블록리스트 | `blocklist.py`, `signal_executor.py` | 수동 보유 종목 자동매수 차단 |
 | 레버리지 ETF 대체매수 | `leverage_map.py`, `signal_executor.py` + risk_config `LEVERAGE_ENABLED` | 토글 on 시 signal_executor 가 매수 직전(**blocklist 제외 후·`is_nxt_enabled` 조회 전**) 원종목을 매핑된 레버리지 ETF 로 치환(`resolve_leverage_target`). 신호 id 는 그대로라 상태 갱신·멱등키·종가랩 리포트는 **원종목** 기준, 실제 주문·포지션·청산·이 대시보드 표시는 **ETF**(ETF 는 시그널에 안 남으므로 `/names` 가 `leverage_map` 의 `etf_stk_nm` 을 합쳐 코드 대신 이름으로 표시). 사이징은 ETF 현재가로 재계산되고, 거래소 라우팅도 ETF 의 NXT 여부로 결정된다(원종목이 NXT 가능이어도 ETF 가 NXT 불가면 KRX 종가 15:20 매수). 매 치환을 `audit_log('leverage_swap')` 기록. `/buy-preview` 도 동일 치환(매수 예정에 ETF 표시). ⚠️ **레버리지는 오버나잇 갭 손실을 배로 키우고 종목당 시드 25% 캡의 최악손실 방어가 실효를 잃는다**(ETF 는 그 종목이 아니라 신호 엣지도 근사) — 손실 최소화 목표와 상충하므로 기본 토글 off |
@@ -216,7 +247,10 @@ cd trading/frontend && npm run dev                                        # 대�
 롤링 엣지 게이트 배수 매핑·역전 판정(`regime_gate`), 선물 섹터 게이트 클래스 매핑·섹터별 keep 차등·미개입 분기(`futures_gate`),
 거시 이벤트 게이트 보유 창·severity 매핑·프록시 관찰 전용·미개입 분기(`macro_gate`),
 뉴스 베토 전량매도·0순위 우선·fail-safe(빈 판정/조회 실패에도 하드손절 정상)·venue 보류·TTL 캐시(`test_news_veto`),
-레버리지 ETF 치환 순수 로직(무매핑 무치환·코드/이름만 교체·원신호 id 유지·ETF 코드 결측 방어, `test_leverage_swap`).
+레버리지 ETF 치환 순수 로직(무매핑 무치환·코드/이름만 교체·원신호 id 유지·ETF 코드 결측 방어, `test_leverage_swap`),
+실시간 피드 폴백·틱 판정(`test_realtime_feed`): TTL 초과/미구독/다른 보드/피드 예외 → REST 폴백, 부호 붙은 현재가 절대값
+파싱, 체결통보 1회 소비, 등록 상한 캡, 틱 경로는 하드손절 즉시 집행하되 **트레일링 상향은 안 함**(15초 경로만 함),
+매도 거부 시 쿨다운이 재전송 억제·경과 후 재시도 허용, 체결 확인 시 스냅샷에서 제거.
 민감 파일(`risk_engine.py`·`execution_engine.py`)은 **수정하지 않고 동작만 핀**한다.
 ```bash
 uv run --directory trading --group dev pytest

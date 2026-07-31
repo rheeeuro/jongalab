@@ -27,7 +27,7 @@ from core.seed_allocator import allocate
 from core.regime_gate import seed_multiplier
 from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
 from core.macro_gate import macro_keep
-from core.config import SEED_COMBINED_MIN_MULT
+from core.config import SEED_COMBINED_MIN_MULT, REALTIME_FEED_ENABLED
 from core.kiwoom_data_client import to_int
 from core.repository import trade_signal as signal_repo
 from core.repository import order as order_repo
@@ -42,6 +42,14 @@ logger = logging.getLogger("SignalExecutor")
 POLL_SEC = 15  # closing_bet 완료 대기 / 데드라인 대기 하트비트 공통 주기
 NXT_PARTIAL_RETRY_MAX = 2
 NXT_PARTIAL_RETRY_WAIT_SEC = 3
+# 체결통보(WS 00)를 받았는데 ka10076 체결내역이 아직 안 보일 때 재조회 대기(초).
+# 브로커 조회 반영이 통보보다 느린 구간을 넘기기 위한 짧은 유예다.
+FILL_REQUERY_WAIT_SEC = 0.5
+
+# 체결통보 구독(core.realtime_feed) — NXT 데드라인 집행 구간에만 살아 있다.
+# 모듈 변수로 두는 이유: _retry_nxt_partial_fill 시그니처를 바꾸지 않아 기존 호출·테스트가
+# 그대로 유효하고, 피드가 없으면(None) 종전 '3초 대기 후 조회' 동작과 완전히 동일하다.
+_fill_feed = None
 
 
 def resolve_leverage_target(sig: dict, lev_map: dict) -> tuple[dict, dict | None]:
@@ -85,6 +93,43 @@ def _hm(now: datetime) -> tuple[int, int]:
 
 def _deadline_dt(now: datetime, hm: tuple[int, int]) -> datetime:
     return now.replace(hour=hm[0], minute=hm[1], second=0, microsecond=0)
+
+
+def _start_fill_feed(venue: str):
+    """NXT 데드라인 집행 직전에 체결통보(WS `00`) 구독을 시작한다. 실패 시 None.
+
+    시세(0B)는 구독하지 않는다 — 여기서 필요한 건 '방금 낸 IOC 주문이 체결됐는가'뿐이고,
+    가격은 데드라인에 한 번만 쓰므로 REST 로 충분하다. KRX(동시호가)는 부분체결 재시도가
+    없어 대상이 아니다."""
+    if venue != "nxt" or not REALTIME_FEED_ENABLED:
+        return None
+    try:
+        from core.realtime_feed import KiwoomRealtimeFeed
+
+        feed = KiwoomRealtimeFeed(symbols={}, subscribe_fills=True)
+        feed.start()
+        logger.info("체결통보 구독 시작 — NXT 부분체결 확인에 사용")
+        return feed
+    except Exception as e:
+        logger.warning("체결통보 구독 실패 — 종전 %d초 대기 방식으로 계속: %s",
+                       NXT_PARTIAL_RETRY_WAIT_SEC, e)
+        return None
+
+
+def _wait_for_fill_signal(seconds: float) -> bool:
+    """체결통보를 최대 seconds 초 기다린다. 통보를 받으면 즉시 True.
+
+    피드가 없으면 종전처럼 그냥 seconds 초 대기하고 False — 이 경로에서는 동작이
+    이전과 완전히 같다(대기 후 ka10076 조회)."""
+    if _fill_feed is None:
+        time.sleep(seconds)
+        return False
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if _fill_feed.take_fill_signal():
+            return True
+        time.sleep(0.1)
+    return False
 
 
 def _execution_qty_by_order(client, stk_cd: str, ord_nos: list[str], exchange: str) -> tuple[dict[str, int], bool]:
@@ -136,9 +181,15 @@ def _retry_nxt_partial_fill(engine: ExecutionEngine, trade_date: str, sig: dict,
         now = datetime.now()
         if now + timedelta(seconds=NXT_PARTIAL_RETRY_WAIT_SEC + 1) >= deadline:
             break
-        time.sleep(NXT_PARTIAL_RETRY_WAIT_SEC)
+        # 체결통보를 기다린다(오면 즉시). 피드가 없으면 종전과 같이 고정 대기.
+        notified = _wait_for_fill_signal(NXT_PARTIAL_RETRY_WAIT_SEC)
 
         qty_by_order, ok = _execution_qty_by_order(engine.client, stk_cd, order_nos, "NXT")
+        if ok and notified and not any(qty_by_order.values()):
+            # 통보는 왔으니 체결은 분명히 있었는데 ka10076 이 아직 반영 전이다.
+            # 종전엔 이걸 '체결내역 미확인'으로 보고 재시도를 포기해 잔량을 놓쳤다 → 짧게 재조회.
+            time.sleep(FILL_REQUERY_WAIT_SEC)
+            qty_by_order, ok = _execution_qty_by_order(engine.client, stk_cd, order_nos, "NXT")
         if not ok:
             audit_log.append("buy_partial_retry_skip", stk_cd, {
                 "reason": "체결내역 조회 실패", "target_qty": target_qty, "order_nos": order_nos})
@@ -400,17 +451,25 @@ def main() -> int:
         time.sleep(POLL_SEC)
 
     # 5) 데드라인 — 잔여 후보 전량 종가(KRX 동시호가 / NXT IOC) 매수
-    for c in cands:
-        if c["bought"]:
-            continue
-        try:
-            cur = engine.data.get_market_price(c["stk_cd"])
-            if cur > 0:
-                c["price"] = cur  # 체결 기록용 참고가(실주문은 시장가/IOC)
-        except Exception as e:
-            logger.warning("데드라인 현재가 조회 실패 [%s]: %s", c["stk_cd"], e)
-        _buy_candidate(engine, trade_date, c, cfg["exchange"], "종가 매수(마감 데드라인)",
-                       cfg["deadline"])
+    #    NXT 는 부분체결 확인에 체결통보를 쓰므로 집행 직전에 구독을 열고, 끝나면 반드시 닫는다.
+    global _fill_feed
+    _fill_feed = _start_fill_feed(args.venue)
+    try:
+        for c in cands:
+            if c["bought"]:
+                continue
+            try:
+                cur = engine.data.get_market_price(c["stk_cd"])
+                if cur > 0:
+                    c["price"] = cur  # 체결 기록용 참고가(실주문은 시장가/IOC)
+            except Exception as e:
+                logger.warning("데드라인 현재가 조회 실패 [%s]: %s", c["stk_cd"], e)
+            _buy_candidate(engine, trade_date, c, cfg["exchange"], "종가 매수(마감 데드라인)",
+                           cfg["deadline"])
+    finally:
+        if _fill_feed is not None:
+            _fill_feed.stop()
+            _fill_feed = None
 
     # 6) 관리자 알림은 체결 직후 fills_sync 워커가 실체결가로 전송한다
     #    (KRX 15:31 / NXT 19:55) — 종가 단일가/IOC 체결가는 이 시점엔 아직 미확정이라 여기서 보내지 않는다.
