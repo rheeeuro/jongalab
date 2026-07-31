@@ -60,8 +60,37 @@ NEWS_JUDGE_BATCH_SIZE = int(os.getenv('NEWS_JUDGE_BATCH_SIZE', '8'))          # 
 NEWS_JUDGE_LOOKBACK_DAYS = int(os.getenv('NEWS_JUDGE_LOOKBACK_DAYS', '5'))    # 헤드라인 룩백(재료 stage 판정 근거)
 NEWS_JUDGE_MAX_HEADLINES = int(os.getenv('NEWS_JUDGE_MAX_HEADLINES', '20'))   # 종목당 헤드라인 상한(최신 우선)
 # 후속 재료 실현 채점 창(거래일 아닌 달력일) — outcome_backfill 이 news_followup_days 를 채운다.
-# news_mention 보존이 14일이므로 창 + 백필 지연이 14일을 넘으면 표본이 잘린다(10 + 여유 3).
+# news_mention 보존(NEWS_RETENTION_DAYS)보다 창 + 백필 지연이 크면 표본이 잘린다.
 NEWS_FOLLOWUP_WINDOW_DAYS = int(os.getenv('NEWS_FOLLOWUP_WINDOW_DAYS', '10'))
+# news_mention 원자료 보존일(cleanup_content 가 사용). 14 → 30 상향(2026-07-31): 네이버 수집
+# 병행 검증이 "같은 날 텔레그램만 vs 네이버 포함" 을 원자료에서 소급 재계산하는 방식이라,
+# 14일이면 검증 창이 앞에서 잘린다. 승격 판정이 끝나면 14로 되돌려도 된다.
+NEWS_RETENTION_DAYS = int(os.getenv('NEWS_RETENTION_DAYS', '30'))
+
+# ── 뉴스 소스 게이트 (news_mention.source) ──
+# **뉴스 원자료의 어느 소스를 소비할지**를 한 곳에서 정한다. repository/news.py 의 모든 조회가
+# 이 집합으로 필터하므로, 새 소스를 수집만 해두고 라벨·룰·veto·LLM 판정에는 일절 반영하지 않는
+# '관측 전용' 기간을 둘 수 있다(승격은 .env 한 줄).
+#   왜 필요한가: 소스를 늘리면 news_count·news_prior_avg·surprise 배수가 도입일에 계단식으로
+#   튄다. 실측(2026-07-31 프로브) 네이버 당일 562행 vs 텔레그램 273행이고 **헤드라인 중복은
+#   2%뿐**이라 상쇄 없이 3배로 순증한다. news_unique_count 를 쓰는 rule 3종(그중
+#   `veto_bad_news` 는 **live = 자금 경로**)의 표본이 중간에 성질이 바뀌므로, 검증 전 유입을
+#   막는 게이트가 없으면 도입 자체가 실탄 변경이 된다.
+# 값은 쉼표 구분(예: 'telegram,naver'). 순서는 무관.
+NEWS_ACTIVE_SOURCES = tuple(
+    s.strip() for s in os.getenv('NEWS_ACTIVE_SOURCES', 'telegram').split(',') if s.strip()
+) or ('telegram',)
+
+# ── 네이버 증권 종목별 뉴스 수집 (workers/naver_news_collector.py) ──
+# 유니버스 종목의 재료 라벨 커버리지가 47%(2026-07-31 실측 18/38)뿐인 것을 메우기 위한 소스.
+# 종목코드로 조회하므로 사명 사전매칭이 필요 없다(텔레그램 경로의 no_match 55% 문제를 우회).
+NAVER_NEWS_ENABLED = os.getenv('NAVER_NEWS_ENABLED', '1') == '1'
+NAVER_NEWS_BASE_URL = os.getenv('NAVER_NEWS_BASE_URL', 'https://m.stock.naver.com')
+# 종목당 1페이지만 조회한다. 40건이면 30분 주기 증분에는 충분하고, 첫 사이클에 대형주가
+# 잘리는 정도는 감수한다(실측 삼성전자·SK하이닉스는 20건이 전부 당일 기사였다).
+NAVER_NEWS_PAGE_SIZE = int(os.getenv('NAVER_NEWS_PAGE_SIZE', '40'))
+NAVER_NEWS_SLEEP_SEC = float(os.getenv('NAVER_NEWS_SLEEP_SEC', '0.3'))   # 종목 간 간격
+NAVER_NEWS_TIMEOUT = int(os.getenv('NAVER_NEWS_TIMEOUT', '10'))
 
 # 스코어/선정 로직 유효 시작일(YYYY-MM-DD, inclusive) — 이 날짜 이전은 구 로직이라
 # 가중치 튜닝 백테스트 표본에서 제외한다. weight_tuner 가 분석 주 시작을 이 날짜로 클램프.

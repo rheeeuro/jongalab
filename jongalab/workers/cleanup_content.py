@@ -6,6 +6,7 @@ content_analysis 는 최근 데이터(대시보드 7일/통계 24시간/오늘)�
 import logging
 import sys
 
+from core.config import NEWS_RETENTION_DAYS
 from core.logging_setup import setup_logging
 from core.repository import (
     delete_old_content_analysis,
@@ -18,8 +19,8 @@ setup_logging()
 logger = logging.getLogger("CleanupContent")
 
 RETENTION_MONTHS = 3
-# 뉴스 언급은 당일 카운트/최근 헤드라인만 쓰므로 짧게 보관(고빈도라 테이블 비대화 방지)
-NEWS_RETENTION_DAYS = 14
+# 뉴스 언급 보존일은 config.NEWS_RETENTION_DAYS(기본 30) — 네이버 병행 검증이 원자료에서
+# "텔레그램만 vs 네이버 포함" 을 소급 재계산하는 방식이라 14일이면 검증 창이 잘린다.
 
 
 def main() -> int:

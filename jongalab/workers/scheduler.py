@@ -90,6 +90,11 @@ JOBS = [
     # 멱등 적재라 지각 실행도 무해하지만, 늦게 도는 건 의미가 없어 유예 10분.
     Job("disclosure_collector", UV_RUN + ["workers/disclosure_collector.py"],
         timeout=600, grace=600, minute="20,50", hour="8-20", day_of_week="mon-fri"),
+    # 평일 08:45~20:45 매 30분 네이버 증권 뉴스 수집(:15/:45 — closing_bet :00/:30 및
+    # disclosure_collector :20/:50 과 어긋나게). 멱등 적재라 지각 실행도 무해하지만 늦게 도는 건
+    # 의미가 없어 유예 10분. 실측 38종목 14초라 타임아웃은 넉넉히 5분.
+    Job("naver_news_collector", UV_RUN + ["workers/naver_news_collector.py"],
+        timeout=300, grace=600, minute="15,45", hour="8-20", day_of_week="mon-fri"),
     # 평일 17:50 시간외/리스크 라벨. ka10087 이 16~18시에만 살아있어 유예 5분(18시 넘기면 무의미).
     Job("after_hours_labels", UV_RUN + ["workers/after_hours_labels.py"],
         timeout=900, grace=300, minute="50", hour="17", day_of_week="mon-fri"),

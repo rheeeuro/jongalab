@@ -1,12 +1,21 @@
 """뉴스 속보 언급 데이터 접근 (news_mention).
 
-고빈도 뉴스 채널을 LLM 없이 종목 사전매칭만으로 적재한다. content_analysis 와 분리해
-'재료 감지 신호'로만 쓰며, 오늘 언급 건수/헤드라인을 closing_bet Phase 2 가 조회한다.
+두 소스가 같은 테이블에 들어온다 — 텔레그램 뉴스 채널(사명 사전매칭)과 네이버 증권
+종목별 뉴스(종목코드 조회, 매칭 없음). content_analysis 와 분리해 '재료 감지 신호'로만
+쓰며, 오늘 언급 건수/헤드라인을 closing_bet Phase 2 가 조회한다.
+
+⚠️ **조회 함수는 전부 `_source_filter()` 를 통과한다.** 소스를 늘리면 news_count·
+news_prior_avg·surprise 배수가 도입일에 계단식으로 튀고(실측 네이버 562행 vs 텔레그램
+273행, 헤드라인 중복 2%뿐이라 상쇄 없이 순증), news_unique_count 를 쓰는 rule 3종 중
+`veto_bad_news` 는 live = 자금 경로다. 그래서 적재는 무조건 하고 **소비만**
+config.NEWS_ACTIVE_SOURCES(기본 telegram)로 막아 관측 기간을 둔다. 승격은 .env 한 줄.
+새 조회 함수를 추가할 때도 이 필터를 빠뜨리지 말 것 — 빠뜨리면 게이트가 조용히 뚫린다.
 """
 import json
 import re
 from datetime import datetime
 
+from core.config import NEWS_ACTIVE_SOURCES
 from core.db import get_db
 
 # 헤드라인 dedup 정규화: 발행처 대괄호 제거 후 한글/영숫자만 남긴다.
@@ -21,23 +30,58 @@ def _normalize_headline(headline: str) -> str:
     return _NON_WORD_RE.sub("", text).lower()
 
 
+# news_first_today 의 '첫 등장' 판정 창(일). **보존 기간과 분리해 명시한다** —
+# 예전엔 하한이 없어서 사실상 cleanup_content 의 보존일(14)이 창이었다. 2026-07-31 에 네이버
+# 병행 검증을 위해 보존을 30일로 늘리면서, 그대로 두면 라벨 뜻이 "14일 내 첫 등장"에서
+# "30일 내"로 조용히 바뀌어 candidate rule `f1_fresh_news_unpriced` 의 입력이 흔들렸다.
+# 값은 종전과 같은 14 이므로 지금 라벨값은 변하지 않는다(보존 14일 하에선 결과 동일).
+_FIRST_TODAY_LOOKBACK_DAYS = 14
+
+
+def _source_filter() -> tuple[str, tuple]:
+    """소비 대상 소스 필터 — (SQL 조각, 바인딩 파라미터).
+
+    조각은 항상 앞에 AND 가 붙는 형태로 돌려주므로 WHERE 절 뒤에 그대로 이어 붙인다.
+    """
+    placeholders = ", ".join(["%s"] * len(NEWS_ACTIVE_SOURCES))
+    return f" AND source IN ({placeholders})", tuple(NEWS_ACTIVE_SOURCES)
+
+
 def save_news_mentions(rows: list[dict]) -> int:
     """뉴스 언급을 일괄 저장 (중복 URL·종목 조합은 무시).
 
     rows 항목: {ticker, company_name, headline, source_url, channel_name, published_at}
+      + 선택 {source, created_at}
+      - source     : 미지정이면 'telegram'(기존 호출부 무변경)
+      - created_at : 미지정이면 지금 시각. **네이버 경로는 기사 발행시각을 넣는다** —
+        created_at 은 news_pm_count(12시 이후)·get_news_heat(NOW() 기준 창)·news_guard 의
+        오버나잇 창 기준이라, 30분 주기 수집기가 '수집 시각'을 넣으면 저녁 사이클 분이
+        전부 오후 재료로 잡히고 창 분석이 오염된다.
     반환: 실제 삽입된 행 수.
     """
     if not rows:
         return 0
+    now = datetime.now()
+    payload = [{
+        "ticker": r["ticker"],
+        "company_name": r.get("company_name"),
+        "headline": r.get("headline"),
+        "source_url": r.get("source_url"),
+        "channel_name": r.get("channel_name"),
+        "published_at": r.get("published_at"),
+        "source": r.get("source") or "telegram",
+        "created_at": r.get("created_at") or now,
+    } for r in rows]
     with get_db() as (conn, cursor):
         cursor.executemany(
             """
             INSERT IGNORE INTO news_mention
-                (ticker, company_name, headline, source_url, channel_name, published_at)
+                (ticker, company_name, headline, source_url, channel_name,
+                 published_at, source, created_at)
             VALUES (%(ticker)s, %(company_name)s, %(headline)s, %(source_url)s,
-                    %(channel_name)s, %(published_at)s)
+                    %(channel_name)s, %(published_at)s, %(source)s, %(created_at)s)
             """,
-            rows,
+            payload,
         )
         inserted = cursor.rowcount
         conn.commit()
@@ -47,13 +91,14 @@ def save_news_mentions(rows: list[dict]) -> int:
 def get_today_news_count_by_stock(stock_code: str) -> int:
     """오늘 수집된 특정 종목의 뉴스 언급 건수 (created_at = 오늘)."""
     code = stock_code.split(".")[0].split("_")[0]
+    src_sql, src_params = _source_filter()
     with get_db() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT COUNT(*) AS cnt FROM news_mention
-            WHERE ticker = %s AND DATE(created_at) = CURDATE()
+            WHERE ticker = %s AND DATE(created_at) = CURDATE(){src_sql}
             """,
-            (code,),
+            (code, *src_params),
         )
         return int(cursor.fetchone()["cnt"])
 
@@ -65,17 +110,18 @@ def get_today_news_stats_by_stock(stock_code: str) -> dict:
       - count        : 오늘 총 언급 건수 (기존 get_today_news_count_by_stock 과 동일 기준)
       - unique_count : 헤드라인 정규화 dedup 고유 기사 수 (채널 복제 제거)
       - pm_count     : 12시 이후 언급 수 (종가베팅 신선도 — 장중 늦게 터진 재료)
-      - first_today  : 직전 14일(보존 주기) 내 언급 이력이 없으면 1
+      - first_today  : 직전 `_FIRST_TODAY_LOOKBACK_DAYS`일 내 언급 이력이 없으면 1
       - prior_avg    : 직전 7일 일평균 언급 수 (서프라이즈 배수의 분모). 오늘 언급 없으면 None
     """
     code = stock_code.split(".")[0].split("_")[0]
+    src_sql, src_params = _source_filter()
     with get_db() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT headline, created_at FROM news_mention
-            WHERE ticker = %s AND DATE(created_at) = CURDATE()
+            WHERE ticker = %s AND DATE(created_at) = CURDATE(){src_sql}
             """,
-            (code,),
+            (code, *src_params),
         )
         today_rows = cursor.fetchall()
         if not today_rows:
@@ -83,13 +129,14 @@ def get_today_news_stats_by_stock(stock_code: str) -> dict:
                     "first_today": 0, "prior_avg": None}
 
         cursor.execute(
-            """
+            f"""
             SELECT COUNT(*) AS prior_total,
                    SUM(created_at >= CURDATE() - INTERVAL 7 DAY) AS prior_7d
             FROM news_mention
             WHERE ticker = %s AND created_at < CURDATE()
+              AND created_at >= CURDATE() - INTERVAL %s DAY{src_sql}
             """,
-            (code,),
+            (code, _FIRST_TODAY_LOOKBACK_DAYS, *src_params),
         )
         prior = cursor.fetchone()
 
@@ -113,16 +160,17 @@ def get_today_news_stats_by_stock(stock_code: str) -> dict:
 def get_today_news_by_stock(stock_code: str, limit: int = 15) -> list[dict]:
     """오늘 수집된 특정 종목의 뉴스 헤드라인 목록 (최신순, 표시·요약용)."""
     code = stock_code.split(".")[0].split("_")[0]
+    src_sql, src_params = _source_filter()
     with get_db() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT headline, source_url, channel_name, created_at
             FROM news_mention
-            WHERE ticker = %s AND DATE(created_at) = CURDATE()
+            WHERE ticker = %s AND DATE(created_at) = CURDATE(){src_sql}
             ORDER BY created_at DESC
             LIMIT %s
             """,
-            (code, int(limit)),
+            (code, *src_params, int(limit)),
         )
         results = cursor.fetchall()
         for row in results:
@@ -139,16 +187,17 @@ def get_news_since(stock_code: str, since_dt: datetime, limit: int = 30) -> list
     (호출부 news_guard 가 news_max_at 비교에 사용).
     """
     code = stock_code.split(".")[0].split("_")[0]
+    src_sql, src_params = _source_filter()
     with get_db() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT headline, company_name, channel_name, created_at
             FROM news_mention
-            WHERE ticker = %s AND created_at >= %s
+            WHERE ticker = %s AND created_at >= %s{src_sql}
             ORDER BY created_at ASC
             LIMIT %s
             """,
-            (code, since_dt, int(limit)),
+            (code, since_dt, *src_params, int(limit)),
         )
         return cursor.fetchall()
 
@@ -169,16 +218,17 @@ def get_recent_news_by_stocks(
     if not codes:
         return {}
     placeholders = ", ".join(["%s"] * len(codes))
+    src_sql, src_params = _source_filter()
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""
             SELECT ticker, DATE(created_at) AS d, headline, created_at
             FROM news_mention
             WHERE ticker IN ({placeholders})
-              AND created_at >= CURDATE() - INTERVAL %s DAY
+              AND created_at >= CURDATE() - INTERVAL %s DAY{src_sql}
             ORDER BY ticker, created_at ASC
             """,
-            (*codes, int(max(0, days - 1))),
+            (*codes, int(max(0, days - 1)), *src_params),
         )
         out: dict[str, list[dict]] = {}
         for row in cursor.fetchall():
@@ -200,12 +250,14 @@ def get_news_max_at_by_stocks(stock_codes: list[str]) -> dict[str, datetime]:
     if not codes:
         return {}
     placeholders = ", ".join(["%s"] * len(codes))
+    src_sql, src_params = _source_filter()
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""SELECT ticker, MAX(created_at) AS max_at FROM news_mention
-                 WHERE ticker IN ({placeholders}) AND DATE(created_at) = CURDATE()
+                 WHERE ticker IN ({placeholders})
+                   AND DATE(created_at) = CURDATE(){src_sql}
                  GROUP BY ticker""",
-            tuple(codes),
+            (*codes, *src_params),
         )
         return {r["ticker"]: r["max_at"] for r in cursor.fetchall() if r["max_at"]}
 
@@ -223,12 +275,13 @@ def get_news_days_by_stocks(
     if not codes:
         return {}
     placeholders = ", ".join(["%s"] * len(codes))
+    src_sql, src_params = _source_filter()
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""SELECT ticker, DATE(created_at) AS d, headline FROM news_mention
                  WHERE ticker IN ({placeholders})
-                   AND DATE(created_at) BETWEEN %s AND %s""",
-            (*codes, start_date, end_date),
+                   AND DATE(created_at) BETWEEN %s AND %s{src_sql}""",
+            (*codes, start_date, end_date, *src_params),
         )
         out: dict[str, list[dict]] = {}
         for row in cursor.fetchall():
@@ -254,9 +307,13 @@ def get_news_heat(hours: int = 24, limit: int = 20) -> list[dict]:
     오늘 유니버스에 든 종목이면 재료 지속성 라벨(durability/catalyst/summary)을 함께 실어
     카드가 '무슨 재료인지'까지 보여줄 수 있게 한다(유니버스 밖 종목은 NULL).
     """
+    src_sql, src_params = _source_filter()
+    # 서브쿼리(기저)와 본 쿼리에 각각 별칭이 다른 같은 필터를 붙인다.
+    prior_src = src_sql.replace(" AND source IN", " AND p.source IN")
+    main_src = src_sql.replace(" AND source IN", " AND n.source IN")
     with get_db() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT n.ticker,
                    MAX(n.company_name) AS company_name,
                    COUNT(*) AS mention_count,
@@ -264,7 +321,7 @@ def get_news_heat(hours: int = 24, limit: int = 20) -> list[dict]:
                    (SELECT COUNT(*) FROM news_mention p
                      WHERE p.ticker = n.ticker
                        AND p.created_at < CURDATE()
-                       AND p.created_at >= CURDATE() - INTERVAL 7 DAY) / 7 AS prior_avg,
+                       AND p.created_at >= CURDATE() - INTERVAL 7 DAY{prior_src}) / 7 AS prior_avg,
                    MAX(r.news_durability) AS durability,
                    MAX(r.news_catalyst) AS catalyst,
                    MAX(r.news_summary) AS summary,
@@ -272,10 +329,10 @@ def get_news_heat(hours: int = 24, limit: int = 20) -> list[dict]:
             FROM news_mention n
             LEFT JOIN daily_stock_report r
                    ON r.stock_code = n.ticker AND r.report_date = CURDATE()
-            WHERE n.created_at >= NOW() - INTERVAL %s HOUR
+            WHERE n.created_at >= NOW() - INTERVAL %s HOUR{main_src}
             GROUP BY n.ticker
             """,
-            (int(hours),),
+            (*src_params, int(hours), *src_params),
         )
         results = cursor.fetchall()
 
