@@ -104,6 +104,11 @@ JOBS = [
     # 월요일 08:20 거시 이벤트 캘린더 고갈 체크(3주 내 바닥나면 exit 1 → 경보). 유예 6h.
     Job("macro_event_check", UV_RUN + ["workers/macro_event_check.py"],
         timeout=120, grace=21600, minute="20", hour="8", day_of_week="mon"),
+    # 매일 20:30 미매칭 뉴스 섹터·거시 라벨(관측 전용 표본 축적, LLM 벌크).
+    # **매일**인 이유: 코퍼스는 주말에도 쌓이고(실측 토·일 각 800건) 밀리면 상한에 걸린다.
+    # 하루 안이면 언제 돌아도 무방(라벨은 news_at 기준이라 실행 시각과 무관) → 유예 6h.
+    Job("sector_news_labeler", UV_RUN + ["workers/sector_news_labeler.py"],
+        timeout=1800, grace=21600, minute="30", hour="20"),
 ]
 
 

@@ -92,6 +92,18 @@ NAVER_NEWS_PAGE_SIZE = int(os.getenv('NAVER_NEWS_PAGE_SIZE', '40'))
 NAVER_NEWS_SLEEP_SEC = float(os.getenv('NAVER_NEWS_SLEEP_SEC', '0.3'))   # 종목 간 간격
 NAVER_NEWS_TIMEOUT = int(os.getenv('NAVER_NEWS_TIMEOUT', '10'))
 
+# ── 미매칭 뉴스 섹터·거시 라벨 (workers/sector_news_labeler.py) — 관측 전용 ──
+# 사명이 안 잡혀 버려진 뉴스(content_skip no_match, 실측 수집률 34%)에 섹터·방향 라벨을 붙여
+# 검정 표본을 만든다. **소비 경로 없음** — 점수·시드·veto 어디에도 들어가지 않는다(sql/45 주석).
+# 끄면 라벨 축적만 멈추고 나머지 파이프라인은 무영향(이 라벨을 읽는 live 코드가 없다).
+NEWS_SECTOR_ENABLED = os.getenv('NEWS_SECTOR_ENABLED', '1') == '1'
+# 1회 LLM 호출에 넣는 헤드라인 수. 재료 지속성 판정(8종목)보다 크게 잡는 이유는 항목당 입력이
+# 헤드라인 한 줄뿐이라서다(그쪽은 종목당 5일치 묶음). 너무 키우면 JSON 항목 누락이 는다.
+NEWS_SECTOR_BATCH_SIZE = int(os.getenv('NEWS_SECTOR_BATCH_SIZE', '40'))
+# 1회 실행 처리 상한. 하루 신규 유입이 ~800건(주말 포함)이라 여유를 두되, 백로그 일괄 소화는
+# 수동 `--limit` 로 한다(스케줄 실행이 예상치 못하게 길어지지 않도록).
+NEWS_SECTOR_MAX_ROWS = int(os.getenv('NEWS_SECTOR_MAX_ROWS', '1200'))
+
 # 스코어/선정 로직 유효 시작일(YYYY-MM-DD, inclusive) — 이 날짜 이전은 구 로직이라
 # 가중치 튜닝 백테스트 표본에서 제외한다. weight_tuner 가 분석 주 시작을 이 날짜로 클램프.
 # (trading 쪽 레짐 게이트의 REGIME_MIN_DATE 와 같은 로직 변경을 가리킴 — 도메인 분리라 값만 맞춘다.)

@@ -162,7 +162,11 @@ US_STOP_MIN_PCT = float(os.getenv('US_STOP_MIN_PCT', '1.0'))          # 강화 �
 MACRO_GATE_ENABLED = os.getenv('MACRO_GATE_ENABLED', '1') == '1'
 MACRO_EVENT_KEEP = float(os.getenv('MACRO_EVENT_KEEP', '0.5'))   # sev3 이벤트 밤 시드 keep(≤1.0)
 # 관찰 전용 프록시 축(지정학 쇼크 대비: VIX 레벨 / WTI·원달러 급등) — keep 을 계산해 진단에만 남기고
-# 감액엔 미적용(임계 미검증). 표본이 쌓이면 승격 판단. 강도는 futures_gate 와 같은 선형 램프(LO=0~HI=1).
+# 감액엔 미적용. 강도는 futures_gate 와 같은 선형 램프(LO=0~HI=1).
+# ⛔ 2026-08-03 백테스트(4/9~7/31 75거래일): VIX 축은 부호가 반대(VIX 높을수록 익일 성적 좋음,
+#   t=+2.87 — 지금 램프대로 켜면 담아야 할 때 깎는다. 단 월별 불안정해 역방향도 근거 없음),
+#   WTI 축은 기각(보유 밤 실변동조차 t=+0.42, 갭 경로는 NQ 선물). **아래 임계를 감액에 연결 금지** —
+#   상세·재검정 조건은 core/macro_gate.py docstring. 원값은 audit 진단에 계속 남는다.
 MACRO_VIX_LO = float(os.getenv('MACRO_VIX_LO', '25'))            # VIX 레벨 — 강도 0 시작점
 MACRO_VIX_HI = float(os.getenv('MACRO_VIX_HI', '35'))            # 강도 1 도달점
 MACRO_WTI_BAND = float(os.getenv('MACRO_WTI_BAND', '3.0'))       # WTI 급등 %p — 강도 0 시작점
