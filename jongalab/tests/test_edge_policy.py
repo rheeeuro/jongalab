@@ -150,13 +150,48 @@ def test_selector_blocked_when_below_best_control():
 
 
 def test_selector_blocked_on_non_executable_predicate():
-    # veto_overheat_gap 사례: 통계가 아무리 좋아도 19:50 피처면 live 는 무음 no-op → 차단.
-    rule = _rule(family="f3_nxt", stats=GOOD_STATS,
-                 predicate=[{"col": "nxt_gap_pct", "op": ">=", "value": 3}])
+    # 통계가 아무리 좋아도 **어느 레이어에서도** 못 쓰는 피처면 live 는 무음 no-op → 차단.
+    # short_wght 는 17:50 수집이라 선정(13~15시)에도 NXT 집행(19:50)에도 없다.
+    rule = _rule(family="f7_risk", role="selector", stats=GOOD_STATS,
+                 predicate=[{"col": "short_wght", "op": ">=", "value": 15}])
     gate = check_promotion(rule, [_control(0.2)])
     assert not gate["eligible"]
     assert gate["stat_reasons"] == []      # 통계는 충족 → '집행 설계 필요' 알림 분기
     assert len(gate["exec_reasons"]) == 1
+
+
+def test_nxt_gap_rule_is_promotable_via_execution_layer():
+    """19:50 갭은 **집행 레이어**에서 평가 가능하므로 승격을 막지 않는다 (2026-08-03).
+
+    NXT 매수는 19:50 데드라인 단일 주문이고 집행기가 그 순간 갭을 계산해 predicate 에 먹인다
+    (trading `core/edge_execution`). 이 예외가 없던 동안 원장에서 통계가 가장 강한
+    `f3_nxt_gap_quality`(초과 t=2.21)가 영구 승격 불가였고, 그 가설을 쓰려면 원장을 우회한
+    하드코딩이 필요했다(= 채점·강등 감시 소실).
+    """
+    rule = _rule(family="f3_nxt", stats=GOOD_STATS, predicate=[
+        {"col": "nxt_gap_pct", "op": "between", "value": [1.0, 6.0]},
+        {"col": "nxt_listed", "op": "==", "value": 1},
+        {"col": "sector_rel_ret", "op": ">=", "value": 0},
+        {"col": "change_pct", "op": "between", "value": [0, 12]},
+    ])
+    gate = check_promotion(rule, [_control(0.2)])
+    assert gate["exec_reasons"] == []
+    assert gate["eligible"]
+
+
+def test_rule_layer_prefers_selection_over_execution():
+    from core.edge_policy import rule_layer
+    # 선정 시점에 되는 rule 은 선정 레이어 — 집행으로 내리면 대체가 안 돼 시드가 논다.
+    assert rule_layer([{"col": "supply_score", "op": ">=", "value": 50}]) == "selection"
+    assert rule_layer([{"col": "nxt_gap_pct", "op": ">=", "value": 1}]) == "execution"
+    # 섞이면 가장 늦은 레이어(집행)에서만 가능
+    assert rule_layer([{"col": "supply_score", "op": ">=", "value": 50},
+                       {"col": "nxt_gap_pct", "op": ">=", "value": 1}]) == "execution"
+    # 17:50·익일 수집은 어느 레이어에서도 불가
+    assert rule_layer([{"col": "short_wght", "op": ">=", "value": 15}]) is None
+    assert rule_layer([{"col": "next_open_ret", "op": ">", "value": 0}]) is None
+    # market.* 는 선정 시점 스냅샷이 없어 여전히 불가(기존 규약 유지)
+    assert rule_layer([{"col": "market.vix", "op": ">", "value": 20}]) is None
 
 
 # ── 승격 게이트: veto / benchmark ──
@@ -201,10 +236,18 @@ def test_veto_blocked_without_benefit_evidence():
 
 
 def test_veto_blocked_on_non_executable_predicate():
-    dead_rule = _rule(family="f3_nxt", role="veto", stats=GOOD_VETO_STATS,
-                      predicate=[{"col": "nxt_gap_pct", "op": ">=", "value": 5}])
+    # 17:50 수집(short_wght)은 선정에도 NXT 집행에도 없다 → veto 여도 무음 no-op.
+    dead_rule = _rule(family="f7_risk", role="veto", stats=GOOD_VETO_STATS,
+                      predicate=[{"col": "short_wght", "op": ">=", "value": 15}])
     gate = check_promotion(dead_rule, [])
     assert not gate["eligible"] and gate["exec_reasons"]
+
+
+def test_veto_on_nxt_gap_is_promotable_via_execution_layer():
+    # veto 도 집행 레이어에서 평가 가능하면 실행 게이트를 통과한다(2026-08-03).
+    live_veto = _rule(family="f3_nxt", role="veto", stats=GOOD_VETO_STATS,
+                      predicate=[{"col": "nxt_gap_pct", "op": "<", "value": 0}])
+    assert check_promotion(live_veto, [])["eligible"]
 
 
 def test_benchmark_exempt_from_all_gates():
@@ -500,8 +543,8 @@ def test_experimental_still_requires_trading_days_and_executability():
                          policy="experimental")
     assert not g1["eligible"] and any("거래일 부족" in r for r in g1["stat_reasons"])
     g2 = check_promotion(
-        _rule(family="f3_nxt", stats=_WEAK_SIG,
-              predicate=[{"col": "nxt_gap_pct", "op": ">=", "value": 3}]),
+        _rule(family="f7_risk", role="selector", stats=_WEAK_SIG,
+              predicate=[{"col": "short_wght", "op": ">=", "value": 15}]),
         [_control(-0.227)], policy="experimental")
     assert not g2["eligible"] and g2["exec_reasons"]
 

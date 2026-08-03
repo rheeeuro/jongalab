@@ -252,6 +252,37 @@ class ClosingBetStrategy:
         feat["frgn_exhaust_rate"] = self.engine.parse_float(fer) if fer else None
         feat.update(financials(info))
 
+    # NXT 애프터마켓 시작 시각 — 이 전에는 '야간 갭' 개념이 없어 조회하지 않는다.
+    #   정규장 중(09:00~15:30)에도 NXT 보드는 대체거래소로 열려 있지만 가격이 KRX 를 따라가
+    #   갭이 ~0 이라 야간갭 rule 이 매칭될 수 없다 — 그래도 콜을 아끼려 시각으로 먼저 끊는다.
+    _NXT_AFTER_HOURS_FROM = (15, 40)
+
+    def _fetch_nxt_gap(self, code: str, krx_close: int) -> tuple[float | None, int | None]:
+        """그 회차 시점의 야간 갭(%) + NXT 상장 여부. 창 밖·조회 실패·재료 부재는 (None, None).
+
+        **선정 레이어가 야간갭 rule 을 쓸 수 있게 하는 유일한 경로다.** DB 의 `nxt_gap_pct` 는
+        `gap_check --base-nxt`(19:50)가 채우는데, NXT 매수 신호는 **19:30 회차**가 넘기므로
+        DB 값을 기다리면 선정은 영원히 NULL 을 본다(무음). 그래서 그 시점 값을 직접 재서
+        룰 평가 dict 에만 넣는다.
+
+        ⚠️ **DB 컬럼(`nxt_gap_pct`)에는 쓰지 않는다** — 소유자는 19:50 패스다. 회차마다 덮어쓰면
+        마지막 실행(20:30) 값이 남아 채점 축이 19:50 에서 어긋난다(실측: 19:50 vs 20:20 종가 갭이
+        최대 0.94%p 차이 — 1% 밴드에서 판정이 뒤집히는 크기). 종목 탭은 19:50 값 + `rule_names`
+        태그로 선정 근거를 보여준다.
+        """
+        now = datetime.now()
+        if (now.hour, now.minute) < self._NXT_AFTER_HOURS_FROM or krx_close <= 0:
+            return None, None
+        try:
+            info = self.api.get_stock_basic_info(f"{code}_NX")
+            price = abs(self.engine.parse_price(info.get("cur_prc", "0")))
+        except Exception as e:
+            logger.warning(f"NXT 현재가 조회 실패 [{code}]: {e}")
+            return None, None
+        if price <= 0:
+            return None, 0          # NXT 미상장(호가 없음) — 갭 없음이 정상
+        return (price - krx_close) / krx_close * 100, 1
+
     def _fetch_chart_features(self, code: str, current_price: int) -> dict:
         """일봉(ka10081) 1콜에서 차트 구조 피처를 굽는다 — vol_ratio(당일÷20일 평균 거래량)
         + dist_prior_high_pct(250일 전고점 대비 거리) + ma5_reclaim(5일선 재탈환 반전)
@@ -287,7 +318,14 @@ class ClosingBetStrategy:
                 )
                 for cd in candles[:251]  # 볼륨프로파일(당일 포함 250봉)
             ]
+            # 당일 KRX 확정 종가 — 야간 갭의 분모(추가 API 콜 0, 일봉 당일 캔들에서). 15:30 이후 확정.
+            #   ka10001 무접미사 `cur_prc` 를 쓰지 않는 이유: 야간엔 그 값이 KRX 종가인지 NXT
+            #   시세인지 일관되지 않다(실측 19:50 엔 KRX 종가, 20:00+ 엔 NXT 가격).
+            krx_close_today = next(
+                (abs(self.engine.parse_price(cd.get("cur_prc", "0")))
+                 for cd in candles[:1] if cd.get("dt") == today), 0)
             return {
+                "krx_close_today": krx_close_today,
                 "vol_ratio": vol_ratio(vols, today),
                 "dist_prior_high_pct": dist_prior_high_pct(highs, today, current_price),
                 "ma5_reclaim": ma5_reclaim(ohlc, today, current_price),
@@ -560,6 +598,13 @@ class ClosingBetStrategy:
                 "score": c.score,
                 "rank_no": i,
                 "selected": is_top_score,  # 잠정값 — 아래 선정 레이어가 모드에 따라 다시 정함
+                # 야간 갭 — **룰 평가용 in-memory 값**(그 회차 시점 NXT 가격 기준).
+                #   DB 의 nxt_gap_pct 는 19:50 패스 소관이라 여기서 저장하지 않는다
+                #   (_analysis_row 에 없으므로 reports 에 담아도 저장 컬럼엔 안 들어간다).
+                #   이 두 키가 있어야 `f3_nxt_gap_quality` 같은 집행 레이어 rule 이 선정에서
+                #   매칭돼 selected/rule_names 태깅이 되고, 종목 탭이 선정 근거를 보여준다.
+                **dict(zip(("nxt_gap_pct", "nxt_listed"),
+                           self._fetch_nxt_gap(code, feat.get("krx_close_today") or 0))),
                 "sector_rel_ret": (c.change_pct or 0.0) - sector_avg[c.sector or "기타"],
                 "sector_leader_chg": sector_max[c.sector or "기타"],
                 "foreign_brokers_buying": feat.get("foreign_brokers_buying"),

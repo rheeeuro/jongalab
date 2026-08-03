@@ -116,6 +116,28 @@ def update_rule_decision(rule_id: int, decision: dict) -> None:
         conn.commit()
 
 
+def delete_rule(rule_id: int) -> int:
+    """rule 행 삭제 — **당일 오등록 철회 전용**. 반환: 삭제된 행 수.
+
+    원장은 사전등록이 규율이라 rule 은 원칙적으로 불변이고, 종료는 `status='retired'` 다
+    (retire 후에도 채점은 계속해 "그때 폐기가 옳았나"를 사후 확인한다 — 2026-07-31 결정).
+    그래서 이 함수는 **채점 이력이 없는**(edge_rule_daily 0행) 같은 날 오등록만 지운다 —
+    표본이 쌓인 rule 을 지우면 그 가설을 시험했다는 사실 자체가 사라져 다중검정 보정이 무의미해진다.
+    이력이 있으면 ValueError 를 던져 retire 로 유도한다.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute("SELECT COUNT(*) AS n FROM edge_rule_daily WHERE rule_id = %s", (rule_id,))
+        scored = int((cursor.fetchone() or {}).get("n") or 0)
+        if scored:
+            raise ValueError(
+                f"rule {rule_id} 은 채점 이력 {scored}행이 있어 삭제할 수 없습니다 — "
+                "종료는 status='retired' 로 하세요(채점은 계속되며 사후 검증이 가능합니다)"
+            )
+        cursor.execute("DELETE FROM edge_rule WHERE id = %s", (rule_id,))
+        conn.commit()
+        return cursor.rowcount
+
+
 def set_rule_status(rule_id: int, status: str) -> None:
     """상태 전이 — live 면 promoted_at, retired 면 retired_at 타임스탬프도 찍는다."""
     ts = ""

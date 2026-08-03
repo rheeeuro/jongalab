@@ -73,6 +73,13 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     "op_earnings_yield",
     # 호가 미시구조 스냅샷 (2026-07-22, sql/33) — ka10004 선정 시점 수집. 연속장 중만 유효.
     "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct",
+    # NXT 19:25 야간 갭 (2026-08-03, sql/47) — `gap_check --base-nxt-1930`(19:25)이 채우고
+    # **19:30 closing_bet 회차**가 읽는다. 19:50 계열(`nxt_gap_pct`)이 여기 없는 것과 대비되는데,
+    # 그 이유가 이 축의 전부다: NXT 매수는 19:50 데드라인 단일 주문이라 19:50 갭은 결정에 못 쓰고,
+    # 19:25 갭은 신호 핸드오프(19:30)보다 앞서므로 쓸 수 있다.
+    # ⚠️ 13~15시 회차에는 아직 NULL 이다 — 이 컬럼을 쓰는 rule 은 **19:30 회차에서만** 매칭된다.
+    # NXT 매수 신호는 그 회차가 넘기므로 NXT 경로엔 문제가 없지만, KRX 종가 매수(15:20) 경로엔
+    # 영원히 매칭되지 않는다(그 시각엔 야간 거래 자체가 없으므로 의미상으로도 맞다).
     # DART 공시 사건 라벨 (2026-07-28, sql/36) — disclosure_collector(30분 주기)가 적재한
     # stock_event 를 closing_bet 선정 시점에 집계. 매 실행 재계산이라 저녁 재실행(19:00)에는
     # 장 마감 후 공시(15:30~18:00)까지 반영된다 → NXT 매수(19:30) 직전 veto 가 실제로 동작.
@@ -90,6 +97,56 @@ def selection_executable(predicate: list) -> tuple[bool, list[str]]:
         if col.startswith(_MARKET_PREFIX) or col not in SELECTION_TIME_COLS:
             missing.append(col)
     return (not missing, missing)
+
+
+# ── 집행 시점(NXT 19:50 데드라인) 실행 가능성 (2026-08-03) ──
+# 선정 레이어 말고 **집행 레이어**에서 평가되는 rule 을 위한 두 번째 화이트리스트.
+# 배경: NXT 매수는 19:50 데드라인 단일 주문이고, `signal_executor` 가 그 순간 종목마다
+# NXT 현재가를 이미 조회한다(체결 참고가). 즉 **19:50 야간 갭은 주문 직전에 알 수 있다** —
+# 선정 시점(13~15시·19:30 회차)엔 NULL 이라 SELECTION_TIME_COLS 에는 못 들어가지만,
+# 집행기가 그 값을 채워 predicate 를 평가할 수 있다.
+# 이 구분이 없던 동안 `f3_nxt_gap_quality`(원장에서 통계가 가장 강한 rule — 초과 t_days_exc=2.21,
+# 양수일 8/11)는 "선정 시점 실행 불가"로 영구 승격 불가였고, 그 가설을 쓰려면 원장을 우회한
+# 하드코딩 필터를 넣어야 했다(2026-08-03 실제로 그렇게 했다가 되돌림 — 채점·강등 감시가 안 붙는다).
+#
+# ⚠️ **집행 레이어 rule 은 종목을 추가하지 못한다 — 화이트리스트로만 동작한다.**
+# 후보 풀·시드 배분이 19:30 에 이미 확정된 뒤라 빈 슬롯을 채울 대상이 없다. 그래서
+# role=selector 여도 실효 의미는 "선정된 NXT 종목 중 매칭분만 매수"(reduce-only)다.
+# 대가: 하이브리드 대체가 안 되므로 **거른 몫의 시드가 논다**. 그 전제로 측정해야 한다.
+EXECUTION_TIME_COLS: frozenset[str] = SELECTION_TIME_COLS | frozenset({
+    # 19:50 NXT 스냅샷 계열 — 집행기가 주문 직전 실시간으로 계산해 행에 덮어쓴다.
+    #   nxt_gap_pct = (NXT 현재가 − KRX 확정 종가) / KRX 확정 종가 × 100
+    # gap_check --base-nxt(19:50)가 사후에 같은 정의로 기록하므로 **채점 표본과 집행 값이
+    # 같은 변수**다(rule 의 과거 stats 를 그대로 승격 근거로 쓸 수 있는 이유).
+    "nxt_gap_pct", "nxt_price_1950", "nxt_listed",
+})
+
+
+def execution_executable(predicate: list) -> tuple[bool, list[str]]:
+    """predicate 가 **집행 시점(NXT 19:50)** 에 실행 가능한지. 반환: (가능 여부, 불가 컬럼 목록)."""
+    missing = []
+    for cond in predicate or []:
+        col = cond.get("col", "") if isinstance(cond, dict) else ""
+        if col.startswith(_MARKET_PREFIX) or col not in EXECUTION_TIME_COLS:
+            missing.append(col)
+    return (not missing, missing)
+
+
+def rule_layer(predicate: list) -> str | None:
+    """이 rule 이 어느 레이어에서 동작하는가 — predicate 컬럼에서 파생(별도 컬럼 없음).
+
+    'selection' : 선정 시점에 평가 가능 → closing_bet 의 edge_selection 이 쓴다(종목 추가 가능)
+    'execution' : 선정 시점엔 불가하지만 NXT 19:50 데드라인엔 가능 → signal_executor 가
+                  화이트리스트로 쓴다(종목 추가 불가, reduce-only)
+    None        : 어느 레이어에서도 실행 불가(19:50 이후·익일 수집 피처) → 페이퍼 검증 전용
+    선정 시점 가능한 rule 을 집행 레이어로 내리지 않는다 — 선정에서 쓰는 게 항상 낫다
+    (대체가 가능해 시드가 놀지 않는다).
+    """
+    if selection_executable(predicate)[0]:
+        return "selection"
+    if execution_executable(predicate)[0]:
+        return "execution"
+    return None
 
 
 # ── 승격 게이트 (candidate → live) ──
@@ -317,14 +374,19 @@ def check_promotion(rule: dict, control_rules: list[dict], policy: str = "strict
                 "제외 대상이 평균적으로 손실이어야 veto 이득)"
             )
 
-    # 실행 가능성 게이트 — live 는 실탄이므로 선정 시점에 실제 동작해야 한다(benchmark 면제).
+    # 실행 가능성 게이트 — live 는 실탄이므로 **어느 레이어에서든** 실제 동작해야 한다(benchmark 면제).
+    # 2026-08-03: 선정 시점만 보던 것을 집행 시점(NXT 19:50)까지 확장했다. 집행기가 주문 직전에
+    # NXT 갭을 계산해 predicate 를 평가할 수 있으므로, 그 컬럼만 쓰는 rule 은 무음 no-op 이 아니다.
+    # 확장 전에는 `f3_nxt_gap_quality` 처럼 19:50 값을 쓰는 rule 이 통계가 아무리 강해도 영구
+    # 승격 불가였고, 그 가설을 쓰려면 원장을 우회하는 하드코딩이 필요했다(= 채점·강등 감시 소실).
     if role in ("selector", "veto"):
-        ok, missing = selection_executable(rule.get("predicate") or [])
-        if not ok:
+        predicate = rule.get("predicate") or []
+        if rule_layer(predicate) is None:
+            _, missing = execution_executable(predicate)
             exec_reasons.append(
                 # 콜론 앞부분은 화면 배지(stats.promo_blockers)로도 쓰이니 짧게 유지한다.
-                f"선정 시점 실행 불가: {missing} — 19:50/익일 수집 컬럼은 선정 때(13~15시) NULL 이라 "
-                "live 여도 무음 no-op 가 됩니다(집행 설계 변경 후 승격)"
+                f"실행 불가: {missing} — 선정 시점(13~15시)에도 NXT 집행 시점(19:50)에도 없는 "
+                "컬럼입니다(19:50 이후·익일 수집). live 여도 무음 no-op 가 됩니다"
             )
 
     return {

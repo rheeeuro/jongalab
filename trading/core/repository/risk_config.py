@@ -18,6 +18,9 @@ _DEFAULTS = {
                                        # 레짐/거시/선물 감액보다 먼저 적용(0.0~1.0, 축소 전용)
     "LEVERAGE_ENABLED": 0,             # 레버리지 ETF 대체매수 토글(0/1) — 1이면 signal_executor 가
                                        # leverage_map 원종목을 매핑된 레버리지 ETF 로 치환해 매수
+    "NXT_GAP_FILTER_ENABLED": 0,       # NXT 야간갭 필터 토글(0/1) — 1이면 signal_executor(--venue nxt)가
+                                       # 19:50 주문 직전 갭이 NXT_GAP_MIN~MAX 밖인 종목을 매수 스킵
+                                       # (reduce-only, 거른 몫은 현금 유지). 롤백은 이 값을 0 으로.
 }
 
 # float 로 다루는 키 (나머지는 int). SEED_INIT_MULT 는 0.0~1.0 로 클램프.

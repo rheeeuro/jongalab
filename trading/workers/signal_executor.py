@@ -34,12 +34,15 @@ from core.repository import order as order_repo
 from core.repository import blocklist as blocklist_repo
 from core.repository import risk_config as risk_config_repo
 from core.repository import leverage_map as leverage_map_repo
+from core.repository import edge_rule as edge_rule_repo
 from core.repository import audit_log
+from core import edge_execution
 
 setup_logging()
 logger = logging.getLogger("SignalExecutor")
 
 POLL_SEC = 15  # closing_bet 완료 대기 / 데드라인 대기 하트비트 공통 주기
+
 NXT_PARTIAL_RETRY_MAX = 2
 NXT_PARTIAL_RETRY_WAIT_SEC = 3
 # 체결통보(WS 00)를 받았는데 ka10076 체결내역이 아직 안 보일 때 재조회 대기(초).
@@ -257,6 +260,34 @@ def _retry_nxt_partial_fill(engine: ExecutionEngine, trade_date: str, sig: dict,
     return result
 
 
+def _krx_close_today(engine: ExecutionEngine, stk_cd: str, trade_date: str) -> int:
+    """당일 KRX 확정 종가(원). 실패/미확정은 0.
+
+    ka10081 일봉(접미사 없음=KRX 보드)의 **당일 캔들 종가**를 쓴다. 15:30 이후엔 확정값이고,
+    실측 검증(2026-08-03): 009150 1,181,000 / 005380 393,000 / 214450 372,000 이 jongalab
+    `daily_stock_report.krx_close_price`(19:50 수집)와 정확히 일치했다.
+    ka10001 `cur_prc`(접미사 없음)를 쓰지 않는 이유: 야간 시간대에 그 값이 KRX 종가인지 NXT
+    시세인지 **일관되지 않다**(같은 무접미사 조회가 19:50 엔 KRX 종가, 20:00+ 엔 NXT 가격을
+    돌려준 실측이 있다). 갭의 분모가 흔들리면 필터가 엉뚱한 종목을 거르므로 일봉으로 고정한다.
+    """
+    try:
+        data = engine.data.get_daily_chart(stk_cd)
+    except Exception as e:
+        logger.warning("일봉 조회 실패 [%s]: %s", stk_cd, e)
+        return 0
+    for bar in (data.get("stk_dt_pole_chart_qry") or []):
+        if str(bar.get("dt")) == trade_date:
+            return abs(to_int(bar.get("cur_prc")))
+    return 0
+
+
+def _nxt_gap_pct(nxt_price: int, krx_close: int) -> float | None:
+    """NXT 갭 % = (NXT 현재가 − KRX 확정 종가) / KRX 확정 종가 × 100. 재료 없으면 None."""
+    if nxt_price <= 0 or krx_close <= 0:
+        return None
+    return (nxt_price - krx_close) / krx_close * 100
+
+
 def _buy_candidate(engine: ExecutionEngine, trade_date: str, c: dict,
                    exchange: str, reason: str, deadline_hm: tuple[int, int]) -> None:
     """배분 수량으로 1종목 매수 집행 + 시그널 상태 갱신. 한 종목당 1회만 호출한다."""
@@ -444,6 +475,44 @@ def main() -> int:
                 "reason": "배분 0주", "score": c["score"], "price": c["price"]})
             c["bought"] = True  # 루프 대상에서 제외
 
+    # 4-0) 집행 레이어 rule 준비 — **데드라인 전에** 원장·리포트 행·KRX 종가를 미리 받아둔다.
+    #      19:50 루프에 DB·API 호출을 더하면 주문이 늦어지고, 이 값들은 그때 이미 고정이다
+    #      (KRX 종가는 15:30 확정, 리포트 행은 19:30 선정분, live rule 은 관리자 수동 전이).
+    #      갭만 주문 직전에 실시간으로 계산해 predicate 에 먹인다(core/edge_execution.decide).
+    #      토글이 off 면 원장 조회조차 하지 않는다 — 현행 동작 그대로.
+    gap_filter = args.venue == "nxt" and bool(
+        risk_config_repo.get_risk_config().get("NXT_GAP_FILTER_ENABLED", 0))
+    live_rules: list[dict] = []
+    report_rows: dict[str, dict] = {}
+    score_top_n: int | None = None
+    if gap_filter:
+        try:
+            live_rules = edge_rule_repo.get_live_rules()
+        except Exception as e:  # 원장 조회 실패가 매수를 막지 않는다(fail-open)
+            logger.warning("원장 live rule 조회 실패 — 갭 필터 무개입: %s", e)
+            gap_filter = False
+    if gap_filter:
+        exec_names = [r.get("name") for r in live_rules if edge_execution.is_execution_layer_rule(r)]
+        if not exec_names:
+            logger.info("집행 레이어 live rule 없음 — 갭 필터 무개입")
+            gap_filter = False
+        else:
+            pend = [c for c in cands if not c["bought"]]
+            today_iso = datetime.now().strftime("%Y-%m-%d")
+            try:
+                report_rows = edge_rule_repo.get_report_rows(
+                    today_iso, [c["stk_cd"] for c in pend])
+                # '점수 top-N 에도 들었는가' 판정의 N — 그날 선정 종목 수로 근사(repo docstring).
+                score_top_n = edge_rule_repo.get_selected_count(today_iso)
+            except Exception as e:
+                logger.warning("리포트 행 조회 실패 — 갭 필터 무개입: %s", e)
+                gap_filter = False
+            for c in pend:
+                c["krx_close"] = _krx_close_today(engine, c["stk_cd"], trade_date)
+            logger.info("집행 레이어 rule %s 활성 — KRX 종가 %d/%d, 리포트 행 %d/%d",
+                        exec_names, sum(1 for c in pend if c.get("krx_close")), len(pend),
+                        len(report_rows), len(pend))
+
     # 4) 데드라인까지 대기 — 종가 매수라 트리거 없이 하트비트만 남긴다(대시보드 가동 표시).
     while _hm(datetime.now()) < cfg["deadline"]:
         _beat({"venue": args.venue, "phase": "poll",
@@ -464,6 +533,39 @@ def main() -> int:
                     c["price"] = cur  # 체결 기록용 참고가(실주문은 시장가/IOC)
             except Exception as e:
                 logger.warning("데드라인 현재가 조회 실패 [%s]: %s", c["stk_cd"], e)
+
+            # 집행 레이어 rule 판정 — 주문 직전 갭을 predicate 에 먹여 원장이 매수 여부를 정한다.
+            # 밴드·조건은 **rule 의 predicate**가 갖고 있다(하드코딩 상수 아님) → 승격/강등이
+            # 실제로 필터를 켜고 끄고, rule_evaluator 의 채점·강등 감시가 그대로 붙는다.
+            # 규약·전제(추가 불가·룰 선정분만 대상·fail-open)는 core/edge_execution 모듈 docstring.
+            # 갭은 대상·비대상·스킵 무관하게 **전건** audit 에 남긴다 — 비대상(점수 선정분)까지
+            # 기록해야 "범위를 넓혔다면 어땠을까"를 반사실로 계산할 수 있다.
+            if gap_filter:
+                gap = _nxt_gap_pct(c["price"], c.get("krx_close") or 0)
+                verdict = edge_execution.decide(
+                    report_rows.get(c["stk_cd"]), live_rules, gap, c["price"],
+                    rule_names=c["sig"].get("rule_names"),
+                    rank_no=c["sig"].get("rank_no"), score_top_n=score_top_n)
+                audit_log.append("nxt_gap_filter", c["stk_cd"], {
+                    "gap_pct": None if gap is None else round(gap, 3),
+                    "nxt_price": c["price"], "krx_close": c.get("krx_close") or None,
+                    "rule_names": c["sig"].get("rule_names") or None,
+                    "in_scope": verdict["in_scope"], "matched": verdict["matched"],
+                    "evaluated": verdict["evaluated"], "reason": verdict["reason"],
+                    "action": "buy" if verdict["buy"] else "skip",
+                    "shares": c["shares"]})
+                if not verdict["buy"]:
+                    logger.info("집행 rule 스킵 [%s] 갭 %.2f%% — %s (%d주 미집행)",
+                                c["stk_cd"], gap, verdict["reason"], c["shares"])
+                    signal_repo.update_status(c["sig"]["id"], "skipped",
+                                              note=f"집행 rule 미매칭(갭 {gap:.2f}%)")
+                    audit_log.append("buy_skip", c["stk_cd"], {
+                        "reason": "집행 레이어 rule 미매칭", "gap_pct": round(gap, 3),
+                        "evaluated": verdict["evaluated"],
+                        "rule_names": c["sig"].get("rule_names"), "shares": c["shares"]})
+                    c["bought"] = True
+                    continue
+
             _buy_candidate(engine, trade_date, c, cfg["exchange"], "종가 매수(마감 데드라인)",
                            cfg["deadline"])
     finally:
