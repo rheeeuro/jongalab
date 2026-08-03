@@ -4,14 +4,18 @@
 - 국내지수(코스피/코스닥)·선물: 한국투자증권(KIS) REST API
 - 그 외 지수(미국지수·원자재·환율): yfinance
 """
+import logging
 import math
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import yfinance as yf
 
 from core.repository.ticker import lookup_name_by_ticker
+
+logger = logging.getLogger("MarketData")
 
 
 # ── 키움 데이터 서버 클라이언트 (국내 종목 시세 — lazy singleton, HTTP) ──
@@ -94,6 +98,74 @@ def _kospi200_futures_sparkline() -> list[float] | None:
     return closes[-80:] if closes and len(closes) >= 2 else None
 
 
+# 선물 상세 차트 — 두 카드(K200NF/K200DF)가 같은 시계열을 쓰고 새로고침도 잦아 짧게 캐시한다.
+# (KIS 는 연속 호출에 레이트리밋이 걸려 빈 차트가 나올 수 있다 — 2026-08-03 실측)
+_FUT_CANDLE_TTL_SEC = 30
+_fut_candle_cache: dict[str, dict] = {}
+
+# 다일 구간은 거래일 수(일봉 개수)로 센다 — 야간선물 분봉 이력이 없는 과거는 일봉으로만 그린다.
+_FUT_DAILY_COUNT = {"1mo": 22, "5d": 5}
+
+
+def _kospi200_futures_candles(period: str) -> list[dict]:
+    """코스피200 근월물 **연속** 캔들 — 주간·야간을 한 시계열로. 상세 차트(K200NF/K200DF 공용).
+
+    두 카드는 같은 근월물 계약의 다른 세션이라 차트도 하나로 잇는 게 맞다. 종가베팅이
+    실제로 노출되는 구간(주간 종가 → 야간 → 익일 시가)이 한 화면에 보인다.
+      · period "1d" → 1분봉: 어젯밤 야간세션(DB kis_night_future_bar) + 오늘 주간세션(KIS 분봉).
+        야간 봉은 extended=True 로 표시해 차트가 흐리게 그린다.
+      · 그 외      → 일봉(KIS): 야간선물 분봉 이력은 2026-08-03 부터라 그 이전은 일봉만 가능하다.
+    실패 시 빈 리스트(차트가 '데이터 없음' 표시).
+    """
+    from core.kis_client import kospi200_front_month_code
+
+    cached = _fut_candle_cache.get(period)
+    now_ts = time.time()
+    if cached and now_ts - cached["at"] < _FUT_CANDLE_TTL_SEC:
+        return cached["data"]
+
+    try:
+        code = kospi200_front_month_code()
+        kis = _get_kis()
+    except Exception as e:
+        logger.warning(f"선물 근월물/클라이언트 준비 실패: {e}")
+        return []
+
+    candles: list[dict] = []
+    if period != "1d":
+        try:
+            candles = kis.inquire_futures_daily_ohlc(
+                code, count=_FUT_DAILY_COUNT.get(period, 22))
+        except Exception as e:
+            logger.warning(f"선물 일봉 조회 실패({period}): {e}")
+    else:
+        # 야간세션은 전날 18:00 에 열려 당일 05:05 에 닫힌다 → 전날 18:00 부터 긁는다.
+        night_start = (datetime.now() - timedelta(days=1)).replace(
+            hour=18, minute=0, second=0, microsecond=0)
+        try:
+            from core.repository.kis_night_future_bar import get_bars
+            for b in get_bars(night_start):
+                candles.append({
+                    "time": b["bar_time"].strftime("%Y-%m-%dT%H:%M"),
+                    "open": float(b["open"]), "high": float(b["high"]),
+                    "low": float(b["low"]), "close": float(b["close"]),
+                    "volume": 0.0,      # 야간 체결량은 WS 에서 수집하지 않는다
+                    "extended": True,   # 야간세션 — 차트에서 흐리게
+                })
+        except Exception as e:
+            logger.warning(f"야간선물 분봉 조회 실패: {e}")
+        try:
+            # 정규장 405분(09:00~15:45)을 덮으려면 페이지당 ~120봉 × 4
+            candles.extend(kis.inquire_futures_minute_ohlc(code, max_pages=4))
+        except Exception as e:
+            logger.warning(f"주간선물 분봉 조회 실패: {e}")
+        candles.sort(key=lambda c: c["time"])
+
+    if candles:                 # 실패(빈 결과)는 캐시하지 않는다 — 다음 요청에서 재시도
+        _fut_candle_cache[period] = {"at": now_ts, "data": candles}
+    return candles
+
+
 def _parse_num(val) -> float:
     """키움 응답 가격 문자열("+53,500", "-1200") → float. 빈값/이상치는 0."""
     if val is None:
@@ -147,7 +219,10 @@ KIS_INDICES = [
 ]
 
 # yfinance에 시계열이 없는 커스텀 심볼(코스피200 선물) — 배경 스파크라인 미제공.
+# yfinance 시계열이 없는 커스텀 심볼 — 카드 미니 스파크라인은 KIS 쪽에서 따로 채운다.
 _NO_SPARKLINE_SYMBOLS = {"K200NF", "K200DF"}
+# 상세 차트는 KIS(주간)+DB(야간)로 조립 — _kospi200_futures_candles
+_FUTURES_CHART_SYMBOLS = {"K200NF", "K200DF"}
 
 # 심볼 → 표시명 (상세 페이지·히스토리 응답에서 사용). 커스텀 선물명도 포함.
 _INDEX_NAMES = {
@@ -228,7 +303,12 @@ def fetch_index_ohlc(symbol: str, period: str = "5d", interval: str = "5m",
 
     반환: [{time:"YYYY-MM-DDTHH:MM", open, high, low, close, volume, extended}, ...] (오름차순).
       extended=True 는 정규장 밖(프리/애프터) 봉. 코스피/코스닥(^KS11/^KQ11)도 yfinance 시계열
-      을 쓴다(카드 라이브값은 KIS). 커스텀 심볼(코스피200 선물)·조회 실패 시 []."""
+      을 쓴다(카드 라이브값은 KIS). 조회 실패 시 [].
+
+    코스피200 선물(K200NF/K200DF)은 yfinance 에 없어 KIS+DB 로 따로 조립한다
+    (_kospi200_futures_candles — 주간·야간 연속, 야간 봉이 extended=True)."""
+    if symbol in _FUTURES_CHART_SYMBOLS:
+        return _kospi200_futures_candles(period)
     if symbol in _NO_SPARKLINE_SYMBOLS:
         return []
     try:
@@ -567,7 +647,6 @@ def _us_extended_one(symbol: str) -> dict:
 
 def fetch_us_extended() -> dict:
     """US_EXTENDED_SYMBOLS 각각의 정규장/확장시간 등락 스냅샷 {symbol: {...}}. 60s TTL 캐시."""
-    import time
     now = time.time()
     if _us_ext_cache["data"] is not None and now - _us_ext_cache["at"] < _US_EXT_TTL_SEC:
         return _us_ext_cache["data"]

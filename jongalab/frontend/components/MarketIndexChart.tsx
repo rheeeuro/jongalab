@@ -66,6 +66,14 @@ export function MarketIndexChart({
     ? "text-blue-600 dark:text-blue-400"
     : "text-slate-500 dark:text-slate-400";
   const hasExtended = candles.some((c) => c.extended);
+  // 코스피200 선물은 yfinance 가 아니라 KIS(주간 분봉)+DB(야간 분봉)로 조립한다 —
+  // 1일만 분봉이고 그 이상은 일봉이며, 흐린 봉의 의미도 프리/애프터가 아니라 야간세션이다.
+  const isFutures = symbol === "K200NF" || symbol === "K200DF";
+  const granularity = isFutures
+    ? range === "1d"
+      ? "1분봉 (야간세션 포함)"
+      : "일봉 (주간·야간 합산)"
+    : "분봉 (프리·애프터마켓 포함)";
 
   return (
     <div className="space-y-3">
@@ -115,17 +123,19 @@ export function MarketIndexChart({
           <CandlestickChart data={candles} fit />
         ) : (
           <p className="py-12 text-center text-sm text-slate-400">
-            이 지표는 분봉 차트 데이터를 제공하지 않습니다.
+            {isFutures
+              ? "선물 시세를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
+              : "이 지표는 분봉 차트 데이터를 제공하지 않습니다."}
           </p>
         )}
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-500 dark:text-slate-400">
-        <span>분봉 (프리·애프터마켓 포함)</span>
+        <span>{granularity}</span>
         {hasExtended && (
           <span className="flex items-center gap-1">
             <span className="inline-block h-2 w-2 rounded-sm bg-rose-300 dark:bg-rose-400/60" />
-            흐린 봉 = 정규장 밖(프리/애프터)
+            {isFutures ? "흐린 봉 = 야간세션(18:00~05:00)" : "흐린 봉 = 정규장 밖(프리/애프터)"}
           </span>
         )}
       </div>

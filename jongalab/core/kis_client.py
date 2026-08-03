@@ -88,6 +88,26 @@ def _to_float(val) -> float | None:
         return None
 
 
+def _futs_candle(row: dict, time_str: str, vol_field: str) -> dict | None:
+    """선물 차트 TR 의 output2 한 행 → 캔들 dict. OHLC 중 하나라도 없으면 None.
+
+    일봉(FHKIF03020100)·분봉(FHKIF03020200) 이 컬럼명을 공유하고 거래량 필드만 다르다
+    (일봉 acml_vol / 분봉 cntg_vol). 반환 shape 은 market_data.fetch_index_ohlc 와 동일.
+    """
+    o = _to_float(row.get("futs_oprc"))
+    h = _to_float(row.get("futs_hgpr"))
+    lo = _to_float(row.get("futs_lwpr"))
+    c = _to_float(row.get("futs_prpr"))
+    if None in (o, h, lo, c) or c == 0:
+        return None
+    return {
+        "time": time_str,
+        "open": round(o, 2), "high": round(h, 2),
+        "low": round(lo, 2), "close": round(c, 2),
+        "volume": _to_float(row.get(vol_field)) or 0.0,
+    }
+
+
 class KisRestClient:
     def __init__(self):
         self.app_key = KIS_APP_KEY
@@ -188,11 +208,12 @@ class KisRestClient:
             "change_percent": round(pct, 2) if pct is not None else None,
         }
 
-    def inquire_futures_daily_closes(self, symbol: str, count: int = 30) -> list[float]:
-        """국내선물 일별 종가 시계열 (오래된→최신 순). 카드 배경 스파크라인용.
+    def inquire_futures_daily_ohlc(self, symbol: str, count: int = 30) -> list[dict]:
+        """국내선물 일봉 OHLCV (오래된→최신 순). 상세 차트·스파크라인 공용 원본.
 
-        inquire-daily-fuopchartprice(FHKIF03020100) 일봉 output2 에서 종가(futs_prpr)만
-        추출한다. 실패하거나 데이터가 없으면 빈 리스트를 반환한다(호출부에서 graceful 처리).
+        inquire-daily-fuopchartprice(FHKIF03020100) output2 를 캔들로 옮긴다. 시각은
+        `YYYY-MM-DDT00:00` — 프론트 CandlestickChart 가 'T' 구분자를 요구해 일봉에도 붙인다.
+        일봉은 주간·야간 세션이 합쳐진 계약 단위 값이다. 실패/무데이터면 빈 리스트.
         """
         self.ensure_token()
         url = f"{self.base_url}{_FUTURES_CHART_PATH}"
@@ -218,21 +239,28 @@ class KisRestClient:
         resp.raise_for_status()
         rows = resp.json().get("output2") or []
 
-        dated = []
+        dated: list[tuple[str, dict]] = []
         for row in rows:
-            close = _to_float(row.get("futs_prpr"))
             d = row.get("stck_bsop_date") or ""
-            if close is not None and close != 0 and d:
-                dated.append((d, round(close, 2)))
+            candle = _futs_candle(row, f"{d[:4]}-{d[4:6]}-{d[6:]}T00:00", "acml_vol")
+            if d and candle:
+                dated.append((d, candle))
         dated.sort(key=lambda x: x[0])  # 날짜 오름차순(오래된→최신)
         return [c for _, c in dated][-count:]
 
-    def inquire_futures_minute_closes(self, symbol: str, count: int = 80) -> list[float]:
-        """국내선물 당일 분봉 종가 시계열 (오래된→최신 순). 카드 배경 분봉 스파크라인용.
+    def inquire_futures_daily_closes(self, symbol: str, count: int = 30) -> list[float]:
+        """국내선물 일별 종가 시계열 (오래된→최신 순). 카드 배경 스파크라인용."""
+        return [c["close"] for c in self.inquire_futures_daily_ohlc(symbol, count)]
 
-        inquire-time-fuopchartprice(FHKIF03020200) 1분봉 output2 에서 종가(futs_prpr)만
-        추출한다. 이 TR 은 기준시각(FID_INPUT_HOUR_1)에서 과거로 ~120봉을 준다. 실패/무데이터
-        시 빈 리스트(호출부에서 일봉 폴백).
+    def inquire_futures_minute_ohlc(self, symbol: str, max_pages: int = 1) -> list[dict]:
+        """국내선물 **당일** 1분봉 OHLCV (오래된→최신 순).
+
+        inquire-time-fuopchartprice(FHKIF03020200) 는 기준시각(FID_INPUT_HOUR_1)에서 과거로
+        ~120봉만 준다. 정규장 하루(09:00~15:45 = 405분)를 채우려면 가장 오래된 봉 시각을 다음
+        기준시각으로 넘기며 되짚어야 한다(max_pages=4 면 충분). 이 TR 은 당일 시초를 지나면
+        **전 거래일 오후로 이어지므로**(2026-08-03 실측) 당일 봉만 모으고 거기서 멈춘다.
+        max_pages 는 무한 루프 방어 상한 — 기본 1(카드 스파크라인은 최근 한 페이지면 족하다).
+        실패/무데이터면 빈 리스트(호출부에서 일봉 폴백).
         """
         self.ensure_token()
         url = f"{self.base_url}{_FUTURES_MIN_PATH}"
@@ -245,28 +273,58 @@ class KisRestClient:
             "Content-Type": "application/json; charset=UTF-8",
         }
         now = datetime.now()
-        params = {
-            "FID_COND_MRKT_DIV_CODE": "F",
-            "FID_INPUT_ISCD": symbol,
-            "FID_HOUR_CLS_CODE": "60",          # 60초 = 1분봉
-            "FID_PW_DATA_INCU_YN": "Y",         # 과거(장 시작~) 데이터 포함
-            "FID_FAKE_TICK_INCU_YN": "N",
-            "FID_INPUT_DATE_1": now.strftime("%Y%m%d"),  # 기준일(필수)
-            "FID_INPUT_HOUR_1": now.strftime("%H%M%S"),  # 기준시각(현재에서 과거로 ~120봉)
-        }
-        resp = self.session.get(url, headers=headers, params=params, timeout=_TIMEOUT)
-        resp.raise_for_status()
-        rows = resp.json().get("output2") or []
+        today = now.strftime("%Y%m%d")
+        day_iso = f"{today[:4]}-{today[4:6]}-{today[6:]}"
+        cursor_hour = now.strftime("%H%M%S")
+        bars: dict[str, dict] = {}          # "HHMM" → 캔들 (페이지 겹침 방어)
 
-        timed = []
-        for row in rows:
-            close = _to_float(row.get("futs_prpr"))
-            t = row.get("stck_cntg_hour") or ""
-            d = row.get("stck_bsop_date") or ""
-            if close is not None and close != 0 and t:
-                timed.append(((d, t), round(close, 2)))
-        timed.sort(key=lambda x: x[0])  # (일자, 시각) 오름차순(오래된→최신)
-        return [c for _, c in timed][-count:]
+        for _ in range(max(1, max_pages)):
+            params = {
+                "FID_COND_MRKT_DIV_CODE": "F",
+                "FID_INPUT_ISCD": symbol,
+                "FID_HOUR_CLS_CODE": "60",          # 60초 = 1분봉
+                "FID_PW_DATA_INCU_YN": "Y",         # 과거(장 시작~) 데이터 포함
+                "FID_FAKE_TICK_INCU_YN": "N",
+                "FID_INPUT_DATE_1": today,          # 기준일(필수)
+                "FID_INPUT_HOUR_1": cursor_hour,    # 기준시각(여기서 과거로 ~120봉)
+            }
+            try:
+                resp = self.session.get(url, headers=headers, params=params, timeout=_TIMEOUT)
+                resp.raise_for_status()
+                rows = resp.json().get("output2") or []
+            except Exception as e:
+                logger.warning(f"선물 분봉 조회 실패({symbol} {cursor_hour}): {e}")
+                break
+            if not rows:
+                break
+
+            today_rows = [r for r in rows if (r.get("stck_bsop_date") or "") == today]
+            added, oldest = 0, None
+            for row in today_rows:
+                t = (row.get("stck_cntg_hour") or "")[:4]
+                if len(t) < 4:
+                    continue
+                candle = _futs_candle(row, f"{day_iso}T{t[:2]}:{t[2:]}", "cntg_vol")
+                if not candle:
+                    continue
+                if t not in bars:
+                    bars[t] = candle
+                    added += 1
+                oldest = t if oldest is None else min(oldest, t)
+            # 전 거래일 구간에 닿았거나 새로 얻은 봉이 없으면(=더 되짚어도 소득 없음) 종료
+            if len(today_rows) < len(rows) or not added or oldest is None:
+                break
+            cursor_hour = f"{oldest}00"
+            if cursor_hour <= "000100":     # 자정 wrap 방어
+                break
+            cursor_hour = (datetime.strptime(cursor_hour, "%H%M%S")
+                           - timedelta(minutes=1)).strftime("%H%M%S")
+
+        return [bars[t] for t in sorted(bars)]
+
+    def inquire_futures_minute_closes(self, symbol: str, count: int = 80) -> list[float]:
+        """국내선물 당일 분봉 종가 시계열 (오래된→최신 순). 카드 배경 분봉 스파크라인용."""
+        return [c["close"] for c in self.inquire_futures_minute_ohlc(symbol)][-count:]
 
     def inquire_index_price(self, index_code: str) -> dict | None:
         """국내 업종/지수 현재가 조회. {price, change, change_percent} 또는 None.
