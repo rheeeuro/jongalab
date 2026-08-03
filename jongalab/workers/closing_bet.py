@@ -52,7 +52,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("ClosingBet")
 
 # 실제 매매(trade_signal)로 핸드오프하는 최대 종목 수.
-# Phase 2 유니버스는 전체 저장하고, 선정 레이어가 음전 후보를 제외한 뒤 selected 를 확정한다.
+# Phase 2 유니버스는 전체 저장하고, 선정 레이어가 모드(rule/점수)에 따라 selected 를 확정한다.
 TRADED_TOP_N = 10
 
 
@@ -317,8 +317,8 @@ class ClosingBetStrategy:
         filtered = []
         
         for c in candidates:
-            # 음전 종목도 정밀분석·저장한다. rule_evaluator 의 반사실 표본으로 쓰되,
-            # 실제 매매 선정은 _apply_selection 에서 change_pct >= 0 후보로 제한한다.
+            # 등락률 부호로 후보를 걸러내지 않는다 — 음전 후보도 정밀분석·저장하고
+            # 선정(_apply_selection)에서도 점수·rule 로 그대로 경쟁한다(2026-08-03 하드컷 제거).
 
             # 정배열/신고가는 하드 필터에서 점수 가점으로 전환 (2026-07-03) —
             # 필터가 풀을 하루 10개 미만까지 줄여 점수가 '선정'을 못 하던 문제 해소.
@@ -489,7 +489,7 @@ class ClosingBetStrategy:
         """Phase 2 분석 결과를 daily_stock_report 테이블에 저장.
 
         점수순 정렬된 유니버스 전체를 저장한다(엣지 연구용). selected 는 선정 레이어가
-        음전 후보를 제외한 뒤 확정하고, selected=1 만 trade_signal 로 핸드오프한다.
+        모드(rule/점수)에 따라 확정하고, selected=1 만 trade_signal 로 핸드오프한다.
         LLM 뉴스 요약도 선정(top-N) 후보에만 부여해 비용을 종전과 동일하게 유지한다.
         """
         # 섹터 상대치 파생 (F4 후발 확산형의 눈) — 유니버스 in-memory 계산, API 콜 없음.
@@ -736,6 +736,8 @@ class ClosingBetStrategy:
         rule_names 매핑을 반환한다. live rule 로드 실패 시 **모드 자체를 legacy 로 폴백**한다
         — rules 모드를 빈 rule 목록으로 진행하면 매칭 0=그날 무거래가 되어 '폴백'이 아니게 된다.
 
+        등락률 부호 조건은 없다(2026-08-03 제거) — 유니버스 전체가 점수·rule 로 경쟁한다.
+
         점수·rank_no·저장은 이 함수가 건드리지 않는다(대조군 평가·프론트 표시 불변).
         선정 시점(13~15시)엔 NXT 스냅샷·당일 market_snapshot 이 없어 그 피처 기반 rule 은
         매칭될 수 없다 — 그런 rule 의 live 승격 자체를 edge_policy 실행 가능성 게이트가 막는다.
@@ -756,14 +758,15 @@ class ClosingBetStrategy:
             else:
                 logger.warning(f"veto rule 로드 실패 — veto 미적용: {e}")
 
-        selection_reports = []
-        trade_rank = 0
-        for r in reports:
-            if (r.get("change_pct") or 0) < 0:
-                continue
-            trade_rank += 1
-            selection_reports.append({**r, "rank_no": trade_rank})
-        excluded_negative = len(reports) - len(selection_reports)
+        # 등락률 하드컷 없음(2026-08-03 제거, 사용자 결정) — 음전 후보도 점수·rule 로 경쟁한다.
+        #   유지 근거였던 것: 실집행 라벨로 음전 자체는 무해(음전 +0.65% vs 양전 +0.55%)하고
+        #   컷이 이기는 메커니즘은 대체효과였다. 제거 근거: 슬롯이 안 차는 날(양전<TOP_N)은 폭락일이라
+        #   선물 게이트가 종목별 수량을 이미 깎는다(실측 미달일 keep 0.42~0.86).
+        #   ⚠️ 감시 항목 — 컷이 막아온 '수급 좋은 음전 ↔ 수급 나쁜 양전' 교체는 6/26~7/31 반사실에서
+        #   13건/9일·exec_leg_ret -1.64%p 로 지는 교환이었다(음전 -1.32% vs 밀려난 양전 +0.32%).
+        #   총 시드는 미달일에도 축소되지 않는다(레짐/거시 게이트는 그날 시장을 보지 않음).
+        selection_reports = [{**r, "rank_no": i} for i, r in enumerate(reports, 1)]
+        negative_pool = sum(1 for r in reports if (r.get("change_pct") or 0) < 0)
 
         selected_codes, rule_names_by_code, veto_log = select_signals(
             mode, selection_reports, live_rules, veto_rules, TRADED_TOP_N, market=None,
@@ -782,7 +785,9 @@ class ClosingBetStrategy:
             f"선정 레이어(mode={mode}"
             f"{'←' + EDGE_SELECTION_MODE + ' 폴백' if mode != EDGE_SELECTION_MODE else ''}): "
             f"선정 {len(selected_codes)}건{' — 무거래' if not selected_codes else ''}, "
-            f"음전 연구표본 {excluded_negative}건 제외, veto {len(veto_log)}건"
+            f"후보 {len(reports)}건(음전 {negative_pool}건 포함), "
+            f"음전 선정 {sum(1 for r in reports if r['selected'] and (r.get('change_pct') or 0) < 0)}건, "
+            f"veto {len(veto_log)}건"
         )
         return rule_names_by_code
 
