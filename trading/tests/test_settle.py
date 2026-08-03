@@ -1,9 +1,10 @@
-"""settle._run_open_stage 순수 로직 테스트 — NXT 08:05 / KRX 개장 09:05 공용 단계 고정.
+"""settle._run_open_stage 순수 로직 테스트 — NXT 08:03 / KRX 개장 09:03 공용 단계 고정.
 
 검증 포인트(자금 경로):
   - 단계가 자기 대상 종목만 처리한다(NXT 단계=NXT 상장, KRX 개장 단계=NXT 미상장).
-  - 갭상승/갭하락에 따라 스탑선이 절반매도 체결가 / 시초가-버퍼로 정해진다.
-  - 절반=0(1주)이면 전량 매도하고 감시계획을 만들지 않는다.
+  - **갭상승은 전량 매도하고 감시계획을 만들지 않는다**(2026-08-03 잔량 트레일링 폐지).
+  - 갭하락은 절반 매도 + 스탑선 = 시초가-버퍼로 잔량 감시계획을 만든다.
+  - 갭하락 1주(절반=0)는 매도 없이 감시계획만 만든다(회복 대기).
 DB·네트워크 없이 fake 로 검증한다(conftest 철학 동일).
 """
 import pytest
@@ -42,9 +43,6 @@ def patched(monkeypatch):
     monkeypatch.setattr(settle, "sync_fills", lambda client: None)
     monkeypatch.setattr(settle.plan_repo, "upsert_plan",
                         lambda *a, **k: plans.append((a, k)))
-    # 갭상승 스탑선은 절반매도 실체결가 — 조회를 fallback(시초가)로 단순화
-    monkeypatch.setattr(settle, "_half_sell_fill_price",
-                        lambda trade_date, stk_cd, tag, fallback: fallback)
     return plans
 
 
@@ -56,7 +54,7 @@ def test_krx_open_targets_only_non_nxt(patched, monkeypatch):
     """KRX 개장 단계는 NXT 미상장 종목만 처리하고 NXT 상장 종목은 건너뛴다."""
     monkeypatch.setattr(settle.position_repo, "get_open_positions",
                         lambda: _positions(("AAA", 10, 10000), ("NXT1", 10, 10000)))
-    eng = FakeEngine(price=12000, nxt_codes={"NXT1"})  # 갭상승(12000>10000)
+    eng = FakeEngine(price=9000, nxt_codes={"NXT1"})  # 갭하락 — 절반매도 경로
 
     settle.run_krx_open(eng, "20260629")
 
@@ -90,26 +88,41 @@ def test_gap_down_stop_is_open_minus_buffer(patched, monkeypatch):
     assert kwargs["stop_price"] == round(9000 * (1 - STOP_BUFFER_PCT / 100))
 
 
-def test_gap_up_stop_is_half_sell_fill(patched, monkeypatch):
-    """갭상승이면 스탑선 = 절반매도 체결가(여기선 fallback=시초가)."""
+def test_gap_up_sells_full_qty_without_plan(patched, monkeypatch):
+    """갭상승이면 잔량 없이 전량 매도하고 감시계획을 만들지 않는다(2026-08-03 변경).
+
+    종전엔 절반만 팔고 잔량 스탑선을 절반매도 체결가(버퍼 0)로 뒀으나, 실체결 66건에서
+    잔량이 65/66건 더 싸게 팔려(중앙 보유 0분) 잔량 경로 자체를 없앴다.
+    """
     monkeypatch.setattr(settle.position_repo, "get_open_positions",
                         lambda: _positions(("AAA", 10, 10000)))
     eng = FakeEngine(price=12000, nxt_codes=set())  # 갭상승
 
     settle.run_krx_open(eng, "20260629")
 
-    (_, kwargs) = patched[0]
-    assert kwargs["stop_price"] == 12000
+    assert len(eng.sells) == 1
+    assert eng.sells[0]["qty"] == 10  # 절반(5)이 아니라 전량
+    assert eng.sells[0]["price"] == 12000 and eng.sells[0]["tag"] == "krxopen"
+    assert patched == [], "갭상승은 감시계획을 만들지 않는다"
 
 
-def test_single_share_full_sell_no_plan(patched, monkeypatch):
-    """1주(절반=0)는 전량 매도 없이 보유 유지 — execute_sell 호출 안 함, plan 도 안 만든다.
-
-    half=0 이라 절반매도가 없고 remaining=1>0 이지만, 절반=0 케이스는 회복 대기로 보유한다.
-    """
+def test_gap_up_single_share_sells_full(patched, monkeypatch):
+    """갭상승 1주도 전량(1주) 매도 — 종전엔 절반=0 이라 매도 없이 plan 만 만들었다."""
     monkeypatch.setattr(settle.position_repo, "get_open_positions",
                         lambda: _positions(("AAA", 1, 10000)))
     eng = FakeEngine(price=12000, nxt_codes=set())
+
+    settle.run_krx_open(eng, "20260629")
+
+    assert [s["qty"] for s in eng.sells] == [1]
+    assert patched == []
+
+
+def test_gap_down_single_share_holds_with_plan(patched, monkeypatch):
+    """갭하락 1주(절반=0)는 매도 없이 감시계획만 — 회복 대기(무변경)."""
+    monkeypatch.setattr(settle.position_repo, "get_open_positions",
+                        lambda: _positions(("AAA", 1, 10000)))
+    eng = FakeEngine(price=9000, nxt_codes=set())
 
     settle.run_krx_open(eng, "20260629")
 

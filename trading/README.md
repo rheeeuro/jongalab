@@ -57,7 +57,7 @@ trading/
 │       ├── order.py            # 주문 의도/전송 추적 + 멱등키
 │       ├── fill.py             # 체결 기록(수량·가격·수수료·세금)
 │       ├── position.py         # 보유 포지션(평단·실현손익)
-│       ├── settle_plan.py      # 청산 계획(stop_price, 트레일링)
+│       ├── settle_plan.py      # 청산 계획(stop_price, 트레일링) — 2026-08-03 이후 **갭하락 잔량만** 생성
 │       ├── risk_state.py       # 일자별 상태(주문수·실현손익·브레이커)
 │       ├── risk_config.py      # 리스크 한도 + 최초 시드 배율(SEED_INIT_MULT, JSON, 대시보드 편집)
 │       ├── blocklist.py        # 자동매매 제외 종목(수동 보유분)
@@ -100,8 +100,16 @@ signal_executor (KRX 15:00 / NXT 19:30)
         │
 fills_sync (15:31 / 19:55) · ka10076 체결 동기화 → position 갱신 + 매수 텔레그램 알림
         │
-settle --venue nxt (08:03)      · NXT 상장 종목: NXT 시초가로 갭 판정 → 절반 매도(tag=nxt) → settle_plan 생성
-settle --venue krx_open (09:03) · NXT 미상장 종목: KRX 개장가로 갭 판정 → 절반 매도(tag=krxopen) → settle_plan 생성
+settle --venue nxt (08:03)      · NXT 상장 종목: NXT 시초가로 갭 판정 (tag=nxt)
+settle --venue krx_open (09:03) · NXT 미상장 종목: KRX 개장가로 갭 판정 (tag=krxopen)
+  · **갭상승 → 전량 매도, settle_plan 없음 / 갭하락 → 절반 매도 + 저가이탈선(시초가−STOP_BUFFER_PCT) plan 생성**
+  · 갭상승 잔량 폐지 근거(2026-08-03 실체결 66건, 6/19~8/3): 종전 갭상승 스탑선은 '절반매도 체결가·버퍼 0'
+    이라 첫 하락틱에 걸려 **보유 중앙값 0분**(5분 내 56/66)에 시장가/IOC 로 스탑선보다 몇 틱 아래 체결됐다 —
+    잔량이 절반매도가보다 싸게 팔린 게 **65/66건**(평균 −0.49%), 트레일링이 상승을 실제로 따라간 건 1건뿐.
+    "시초가에 전량" 반사실이 잔량 +0.52%p·**포지션 +0.45%p/건(t=3.35)**, 기간·단계 분할 모두 양수.
+    초기 스탑 버퍼(0.5~3%)·트레일 완화·갭 크기 조건부는 전부 무효~마이너스 → 여유를 주는 게 아니라
+    잔량을 없애는 쪽이 개선. **갭하락은 부호가 반대**(버퍼 후 회복 대기가 즉시 전량보다 +0.78%p 유리, n=26)라 무변경.
+    같은 표본에서 '더 오래 보유'(09:28 −1.21%p / 15:20 −2.46%p)는 아웃샘플에서도 재기각.
   · 두 단계는 동일 전략(_run_open_stage 공용). 대상 종목 집합·거래소(NXT 최유리IOC / KRX 시장가)·tag 만 다르다.
   · NXT 미상장 종목은 NXT 호가가 없어 08:03 를 건너뛰고, KRX 정규장 개장(워밍업 후) 09:03 에 처리한다.
   · 집행 시각 :03 근거(실측): NXT 는 프리마켓 갭상승이 첫 5분간 식어 08:03 이 08:05 대비 평균 +0.35%
@@ -171,7 +179,7 @@ watchdog 은 **jongalab 통합 스케줄러의 dead-man's switch 도 겸한다**
 | 서킷브레이커 | `risk_engine.py` + `risk_state.py` | 일일 실현손실 ≤ -MAX_DAILY_LOSS 시 자동 킬스위치 발동 |
 | 하드 한도 | `risk_engine.py` | 일일 주문수(기본 20, **매수만 카운트** — 청산 매도는 제외). 종목당 명목금액·동시 보유종목수 상한은 제거됨(상위 종목 집중 배분을 위해 — `MAX_NOTIONAL_PER_NAME`/`MAX_POSITIONS` 는 `execution_engine` 폴백 사이징 용도로만 존치) |
 | 멱등키 | `execution_engine.py`, `order.py` | `YYYYMMDD:signal_id:side` UNIQUE — cron 재실행 중복 방지(거부 `:x<id>`, dead `:dead:<id>` 접미사로 키 해제 — id 로 고유성 보장) |
-| 하드 손절 / 트레일링 | `monitor.py`, `settle_plan.py` | HARD_STOP_LOSS_PCT 즉시 전량 / TRAIL_PCT 단조 상승 스톱. 지난밤 US 정규장 급락이면 하드손절 폭을 보수적으로 좁힘(`US_STOP_TIGHTEN_ENABLED`, 위 monitor 흐름) |
+| 하드 손절 / 트레일링 | `monitor.py`, `settle_plan.py` | HARD_STOP_LOSS_PCT 즉시 전량(plan 유무 무관 — 보유 포지션 전부) / TRAIL_PCT 단조 상승 스톱(**갭하락 잔량 plan 에만 해당** — 갭상승은 2026-08-03 부터 시초가 전량매도라 잔량이 없다). 지난밤 US 정규장 급락이면 하드손절 폭을 보수적으로 좁힘(`US_STOP_TIGHTEN_ENABLED`, 위 monitor 흐름) |
 | 실시간 피드 폴백 | `realtime_feed.py`, `kiwoom_data_client.py` | WS 캐시는 **TTL 5초**(`REALTIME_TTL_SEC`) 안의 값만 유효. 초과·무틱·미구독·다른 보드·피드 예외면 `get_fresh`→None 이라 기존 REST 경로로 폴백한다. 보드(KRX/NXT)가 다르면 **다른 보드로 폴백하지 않는다** — 잘못된 보드 가격으로 손절을 판정하는 것이 값이 없는 것보다 위험. 조용히 끊긴 WS 의 stale 가격으로 손절이 미발동하는 최악 실패를 이 TTL 하나가 막는다. WS 스레드는 메모리 캐시만 갱신하고 DB·주문은 전부 메인 루프에서 일어난다(재진입·락 없음) |
 | 매도 재시도 쿨다운 | `monitor.MonitorState` | 판정은 틱 즉시지만 **주문 전송은 종목별 `SELL_RETRY_COOLDOWN_SEC`(15초) 간격**. 거부도 전송이라 성공·거부 무관하게 카운트. 하한가 매도 거부가 초당 반복돼 유량 제한에 걸리고 정작 하한가 풀림을 놓치는 것을 막는다(2026-07-10 HLB 238건 → 초당 재시도면 시간당 수천 건) |
 | 불변 감사로그 | `audit_log.py` | append-only(UPDATE/DELETE 없음) |
@@ -248,6 +256,7 @@ cd trading/frontend && npm run dev                                        # 대�
 거시 이벤트 게이트 보유 창·severity 매핑·프록시 관찰 전용·미개입 분기(`macro_gate`),
 뉴스 베토 전량매도·0순위 우선·fail-safe(빈 판정/조회 실패에도 하드손절 정상)·venue 보류·TTL 캐시(`test_news_veto`),
 레버리지 ETF 치환 순수 로직(무매핑 무치환·코드/이름만 교체·원신호 id 유지·ETF 코드 결측 방어, `test_leverage_swap`),
+시초가 단계 분기(`test_settle`): 단계별 대상 종목, **갭상승=전량매도·plan 미생성**(1주 포함), 갭하락=절반매도+시초가−버퍼 plan,
 실시간 피드 폴백·틱 판정(`test_realtime_feed`): TTL 초과/미구독/다른 보드/피드 예외 → REST 폴백, 부호 붙은 현재가 절대값
 파싱, 체결통보 1회 소비, 등록 상한 캡, 틱 경로는 하드손절 즉시 집행하되 **트레일링 상향은 안 함**(15초 경로만 함),
 매도 거부 시 쿨다운이 재전송 억제·경과 후 재시도 허용, 체결 확인 시 스냅샷에서 제거.
