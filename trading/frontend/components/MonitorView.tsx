@@ -561,6 +561,13 @@ function BuyPreviewSection({
                   <p className="text-xs text-slate-400 tabular-nums">
                     {s.stk_cd} · {s.score.toFixed(1)}점
                   </p>
+                  {/* 확신도(선정 근거 수) — 2표 이상이면 비중을 그만큼 더 실은 종목이다. */}
+                  {s.conviction > 1 && (
+                    <p className="truncate text-[10px] font-bold text-indigo-600 dark:text-indigo-400">
+                      근거 {s.conviction}개 · 비중 증액
+                      {s.rule_names ? ` (${s.rule_names})` : ""}
+                    </p>
+                  )}
                 </div>
                 <div className="shrink-0 text-right">
                   {buying ? (

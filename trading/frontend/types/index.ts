@@ -146,6 +146,8 @@ export interface BuyPreviewStock {
   price: number; // 호출 시점 현재가 (0이면 조회 실패)
   shares: number; // 예상 배분 수량 (게이트 반영 후)
   cost: number; // 예상 매수금액 (shares × price)
+  conviction: number; // 선정 근거 수(표) — 1이면 등가중, 2 이상이면 그만큼 비중 증액
+  rule_names: string | null; // 선정 근거 rule name 콤마 목록 (점수순 선정은 null)
   keep: number | null; // 선물 섹터 게이트 keep-factor(<1이면 감액됨), 감액 없으면 null
   note: string | null; // "배분 0주(시드 부족)" / "현재가 없음" / "선물 게이트 감액" / null(매수 예정)
 }

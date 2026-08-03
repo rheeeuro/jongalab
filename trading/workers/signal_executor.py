@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
-from core.seed_allocator import allocate
+from core.seed_allocator import allocate, conviction_from_signal
 from core.regime_gate import seed_multiplier
 from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
 from core.macro_gate import macro_keep
@@ -308,7 +308,7 @@ def _buy_candidate(engine: ExecutionEngine, trade_date: str, c: dict,
         signal_repo.update_status(sig["id"], "done" if resp else "skipped", note=note)
         audit_log.append("buy_exec", stk, {
             "shares": c["shares"], "price": price, "reason": reason, "sent": bool(resp),
-            "partial_retry": partial or None})
+            "conviction": c.get("conviction"), "partial_retry": partial or None})
     except Exception as e:
         logger.error("시그널 %s 집행 실패: %s", sig["id"], e)
         signal_repo.update_status(sig["id"], "rejected", note=str(e))
@@ -434,7 +434,32 @@ def main() -> int:
          "price": engine.data.get_market_price(stk), "bought": False}
         for sig, stk, score in venue_items
     ]
+
+    # 확신도(선정 근거 수) 사이징 — 여러 근거에 동시 매칭된 종목에 그만큼 비중을 더 준다.
+    #   표 = 매칭 rule 수 + legacy 점수 1표(점수 top-N 포함 시). 점수 '크기' tilt 는 여전히 없다.
+    #   score_top_n 은 집행 레이어 rule 의 in_scope 판정(4-0)과 **같은 값**을 재사용한다.
+    #   조회 실패 시 None → 점수 표를 세지 않는다(보수적, 확신도를 부풀리지 않음).
+    today_iso = now.strftime("%Y-%m-%d")
+    try:
+        score_top_n = edge_rule_repo.get_selected_count(today_iso)
+    except Exception as e:
+        logger.warning("선정 종목 수 조회 실패 — 확신도에서 점수 표 제외: %s", e)
+        score_top_n = None
+    for c in cands:
+        c["conviction"] = conviction_from_signal(c["sig"], score_top_n)
+
     allocate(seed, cands)
+
+    # 확신도 표 수와 그 결과 수량을 전건 기록 — "근거가 많을수록 성적이 좋은가"를 사후 채점한다
+    # (미검증 가정이라 관찰 로그가 필수. 되돌리려면 .env SEED_CONVICTION_MAX_MULT=1.0).
+    conv = {c["stk_cd"]: {"conviction": c["conviction"], "shares": c["shares"],
+                          "rule_names": c["sig"].get("rule_names") or None,
+                          "rank_no": c["sig"].get("rank_no")}
+            for c in cands}
+    logger.info("확신도 사이징(점수 top-N=%s): %s", score_top_n,
+                {k: v["conviction"] for k, v in conv.items()})
+    audit_log.append("seed_conviction", None, {
+        "venue": args.venue, "seed": seed, "score_top_n": score_top_n, "stocks": conv})
 
     # 거시 이벤트 게이트 — 보유 창(매수→익일 시가)에 sev3 예정 이벤트(FOMC·CPI·고용)가 걸려 있으면
     #   총 노출 축소. 프록시(VIX·WTI·환율)는 관찰 전용으로 진단만 기록. 미개입 포함 매 판단을 audit.
@@ -484,7 +509,6 @@ def main() -> int:
         risk_config_repo.get_risk_config().get("NXT_GAP_FILTER_ENABLED", 0))
     live_rules: list[dict] = []
     report_rows: dict[str, dict] = {}
-    score_top_n: int | None = None
     if gap_filter:
         try:
             live_rules = edge_rule_repo.get_live_rules()
@@ -498,12 +522,10 @@ def main() -> int:
             gap_filter = False
         else:
             pend = [c for c in cands if not c["bought"]]
-            today_iso = datetime.now().strftime("%Y-%m-%d")
+            # score_top_n('점수 top-N 에도 들었는가' 판정의 N)은 확신도 사이징에서 이미 조회했다.
             try:
                 report_rows = edge_rule_repo.get_report_rows(
                     today_iso, [c["stk_cd"] for c in pend])
-                # '점수 top-N 에도 들었는가' 판정의 N — 그날 선정 종목 수로 근사(repo docstring).
-                score_top_n = edge_rule_repo.get_selected_count(today_iso)
             except Exception as e:
                 logger.warning("리포트 행 조회 실패 — 갭 필터 무개입: %s", e)
                 gap_filter = False

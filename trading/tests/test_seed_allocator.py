@@ -1,10 +1,12 @@
 """seed_allocator.allocate 골든 테스트 — 시드 배분(자금 분배)의 핵심 불변식 고정.
 
-불변식(등가중):
+불변식(확신도 등가중):
   - 점수 상위 TOP_N(=10) 개만 배분 대상 (그 밖은 0주) — 선정 컷은 점수순
-  - 선정된 종목엔 **등가중** 목표금액(seed/N) → 정수 주 내림(1차). 점수는 사이징에 무관
-    (실거래상 점수가 익일 청산 손익을 예측 못 해 점수비례 집중을 제거함)
-  - 잔여현금은 현재 투입액이 가장 적은 종목부터 채워 균형을 맞춘다(2차)
+  - 등가중 단위는 '종목'이 아니라 **선정 근거 1표**(`conviction`) — 표 비례 목표금액
+    (seed×w/Σw) → 정수 주 내림(1차). `conviction` 없으면 전원 1표 = 종전 등가중과 동일.
+    점수 '크기' 는 여전히 사이징에 무관(익일 손익 예측 실패 → 점수비례 집중 제거)
+  - 표 수 상한은 CONVICTION_MAX_MULT, 종목당 캡(MAX_NAME_PCT)은 확신도와 무관하게 적용
+  - 잔여현금은 **확신도 대비** 투입액(cost/w)이 가장 적은 종목부터 채워 표 비례를 맞춘다(2차)
   - 종목당 투입은 시드의 MAX_NAME_PCT(=25%, 2026-07-10 HLB 하한가 사건으로 50%→25%) 캡을
     넘지 않는다(고정금액 아닌 시드 대비). 캡이 시드 전량 투입보다 우선한다(잔여 현금 허용)
   - 예외: 주가가 캡을 넘는 고가주도 첫 1주는 cap×FIRST_SHARE_CAP_MULT(=2, 시드 50%)
@@ -17,7 +19,7 @@
 import pytest
 
 import core.seed_allocator as seed_allocator
-from core.seed_allocator import allocate
+from core.seed_allocator import allocate, conviction_from_signal
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +27,7 @@ def _pin_cap(monkeypatch):
     # .env 의 SEED_MAX_NAME_PCT 오버라이드와 무관하게 의도한 운영값(25%)으로 계약을 고정한다.
     monkeypatch.setattr(seed_allocator, "MAX_NAME_PCT", 0.25)
     monkeypatch.setattr(seed_allocator, "FIRST_SHARE_CAP_MULT", 2.0)
+    monkeypatch.setattr(seed_allocator, "CONVICTION_MAX_MULT", 3.0)
 
 
 def _total_cost(cands):
@@ -184,6 +187,74 @@ def test_zero_seed_allocates_nothing():
     cands = [{"stk_cd": "A", "score": 1, "price": 10000}]
     allocate(0, cands)
     assert cands[0]["shares"] == 0 and cands[0]["cost"] == 0
+
+
+def test_conviction_scales_target_amount():
+    # 근거 2표 종목(A)은 1표 종목보다 목표금액이 2배 — 8종목이라 캡(25%)에 안 걸리는 구간.
+    # 표 합 9 → A 목표 seed×2/9=222k(22주), 나머지 111k(11주). 잔여는 표 대비 투입이 가장
+    # 적은 A 로 흘러 23주. (등가중이었다면 전원 12주 근처였을 것)
+    cands = [{"stk_cd": f"S{i}", "score": 1, "price": 10_000,
+              "conviction": 2 if i == 0 else 1} for i in range(8)]
+    allocate(1_000_000, cands)
+    a, rest = cands[0], cands[1:]
+    assert a["shares"] == 23
+    assert all(c["shares"] == 11 for c in rest)
+    assert _total_cost(cands) <= 1_000_000
+
+
+def test_missing_conviction_is_equal_weight():
+    # conviction 키가 없으면 전원 1표 — 종전 등가중 결과와 완전히 같아야 한다(회귀 방지).
+    def fresh(with_conv):
+        return [{"stk_cd": f"S{i}", "score": 10 - i, "price": 7_000,
+                 **({"conviction": 1} if with_conv else {})} for i in range(6)]
+    plain, ones = fresh(False), fresh(True)
+    allocate(500_000, plain)
+    allocate(500_000, ones)
+    assert [c["shares"] for c in plain] == [c["shares"] for c in ones]
+
+
+def test_conviction_clamped_at_max_mult(monkeypatch):
+    # 표가 10개여도 CONVICTION_MAX_MULT(=3) 배까지만 실어준다. 캡을 풀어 클램프만 본다.
+    monkeypatch.setattr(seed_allocator, "MAX_NAME_PCT", 1.0)
+    cands = [{"stk_cd": f"S{i}", "score": 1, "price": 10_000,
+              "conviction": 10 if i == 0 else 1} for i in range(4)]
+    allocate(1_000_000, cands)
+    # 클램프 3 → 표합 6 → A 목표 500k(50주). 클램프가 없었다면 표합 13 → 76주였다.
+    assert cands[0]["shares"] == 50
+
+
+def test_conviction_cannot_break_per_name_cap():
+    # 확신도가 높아도 종목당 캡(시드 25%)은 그대로다 — 하한가 1방 손실 봉쇄는 캡만이 한다.
+    cands = [
+        {"stk_cd": "A", "score": 2, "price": 10_000, "conviction": 3},
+        {"stk_cd": "B", "score": 1, "price": 10_000, "conviction": 1},
+    ]
+    allocate(1_000_000, cands)
+    assert cands[0]["cost"] <= 250_000
+
+
+def test_leftover_greedy_follows_conviction(monkeypatch):
+    # 잔여 재투입은 '투입액'이 아니라 '표 대비 투입액(cost/w)'이 가장 적은 종목으로 간다.
+    # 표 2:1 → 목표 66.6k(6주)/33.3k(3주), 잔여 10k. 종전(원시 cost 기준)이면 투입이 적은
+    # B 가 받아 6:4 가 됐겠지만, 표 대비로는 동률이라 안정 정렬로 A(상위) 가 받아 7:3 이 된다.
+    monkeypatch.setattr(seed_allocator, "MAX_NAME_PCT", 1.0)
+    cands = [
+        {"stk_cd": "A", "score": 2, "price": 10_000, "conviction": 2},
+        {"stk_cd": "B", "score": 1, "price": 10_000, "conviction": 1},
+    ]
+    allocate(100_000, cands)
+    assert (cands[0]["shares"], cands[1]["shares"]) == (7, 3)
+
+
+def test_conviction_counts_rules_plus_legacy_score():
+    # 표 = 매칭 rule 수 + legacy 점수 1표(점수 top-N 에도 들었으면). 최소 1.
+    assert conviction_from_signal({"rule_names": None, "rank_no": 3}, 10) == 1      # 점수만
+    assert conviction_from_signal({"rule_names": "a,b", "rank_no": 15}, 10) == 2    # rule 2개
+    assert conviction_from_signal({"rule_names": "a,b", "rank_no": 3}, 10) == 3     # rule 2 + 점수
+    assert conviction_from_signal({"rule_names": "a", "rank_no": None}, 10) == 1    # rank 모름
+    assert conviction_from_signal({"rule_names": "a,b", "rank_no": 3}, None) == 2   # N 모름=보수적
+    assert conviction_from_signal({"rule_names": "a,a", "rank_no": 15}, 10) == 1    # 중복 태그 1표
+    assert conviction_from_signal({}, None) == 1                                    # 재료 없음
 
 
 def test_no_internal_weight_key_leaks():

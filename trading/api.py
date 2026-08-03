@@ -26,9 +26,10 @@ from core.repository import audit_log
 from core.repository import blocklist as blocklist_repo
 from core.repository import leverage_map as leverage_map_repo
 from core.repository import settle_plan as settle_plan_repo
+from core.repository import edge_rule as edge_rule_repo
 from core.kiwoom_data_client import KiwoomDataClient, to_int
 from core.kiwoom_order_client import KiwoomOrderClient
-from core.seed_allocator import allocate
+from core.seed_allocator import allocate, conviction_from_signal
 from core.regime_gate import seed_multiplier
 from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
 from core.macro_gate import macro_keep, month_events
@@ -308,6 +309,15 @@ def buy_preview(date: str | None = None):
         logger.warning("buy-preview 가용현금 조회 실패: %s", e)
         cash = 0
 
+    # 확신도(선정 근거 수) — executor 와 동일하게 계산해 미리보기 수량이 실집행과 어긋나지 않게 한다.
+    try:
+        score_top_n = edge_rule_repo.get_selected_count(datetime.now().strftime("%Y-%m-%d"))
+    except Exception as e:
+        logger.warning("buy-preview 선정 종목 수 조회 실패 — 확신도에서 점수 표 제외: %s", e)
+        score_top_n = None
+    for c in classified:
+        c["conviction"] = conviction_from_signal(c["sig"], score_top_n)
+
     # 최초 시드 배율 — base 시드에 곱해 게이트 감액보다 먼저 적용(executor 와 동일, 대시보드 설정).
     seed_init_mult = risk_config_repo.get_risk_config().get("SEED_INIT_MULT", 1.0)
     # 롤링 엣지 게이트(레짐) 배수 — 두 거래소 시드에 공통 적용(executor 와 동일).
@@ -327,7 +337,8 @@ def buy_preview(date: str | None = None):
         if seed_init_mult < 1.0:
             seed_base = int(seed_base * seed_init_mult)  # 최초 시드 배율(게이트 감액보다 먼저)
         seed = int(seed_base * regime_mult) if regime_mult < 1.0 else seed_base
-        cands = [{"stk_cd": c["sig"]["stk_cd"], "score": c["score"], "price": c["price"]} for c in items]
+        cands = [{"stk_cd": c["sig"]["stk_cd"], "score": c["score"], "price": c["price"],
+                  "conviction": c["conviction"]} for c in items]
         allocate(seed, cands)
 
         # 선물 섹터 게이트 — 배분 뒤 섹터별 keep 으로 수량 감액(집행과 동일). 코스피 축은 거래소별
@@ -355,6 +366,9 @@ def buy_preview(date: str | None = None):
                 "price": c["price"],
                 "shares": shares,
                 "cost": cost,
+                # 확신도 표 수(1=근거 1개=등가중). 2 이상이면 그만큼 비중을 더 실은 종목이다.
+                "conviction": c["conviction"],
+                "rule_names": sig.get("rule_names") or None,
                 "keep": round(keep, 3) if keep < 1.0 else None,
                 "note": note,
             })
