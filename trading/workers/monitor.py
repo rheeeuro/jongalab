@@ -20,6 +20,12 @@
 ⚠️ 실시간 피드는 **항상 옵셔널**이다. 연결 실패·틱 없음·TTL 초과면 `check_once`(15초 REST
 경로)가 그대로 판정하므로, WS 가 죽어도 현행 동작과 동일하게 감시가 유지된다.
 
+수급 관측(2026-08-03, `SUPPLY_FEED_ENABLED`) — **판정에 쓰지 않는 수집 전용**이다. 매도 발동
+payload 에 그 시점 체결강도·프로그램 순매수를 붙이고(`_supply_snapshot`), 매도 안 한 종목의
+대조군으로 `SUPPLY_LOG_SEC` 주기 스냅샷(`monitor_supply`)을 남긴다. 이 축은 과거 데이터가
+없어(ka90008 은 date 를 무시하고 당일치만 반환) 백테스트가 불가능해 먼저 쌓는 단계다.
+값이 없거나 낡아도, 관측이 통째로 실패해도 손절·스탑·트레일링 동작은 완전히 동일하다.
+
 가동 구간은 평일 08:00~09:30 (NXT 개장 직후 ~ KRX 데드라인 + 여유)으로 한정한다.
 08:00·09:00 정각 1분은 시가 단일가 체결 전 stale 가격 오발동 위험이 있어 평가를 스킵한다.
 settle KRX 단계(09:28)가 데드라인으로 미체결 잔량을 강제 청산한다.
@@ -45,6 +51,8 @@ from core.config import (
     REALTIME_FEED_ENABLED,
     MONITOR_TICK_WAIT_SEC,
     SELL_RETRY_COOLDOWN_SEC,
+    SUPPLY_FEED_ENABLED,
+    SUPPLY_LOG_SEC,
 )
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
@@ -72,6 +80,26 @@ def _beat(payload: dict) -> None:
         audit_log.append("monitor_poll", None, payload)
     except Exception as e:
         logger.warning("하트비트 기록 실패: %s", e)
+
+
+def _log_supply(state: "MonitorState", now: datetime) -> None:
+    """보유 종목의 수급 스냅샷을 SUPPLY_LOG_SEC 주기로 audit_log 에 남긴다(관측 전용).
+
+    발동 시점(payload 첨부)만으로는 '매도 안 한 종목의 수급'이 안 남아 대조군이 없다.
+    주기 로그가 그 대조군이다 — 나중에 '수급이 나빴는데 버틴 종목이 어떻게 됐나'를 본다.
+    순수 로깅이라 실패는 삼킨다."""
+    for stk_cd, pos in list(state.positions.items()):
+        if pos["qty"] < 1:
+            continue
+        snap = _supply_snapshot(state, stk_cd, now)
+        if not snap:
+            continue
+        try:
+            cur = state.feed.get_fresh(stk_cd, prefer_nxt=not _in_krx_session(now))
+            audit_log.append("monitor_supply", stk_cd,
+                             {"avg_price": pos["avg_price"], "cur": cur, **snap})
+        except Exception as e:
+            logger.warning("수급 관측 기록 실패 [%s]: %s", stk_cd, e)
 
 
 # ── 오버나잇 US 결과로 하드손절 강화 (KRX 보유분 대비책) ──
@@ -201,6 +229,7 @@ class MonitorState:
         self.last_sell: dict[str, float] = {}  # 종목 → 마지막 매도 '전송 시도' ts(쿨다운 기준)
         self.last_slow_ts: float = 0.0         # 직전 15초 판정 시각(틱 이득 사후 채점용)
         self.cooldown_skips: int = 0           # 쿨다운으로 억제한 재전송 횟수(하트비트 노출)
+        self.feed = None                       # 수급 관측용 참조(없으면 관측만 생략)
 
     def refresh(self) -> None:
         """15초 주기 스냅샷 갱신. 베토 조회는 실패/비활성 시 {} — 감시 루프는 계속 돈다."""
@@ -238,6 +267,22 @@ def _lag_payload(state: MonitorState, path: str) -> dict:
     return out
 
 
+def _supply_snapshot(state: MonitorState, stk_cd: str, now: datetime) -> dict:
+    """관측용 수급 스냅샷(체결강도·프로그램 순매수). 없거나 실패면 {} — 판정에 쓰지 않는다.
+
+    2026-08-03 Phase 1(수집 전용). 매도 발동 payload 와 1분 주기 로그에 같은 모양으로 실려,
+    나중에 "발동 시점 수급이 이후 가격과 관계있나"를 채점할 수 있게 한다. 이 값으로 매도
+    여부가 갈리지 않으므로 stale·결측이 위험을 만들지 않는다(그래서 예외도 삼킨다)."""
+    feed = state.feed
+    if not SUPPLY_FEED_ENABLED or feed is None:
+        return {}
+    try:
+        data = feed.get_supply(stk_cd, prefer_nxt=not _in_krx_session(now))
+    except Exception:  # 관측 실패가 매도 경로를 막아선 안 된다
+        return {}
+    return {"supply": data} if data else {}
+
+
 def _evaluate_position(engine: ExecutionEngine, state: MonitorState, stk_cd: str,
                        pos: dict, cur: int, hard_pct: float, now: datetime,
                        allow_trail: bool, path: str) -> None:
@@ -248,7 +293,8 @@ def _evaluate_position(engine: ExecutionEngine, state: MonitorState, stk_cd: str
     """
     plan = state.plans.get(stk_cd)
     trade_date = plan["trade_date"] if plan else now.strftime("%Y%m%d")
-    diag = _lag_payload(state, path)
+    # diag 는 아래 모든 발동 payload 에 `**diag` 로 실린다 — 수급 스냅샷도 여기서 한 번만 붙인다.
+    diag = {**_lag_payload(state, path), **_supply_snapshot(state, stk_cd, now)}
 
     # 0) 뉴스 베토: 밤사이 중대 악재 판정(jongalab news_guard) 종목은 가격 무관 즉시 전량매도.
     #    하드손절보다 앞 — 갭이 아직 가격에 반영되기 전에도(악재 확인 즉시) 탈출한다.
@@ -489,7 +535,9 @@ def main() -> int:
     engine = ExecutionEngine()
     state = MonitorState()
     feed = _start_feed(engine)
+    state.feed = feed  # 수급 관측 스냅샷 출처(없으면 관측만 생략, 판정은 무영향)
     last_slow = 0.0
+    last_supply = 0.0
     try:
         while in_window(datetime.now()):
             now = datetime.now()
@@ -513,6 +561,11 @@ def main() -> int:
                     beat["ws"] = feed.stats()
                     _sync_feed_symbols(engine, state, feed)
                 _beat(beat)
+
+                # 수급 관측(판정 미사용) — 종목당 SUPPLY_LOG_SEC 주기로 스냅샷 1행
+                if SUPPLY_FEED_ENABLED and time.time() - last_supply >= SUPPLY_LOG_SEC:
+                    _log_supply(state, now)
+                    last_supply = time.time()
 
             if feed is None:
                 time.sleep(POLL_SEC)  # 피드 없음 → 종전 15초 폴링 그대로

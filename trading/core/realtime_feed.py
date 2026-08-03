@@ -1,4 +1,4 @@
-"""키움 REST API WebSocket 실시간 피드 — 시세(0B 주식체결) + 주문체결통보(00). 읽기 전용 구독.
+"""키움 REST API WebSocket 실시간 피드 — 시세(0B 주식체결) + 주문체결통보(00) + 수급 관측(0w). 읽기 전용 구독.
 
 폴링을 대체하는 목적은 두 가지다:
   1) **손절 지연 제거** — 15초 폴링은 노이즈를 필터하는 게 아니라 무작위로 샘플링한다.
@@ -21,6 +21,11 @@
   PING   수신값을 그대로 되돌려준다(연결 유지)
   틱     {"trnm":"REAL","data":[{"type":"0B","item":"000660","values":{...}}]}
          values: "10" 현재가(±부호) · "20" 체결시각(HHMMSS) · "9081" 거래소(KRX|NXT)
+
+수급 관측(2026-08-03, `SUPPLY_FEED_ENABLED`) — **판정에 쓰지 않는 수집 전용 축**이다.
+0B 틱에 이미 체결강도·매수/매도 체결량이 실려 오고(추가 구독 0), 프로그램 순매수는 0w 를
+별도 그룹으로 구독해 받는다. 이 축은 과거 데이터가 없어(ka90008 은 date 를 무시하고 당일치만
+반환) 백테스트가 불가능해서, 먼저 쌓고 나중에 검증한다. 값이 없거나 낡아도 손절·스탑은 무영향.
 """
 import json
 import logging
@@ -32,6 +37,7 @@ from core.config import (
     KIWOOM_WS_MOCK_URL,
     KIWOOM_USE_MOCK,
     REALTIME_TTL_SEC,
+    SUPPLY_FEED_ENABLED,
 )
 from core.kiwoom_data_client import to_int
 from core.repository import kiwoom_token as token_repo
@@ -40,6 +46,16 @@ logger = logging.getLogger("RealtimeFeed")
 
 _TYPE_TRADE = "0B"        # 주식체결(시세)
 _TYPE_FILL = "00"         # 주문체결통보(계정 단위)
+_TYPE_PROGRAM = "0w"      # 종목별프로그램매매(수급 관측 — 판정 미사용)
+
+# 수급 관측 필드(2026-08-03 실측 탐침). **판정에 쓰지 않는다** — audit_log 수집 전용.
+#   0B 는 이미 구독 중이라 추가 비용 0. 필드 의미는 산술 교차검증으로 확정했다:
+#     체결강도(228) == 매수체결량(1031)/매도체결량(1030)*100  (삼성 78.13, NXT 53.60 일치)
+#     매수비율(1032) == 1031/(1030+1031)                      (43.86 / 34.90 일치, 음수=매도우위)
+_FIELDS_TRADE = {"228": "cntr_str", "1030": "sell_qty", "1031": "buy_qty", "1032": "buy_ratio"}
+#   0w 프로그램매매: 순매수수량(210) == 매수수량(206)-매도수량(202), 금액(212, 백만원)도 동일 관계
+_FIELDS_PROGRAM = {"202": "prm_sell_qty", "206": "prm_buy_qty", "210": "prm_net_qty",
+                   "212": "prm_net_amt", "211": "prm_net_amt_irds"}
 _RECV_TIMEOUT = 3.0       # recv 대기 상한(초) — stop() 반응성 확보
 _RECONNECT_WAIT = (1, 2, 5, 10, 15)  # 재연결 백오프(초)
 _MAX_ITEMS = 90           # 키움 실시간 등록 상한(≈97) 대비 안전 여유
@@ -58,23 +74,30 @@ class KiwoomRealtimeFeed:
 
     def __init__(self, symbols: dict[str, bool] | None = None,
                  ttl_sec: float = REALTIME_TTL_SEC, url: str | None = None,
-                 subscribe_fills: bool = True):
+                 subscribe_fills: bool = True,
+                 subscribe_supply: bool = SUPPLY_FEED_ENABLED):
         # symbols: {stk_cd: nxt_enabled} — nxt_enabled 면 `_NX` 심볼도 함께 구독
         self._symbols: dict[str, bool] = dict(symbols or {})
         self._ttl = ttl_sec
         self._url = url or (KIWOOM_WS_MOCK_URL if KIWOOM_USE_MOCK else KIWOOM_WS_URL)
         self._subscribe_fills = subscribe_fills
+        self._subscribe_supply = subscribe_supply
 
         self._lock = threading.Lock()
         self._px: dict[tuple[str, str], tuple[int, float]] = {}  # (코드, 보드) → (가격, 수신ts)
+        # (코드, 보드) → (수급 필드, 수신ts). 관측 전용이라 가격 캐시와 분리한다 —
+        # 여기 값이 낡거나 비어도 손절·스탑 판정은 영향받지 않아야 한다.
+        self._supply: dict[tuple[str, str], tuple[dict, float]] = {}
         self._tick_event = threading.Event()
         self._fill_event = threading.Event()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
-        self._registered: set[str] = set()   # 현재 세션에 REG 된 item
+        self._registered: set[str] = set()   # 현재 세션에 REG 된 item(0B)
+        self._registered_supply: set[str] = set()  # 현재 세션에 REG 된 item(0w)
         self._connected = False
         self._ticks = 0
+        self._supply_ticks = 0
         self._fills = 0
         self._reconnects = 0
         self._last_error: str | None = None
@@ -120,6 +143,20 @@ class KiwoomRealtimeFeed:
             return None
         return price or None
 
+    def get_supply(self, stk_cd: str, prefer_nxt: bool) -> dict | None:
+        """관측용 수급 스냅샷(체결강도·프로그램 순매수) + 수신 나이. 없으면 None.
+
+        ⚠️ **판정에 쓰지 않는다**(2026-08-03 Phase 1 = 수집 전용). 가격과 달리 TTL 로 버리지
+        않고 `age_sec` 를 함께 담아 돌려준다 — '언제 온 값인지'까지가 연구 대상이고, 이 값으로
+        매도하지 않으므로 stale 이 위험을 만들지 않는다."""
+        board = "NXT" if prefer_nxt else "KRX"
+        with self._lock:
+            hit = self._supply.get((stk_cd, board))
+        if not hit:
+            return None
+        data, ts = hit
+        return {**data, "board": board, "age_sec": round(time.time() - ts, 1)}
+
     def age(self, stk_cd: str, prefer_nxt: bool) -> float | None:
         """해당 보드 최신 틱의 나이(초). 없으면 None."""
         board = "NXT" if prefer_nxt else "KRX"
@@ -147,6 +184,7 @@ class KiwoomRealtimeFeed:
         with self._lock:
             n = len(self._px)
         return {"connected": self._connected, "ticks": self._ticks, "fills": self._fills,
+                "supply_ticks": self._supply_ticks,
                 "reconnects": self._reconnects, "symbols": n,
                 "last_tick_age": round(time.time() - self._last_tick_ts, 1) if self._last_tick_ts else None,
                 "error": self._last_error}
@@ -204,6 +242,7 @@ class KiwoomRealtimeFeed:
         async with websockets.connect(self._url, ping_interval=None, max_size=None) as ws:
             await ws.send(json.dumps({"trnm": "LOGIN", "token": token}))
             self._registered.clear()
+            self._registered_supply.clear()
 
             while not self._stop.is_set():
                 try:
@@ -243,14 +282,24 @@ class KiwoomRealtimeFeed:
             await ws.send(json.dumps({
                 "trnm": "REG", "grp_no": "2", "refresh": "1",
                 "data": [{"item": [""], "type": [_TYPE_FILL]}]}))
-        pending = [i for i in self._items() if i not in self._registered]
-        if not pending:
+        items = self._items()
+        pending = [i for i in items if i not in self._registered]
+        if pending:
+            await ws.send(json.dumps({
+                "trnm": "REG", "grp_no": "1", "refresh": "1",
+                "data": [{"item": pending, "type": [_TYPE_TRADE]}]}))
+            self._registered.update(pending)
+            logger.info("실시간 구독 등록 %d종목: %s", len(pending), ",".join(pending))
+        # 수급 관측(0w)은 **별도 그룹**으로 등록한다 — 거부돼도 시세(0B) 구독이 흔들리지 않게.
+        if not self._subscribe_supply:
             return
-        await ws.send(json.dumps({
-            "trnm": "REG", "grp_no": "1", "refresh": "1",
-            "data": [{"item": pending, "type": [_TYPE_TRADE]}]}))
-        self._registered.update(pending)
-        logger.info("실시간 구독 등록 %d종목: %s", len(pending), ",".join(pending))
+        pending_supply = [i for i in items if i not in self._registered_supply]
+        if pending_supply:
+            await ws.send(json.dumps({
+                "trnm": "REG", "grp_no": "3", "refresh": "1",
+                "data": [{"item": pending_supply, "type": [_TYPE_PROGRAM]}]}))
+            self._registered_supply.update(pending_supply)
+            logger.info("수급 관측 구독 등록 %d종목(0w)", len(pending_supply))
 
     def _on_real(self, msg: dict) -> None:
         now = time.time()
@@ -261,19 +310,43 @@ class KiwoomRealtimeFeed:
                 self._fills += 1
                 self._fill_event.set()
                 continue
-            if dtype != _TYPE_TRADE:
-                continue
             item = str(d.get("item") or "")
             values = d.get("values") or {}
-            price = abs(to_int(values.get("10")))
-            if not item or price <= 0:
+            if not item:
                 continue
             code = item[:-3] if item.endswith("_NX") else item
             board = str(values.get("9081") or ("NXT" if item.endswith("_NX") else "KRX")).upper()
+            if dtype == _TYPE_PROGRAM:
+                # 프로그램매매(수급 관측) — 가격 캐시·틱 이벤트는 건드리지 않는다.
+                # 이 타입으로 손절이 판정되거나 대기가 깨지면 안 된다(관측 전용).
+                self._merge_supply(code, board, values, _FIELDS_PROGRAM, now)
+                self._supply_ticks += 1
+                continue
+            if dtype != _TYPE_TRADE:
+                continue
+            price = abs(to_int(values.get("10")))
+            if price <= 0:
+                continue
             with self._lock:
                 self._px[(code, board)] = (price, now)
+            if self._subscribe_supply:
+                self._merge_supply(code, board, values, _FIELDS_TRADE, now)
             self._ticks += 1
             self._last_tick_ts = now
             got_tick = True
         if got_tick:
             self._tick_event.set()
+
+    def _merge_supply(self, code: str, board: str, values: dict,
+                      fields: dict[str, str], now: float) -> None:
+        """수급 필드를 (코드, 보드) 슬롯에 병합한다(0B 체결 + 0w 프로그램이 한 스냅샷을 이룬다).
+
+        누락 필드는 기존 값을 유지한다 — 0B 와 0w 는 갱신 주기가 달라 매 틱이 반쪽짜리다."""
+        picked = {name: values[fid] for fid, name in fields.items() if fid in values}
+        if not picked:
+            return
+        with self._lock:
+            prev = self._supply.get((code, board))
+            merged = dict(prev[0]) if prev else {}
+            merged.update(picked)
+            self._supply[(code, board)] = (merged, now)

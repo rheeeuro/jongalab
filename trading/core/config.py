@@ -203,6 +203,15 @@ MONITOR_TICK_WAIT_SEC = float(os.getenv('MONITOR_TICK_WAIT_SEC', '1.0'))
 #   간격만 현행 폴링 주기로 고정한다.
 SELL_RETRY_COOLDOWN_SEC = float(os.getenv('SELL_RETRY_COOLDOWN_SEC', '15'))
 
+# ── 실시간 수급 관측 (2026-08-03, Phase 1 = 수집 전용) ──
+# 체결강도·프로그램 순매수를 WS 에서 받아 **audit_log 에 기록만** 한다. 판정에는 쓰지 않는다.
+# 목적: 이 축은 과거 데이터가 없어(ka90008 은 date 파라미터를 무시하고 당일치만 반환) 백테스트가
+#   불가능하다 → 매도 판정 시점의 수급을 먼저 쌓아야 "수급으로 손절을 앞당길 수 있나"를 검증한다.
+# 끄면 0w 구독과 기록이 사라질 뿐, 손절/스탑/트레일링 동작은 완전히 동일하다.
+SUPPLY_FEED_ENABLED = os.getenv('SUPPLY_FEED_ENABLED', '1') == '1'
+# 관측 스냅샷 기록 주기(초) — 종목당 이 간격으로 audit_log 1행.
+SUPPLY_LOG_SEC = float(os.getenv('SUPPLY_LOG_SEC', '60'))
+
 # ── ⚠️ 매매 안전장치 ──
 # 'paper': 모의(주문 미전송, 의도만 로깅·기록) / 'live': 실주문 전송. 기본값은 paper.
 TRADING_MODE = os.getenv('TRADING_MODE', 'paper').lower()

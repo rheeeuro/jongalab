@@ -72,6 +72,57 @@ def test_item_over_limit_is_capped():
     assert len(feed._items()) <= 90
 
 
+# ── 1-b. 수급 관측(0B 부가 필드 + 0w) — 수집 전용이라 판정에 영향이 없어야 한다 ──
+
+def test_supply_fields_parsed_from_trade_tick():
+    """0B 틱의 체결강도·매수/매도 체결량이 수급 스냅샷으로 들어간다(추가 구독 없이)."""
+    feed = KiwoomRealtimeFeed(symbols={"005930": False}, subscribe_supply=True)
+    feed._on_real({"trnm": "REAL", "data": [{"type": "0B", "item": "005930", "values": {
+        "10": "-244000", "9081": "KRX", "228": "78.13",
+        "1030": "4867438", "1031": "3802879", "1032": "-43.86"}}]})
+    s = feed.get_supply("005930", prefer_nxt=False)
+    assert s["cntr_str"] == "78.13" and s["sell_qty"] == "4867438"
+    assert s["buy_qty"] == "3802879" and s["buy_ratio"] == "-43.86"
+    assert s["board"] == "KRX" and "age_sec" in s
+
+
+def test_program_tick_merges_and_never_moves_price():
+    """0w(프로그램매매)는 수급에만 병합되고 가격·틱 이벤트는 건드리지 않는다."""
+    feed = KiwoomRealtimeFeed(symbols={"005930": False}, subscribe_supply=True)
+    feed._on_real({"trnm": "REAL", "data": [{"type": "0B", "item": "005930", "values": {
+        "10": "+244000", "9081": "KRX", "228": "78.13"}}]})
+    feed._tick_event.clear()
+    feed._on_real({"trnm": "REAL", "data": [{"type": "0w", "item": "005930", "values": {
+        "10": "+999999", "202": "3798971", "206": "1800396",
+        "210": "-1998575", "212": "-488867"}}]})
+
+    assert feed.get_fresh("005930", prefer_nxt=False) == 244000, "0w 가 가격을 덮어쓰면 안 된다"
+    assert feed._tick_event.is_set() is False, "0w 로 틱 대기가 깨지면 판정 주기가 바뀐다"
+    s = feed.get_supply("005930", prefer_nxt=False)
+    assert s["prm_net_qty"] == "-1998575" and s["cntr_str"] == "78.13", "0B+0w 가 한 스냅샷"
+
+
+def test_supply_absent_when_disabled():
+    """토글을 끄면 0B 부가 필드도 수집하지 않는다(구독 등록도 안 함)."""
+    feed = KiwoomRealtimeFeed(symbols={"005930": False}, subscribe_supply=False)
+    feed._on_real({"trnm": "REAL", "data": [{"type": "0B", "item": "005930", "values": {
+        "10": "+244000", "9081": "KRX", "228": "78.13"}}]})
+    assert feed.get_supply("005930", prefer_nxt=False) is None
+    assert feed.get_fresh("005930", prefer_nxt=False) == 244000, "가격은 그대로 동작"
+
+
+def test_supply_snapshot_failure_does_not_break_evaluation():
+    """수급 조회가 터져도 매도 판정 payload 는 만들어진다(관측은 자금 경로에 개입 금지)."""
+    class Boom:
+        def get_supply(self, stk_cd, prefer_nxt):
+            raise RuntimeError("feed down")
+
+    state = monitor.MonitorState()
+    state.feed = Boom()
+    from datetime import datetime
+    assert monitor._supply_snapshot(state, "005930", datetime.now()) == {}
+
+
 # ── 2. 피드 미주입 시 종전 동작 ────────────────────────────────
 
 def test_data_client_without_feed_uses_rest(monkeypatch):
