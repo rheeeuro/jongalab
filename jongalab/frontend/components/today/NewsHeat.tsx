@@ -13,14 +13,7 @@ import { MaterialBadge } from "@/components/MaterialBadge";
  *
  * 모바일 우선: 세로 리스트, 한 항목 2줄(종목명+배수 / 근거·재료). 넓은 화면에서 2열.
  */
-export function NewsHeat({
-  items,
-  showAllLink = true,
-}: {
-  items: NewsHeatItem[];
-  /** 뉴스 탭에서는 자기 자신으로 가는 링크라 숨긴다 */
-  showAllLink?: boolean;
-}) {
+export function NewsHeat({ items }: { items: NewsHeatItem[] }) {
   if (!items?.length) return null;
 
   const max = Math.max(...items.map((i) => i.surprise ?? i.mention_count), 1);
@@ -32,16 +25,12 @@ export function NewsHeat({
           <Newspaper className="h-5 w-5 text-emerald-500" />
           오늘 새로 뜬 재료
         </h2>
-        {showAllLink ? (
-          <Link
-            href="/news"
-            className="flex shrink-0 items-center gap-0.5 text-xs font-bold text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-300"
-          >
-            평소 대비 <ChevronRight className="h-3.5 w-3.5" />
-          </Link>
-        ) : (
-          <span className="shrink-0 text-xs font-bold text-slate-400">평소 대비 배수</span>
-        )}
+        <Link
+          href="/news"
+          className="flex shrink-0 items-center gap-0.5 text-xs font-bold text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-300"
+        >
+          평소 대비 <ChevronRight className="h-3.5 w-3.5" />
+        </Link>
       </div>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

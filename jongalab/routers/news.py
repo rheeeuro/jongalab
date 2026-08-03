@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Query
 
 from core.news_material_judge import is_price_report
-from core.repository import get_news_heat, get_today_news_by_stock
+from core.repository import get_news_heat, get_news_stream, get_today_news_by_stock
 from core.repository.stock_report import get_news_material_rows
 
 router = APIRouter(prefix="/api/news", tags=["news"])
@@ -12,16 +12,45 @@ router = APIRouter(prefix="/api/news", tags=["news"])
 
 @router.get("/heat")
 def get_news_heat_ranking(
-    hours: int = Query(24, ge=1, le=168, description="집계 윈도우 (시간)"),
+    hours: int = Query(24, ge=1, le=168, description="집계 윈도우 (시간, date 미지정 시)"),
     limit: int = Query(20, ge=1, le=100, description="상위 종목 수"),
+    date: str | None = Query(None, description="특정 날짜 하루 집계 YYYY-MM-DD (뉴스 탭)"),
 ):
-    """최근 N시간 뉴스가 몰린 종목 순위 — **자기 기저 대비 배수(surprise) 정렬**.
+    """뉴스가 몰린 종목 순위 — **자기 기저 대비 배수(surprise) 정렬**.
 
     건수 정렬은 시총 랭킹이 되어(대형주 상단 고정) 카드가 정보를 주지 못했다. 상세는
-    core.repository.news.get_news_heat 주석 참조. 오늘 유니버스 종목이면 재료 라벨도 함께 온다.
+    core.repository.news.get_news_heat 주석 참조. 유니버스 종목이면 재료 라벨도 함께 온다.
+    `date` 를 주면 그 날짜 하루 집계(뉴스 탭 날짜 이동), 없으면 최근 `hours` 시간(홈 카드).
     """
     try:
-        return {"success": True, "data": get_news_heat(hours=hours, limit=limit)}
+        return {"success": True, "data": get_news_heat(hours=hours, limit=limit, date=date)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/stream")
+def get_news_headline_stream(
+    date: str | None = Query(None, description="날짜 YYYY-MM-DD (기본: 오늘)"),
+    limit: int = Query(40, ge=1, le=100, description="한 페이지 기사 수"),
+    offset: int = Query(0, ge=0, description="건너뛸 기사 수 (더 보기)"),
+):
+    """그 날 헤드라인을 **기사 단위**로 최신순 반환 (뉴스 탭 헤드라인 스트림).
+
+    같은 기사가 여러 종목을 언급하면 news_mention 은 종목당 1행이라, 여기서 기사 1건 +
+    종목 칩 N개로 접어 준다. 각 기사에 `is_price_report`("급등/상한가/특징주" 류인가)를
+    실어 화면이 시세 기사를 기본으로 숨길 수 있게 한다 — 판별은 후속 재료 채점과 **같은 함수**.
+    """
+    try:
+        report_date = date or datetime.now().strftime("%Y-%m-%d")
+        items, total = get_news_stream(report_date, limit=limit, offset=offset)
+        for it in items:
+            it["is_price_report"] = is_price_report(it.get("headline") or "")
+        return {
+            "success": True,
+            "data": items,
+            "total": total,
+            "has_more": offset + len(items) < total,
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 

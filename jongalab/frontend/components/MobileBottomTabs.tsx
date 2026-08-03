@@ -26,7 +26,7 @@ const PRIMARY_TABS = [
 ];
 
 const MORE_ITEMS = [
-  { href: "/news", label: "뉴스", icon: Newspaper, desc: "오늘 뜬 재료·지속성" },
+  { href: "/news", label: "뉴스", icon: Newspaper, desc: "종목 재료·헤드라인" },
   { href: "/feed", label: "콘텐츠", icon: MessagesSquare, desc: "유튜브·텔레그램 분석" },
   { href: "/sectors", label: "섹터", icon: Layers, desc: "섹터 트렌드 보기" },
   {

@@ -296,21 +296,32 @@ def get_news_days_by_stocks(
 _SURPRISE_FLOOR = 1.0
 
 
-def get_news_heat(hours: int = 24, limit: int = 20) -> list[dict]:
-    """최근 N시간 뉴스가 몰린 종목 순위 (프론트 '오늘 새로 뜬 재료' 카드용).
+def get_news_heat(hours: int = 24, limit: int = 20, date: str | None = None) -> list[dict]:
+    """뉴스가 몰린 종목 순위 (홈 '오늘 새로 뜬 재료' 카드 + 뉴스 탭 사이드 랭킹).
 
     **정렬은 건수가 아니라 자기 기저 대비 배수(surprise)다.** 건수 랭킹은 사실상 시총
     랭킹이라(실측 2026-07-29: 하이닉스 95·현대차 57·삼성전자 43건이 상단 고정) 매일 같은
     대형주만 보였다. 직전 7일 일평균으로 나누면 "평소 조용했는데 오늘 시끄러운 종목"이 올라온다.
     건수·기저는 함께 반환해 화면이 근거를 같이 보여줄 수 있게 한다.
 
-    오늘 유니버스에 든 종목이면 재료 지속성 라벨(durability/catalyst/summary)을 함께 실어
+    창은 두 가지다 — `date` 를 주면 **그 날짜 하루**(뉴스 탭이 날짜를 이동하므로 기준일이
+    오늘이 아닐 수 있다), 없으면 종전처럼 **최근 `hours` 시간**(홈 카드). 기저 7일과
+    daily_stock_report 조인 날짜도 같은 기준일을 따라가야 라벨이 엇갈리지 않는다.
+
+    유니버스에 든 종목이면 재료 지속성 라벨(durability/catalyst/summary)을 함께 실어
     카드가 '무슨 재료인지'까지 보여줄 수 있게 한다(유니버스 밖 종목은 NULL).
     """
     src_sql, src_params = _source_filter()
     # 서브쿼리(기저)와 본 쿼리에 각각 별칭이 다른 같은 필터를 붙인다.
     prior_src = src_sql.replace(" AND source IN", " AND p.source IN")
     main_src = src_sql.replace(" AND source IN", " AND n.source IN")
+    # 기준일 — date 가 있으면 그 날, 없으면 오늘(CURDATE()). 기저·리포트 조인이 함께 움직인다.
+    base_day = "%s" if date else "CURDATE()"
+    base_params: tuple = (date,) if date else ()
+    window_sql = (
+        "DATE(n.created_at) = %s" if date else "n.created_at >= NOW() - INTERVAL %s HOUR"
+    )
+    window_params: tuple = (date,) if date else (int(hours),)
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""
@@ -320,19 +331,20 @@ def get_news_heat(hours: int = 24, limit: int = 20) -> list[dict]:
                    MAX(n.created_at) AS last_at,
                    (SELECT COUNT(*) FROM news_mention p
                      WHERE p.ticker = n.ticker
-                       AND p.created_at < CURDATE()
-                       AND p.created_at >= CURDATE() - INTERVAL 7 DAY{prior_src}) / 7 AS prior_avg,
+                       AND p.created_at < {base_day}
+                       AND p.created_at >= {base_day} - INTERVAL 7 DAY{prior_src}) / 7 AS prior_avg,
                    MAX(r.news_durability) AS durability,
                    MAX(r.news_catalyst) AS catalyst,
                    MAX(r.news_summary) AS summary,
                    MAX(r.rank_no) AS rank_no
             FROM news_mention n
             LEFT JOIN daily_stock_report r
-                   ON r.stock_code = n.ticker AND r.report_date = CURDATE()
-            WHERE n.created_at >= NOW() - INTERVAL %s HOUR{main_src}
+                   ON r.stock_code = n.ticker AND r.report_date = {base_day}
+            WHERE {window_sql}{main_src}
             GROUP BY n.ticker
             """,
-            (*src_params, int(hours), *src_params),
+            (*base_params, *base_params, *src_params, *base_params,
+             *window_params, *src_params),
         )
         results = cursor.fetchall()
 
@@ -347,6 +359,87 @@ def get_news_heat(hours: int = 24, limit: int = 20) -> list[dict]:
 
     results.sort(key=lambda r: (-r["surprise"], -r["mention_count"], r["last_at"] or ""))
     return results[:int(limit)]
+
+
+def get_news_stream(
+    date: str, limit: int = 40, offset: int = 0
+) -> tuple[list[dict], int]:
+    """그 날 수집된 헤드라인을 **기사 단위**로 최신순 반환 (뉴스 탭 헤드라인 스트림).
+
+    news_mention 은 '한 헤드라인 × 언급 종목' 1행이라 그대로 뿌리면 같은 기사가 종목 수만큼
+    반복된다. 여기서는 `source_url`(없으면 headline)로 접어 **기사 1행 + 종목 칩 N개** 형태로
+    돌려준다. 접기를 SQL GROUP_CONCAT 으로 하지 않는 이유는 종목코드·사명 두 목록의 정렬이
+    어긋날 수 있어서다 — 페이지 키만 SQL 로 뽑고(페이징 정확), 조립은 파이썬에서 한다.
+
+    반환: (기사 목록, 그 날 전체 기사 수). 목록 항목은
+      {headline, source_url, channel_name, created_at(ISO), stocks: [{ticker, name}]}
+
+    ⚠️ 다른 조회 함수와 같은 `_source_filter()` 를 통과한다. 표시 전용이라 게이트와는 무관하지만,
+    필터를 빼면 화면의 기사 수와 재료 집계(news_count·배수)가 서로 다른 모집단이 되어
+    "13건이라며 왜 기사가 80개냐"가 된다. 소스 승격(.env 한 줄)이면 양쪽이 함께 두꺼워진다.
+    """
+    src_sql, src_params = _source_filter()
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"""SELECT COUNT(DISTINCT COALESCE(source_url, headline)) AS total
+                  FROM news_mention
+                 WHERE DATE(created_at) = %s{src_sql}""",
+            (date, *src_params),
+        )
+        total = int((cursor.fetchone() or {}).get("total") or 0)
+
+        # 1) 페이지에 실을 기사 키만 (기사 단위 페이징)
+        cursor.execute(
+            f"""SELECT COALESCE(source_url, headline) AS gkey,
+                       MAX(created_at) AS ts, MAX(id) AS mid
+                  FROM news_mention
+                 WHERE DATE(created_at) = %s{src_sql}
+                 GROUP BY gkey
+                 ORDER BY ts DESC, mid DESC
+                 LIMIT %s OFFSET %s""",
+            (date, *src_params, int(limit), int(offset)),
+        )
+        keys = cursor.fetchall()
+        if not keys:
+            return [], total
+
+        # 2) 그 기사들의 언급 행 전부 — 파이썬에서 종목 칩으로 접는다
+        placeholders = ", ".join(["%s"] * len(keys))
+        cursor.execute(
+            f"""SELECT COALESCE(source_url, headline) AS gkey,
+                       ticker, company_name, headline, source_url, channel_name, created_at
+                  FROM news_mention
+                 WHERE DATE(created_at) = %s
+                   AND COALESCE(source_url, headline) IN ({placeholders}){src_sql}""",
+            (date, *[k["gkey"] for k in keys], *src_params),
+        )
+        rows = cursor.fetchall()
+
+    grouped: dict[str, dict] = {}
+    for row in rows:
+        item = grouped.get(row["gkey"])
+        if item is None:
+            item = grouped[row["gkey"]] = {
+                "headline": row["headline"],
+                "source_url": row["source_url"],
+                "channel_name": row["channel_name"],
+                "created_at": row["created_at"],
+                "stocks": [],
+            }
+        if row["ticker"] and all(s["ticker"] != row["ticker"] for s in item["stocks"]):
+            item["stocks"].append(
+                {"ticker": row["ticker"], "name": row["company_name"] or row["ticker"]}
+            )
+
+    out = []
+    for k in keys:  # SQL 이 정한 최신순을 그대로 유지한다
+        item = grouped.get(k["gkey"])
+        if item is None:
+            continue
+        if isinstance(item["created_at"], datetime):
+            item["created_at"] = item["created_at"].isoformat()
+        out.append(item)
+    return out, total
 
 
 def delete_old_news_mentions(days: int = 14) -> int:

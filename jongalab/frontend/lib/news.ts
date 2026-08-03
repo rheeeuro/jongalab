@@ -14,6 +14,32 @@ export function splitHeadlineUrl(raw: string): {
   return { text: text || raw, url };
 }
 
+// 속보 채널 헤드라인은 발행처를 대괄호 말머리로 단다 — "[뉴시스] 현대차·기아, 美서…".
+// 채널명(`단독 & 속보 뉴스 콜렉터`)은 어느 언론사인지 알려주지 않으므로, 말머리가 있으면
+// 그쪽을 발행처로 쓴다. 네이버 소스는 말머리가 없고 channel_name 이 곧 언론사다.
+const PUBLISHER_RE = /^\s*[[【]\s*([^\]】]{1,20})\s*[\]】]\s*/;
+
+/** 헤드라인 1건을 표시 단위로 분해 — 발행처 / 제목 / 기사 URL. */
+export function splitHeadlineMeta(
+  raw: string,
+  channelName?: string | null,
+): { publisher: string | null; title: string; url: string | null } {
+  const { text, url } = splitHeadlineUrl(raw ?? "");
+  const m = text.match(PUBLISHER_RE);
+  if (m) return { publisher: m[1].trim(), title: text.slice(m[0].length).trim(), url };
+  return { publisher: channelName?.trim() || null, title: text, url };
+}
+
+/**
+ * 뉴스량 배수 — 그 날 언급 건수 ÷ 직전 7일 일평균(하한 1).
+ * 백엔드 `get_news_heat` 의 surprise 와 같은 식이다. 재료 목록(`/api/news/materials`)은
+ * 배수를 미리 계산해 주지 않으므로 화면에서 같은 공식으로 맞춘다 — 식이 갈리면
+ * 같은 종목이 목록과 사이드 랭킹에서 다른 배수로 보인다.
+ */
+export function newsSurprise(count: number, priorAvg?: number | null): number {
+  return Math.round((count / Math.max(priorAvg ?? 0, 1)) * 10) / 10;
+}
+
 /**
  * 재료 판정 근거를 사이트 사용자의 말로 — 저장된 문장에 섞인 내부 필드명을 치환한다.
  *

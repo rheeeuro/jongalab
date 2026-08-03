@@ -207,6 +207,9 @@ export interface NewsMaterialRow {
   stock_name: string;
   sector: string | null;
   change_pct: number | null;
+  market_cap?: number | null;
+  trading_value?: number | null;
+  score?: number | null;
   rank_no: number;
   selected: number;
   news_count: number;
@@ -233,6 +236,29 @@ export interface NewsMentionItem {
   channel_name: string | null;
   created_at: string | null;
   is_price_report?: boolean;   // 재료가 아니라 그날 시세를 옮긴 기사 (화면에서 접는다)
+}
+
+// /api/news/stream — 뉴스 탭 헤드라인 스트림. news_mention 은 '헤드라인 × 종목' 1행이라
+// 백엔드가 source_url 로 접어 **기사 1건 + 종목 칩 N개** 로 돌려준다.
+export interface NewsStreamStock {
+  ticker: string;
+  name: string;
+}
+
+export interface NewsStreamItem {
+  headline: string;
+  source_url: string | null;
+  channel_name: string | null;
+  created_at: string | null;
+  stocks: NewsStreamStock[];
+  is_price_report?: boolean;
+}
+
+export interface NewsStreamResponse {
+  success: boolean;
+  data: NewsStreamItem[];
+  total: number;        // 그 날 전체 기사 수 (페이지가 아니라 전체)
+  has_more: boolean;
 }
 
 export interface StockReportDetail {
