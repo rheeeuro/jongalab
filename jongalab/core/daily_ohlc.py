@@ -15,6 +15,32 @@ logger = logging.getLogger("DailyOhlc")
 # 넘으면 분할·데이터 아티팩트로 보고 해당 라벨을 버린다(모든 결과 라벨에 동일 적용).
 SANE_RET_PCT = 35.0
 
+# 수정주가 일봉 종가와 그날 **실제 거래 종가**(미조정)의 허용 오차(%).
+# 넘으면 리포트일 이후 권리락(무상증자·분할 등)이 있었다는 뜻이다 — 아래 주석 참조.
+PRICE_SCALE_TOL_PCT = 2.0
+
+
+def is_price_scale_shifted(adj_close: int | None, raw_close: int | None) -> bool:
+    """수정주가 일봉 종가와 미조정 실거래 종가의 **가격 스케일이 어긋났는가**.
+
+    [왜 필요한가]
+    ka10081 수정주가 일봉은 무상증자·분할 권리락을 **과거로 소급 조정**하지만, ka10080 분봉과
+    저장된 `krx_close_price`·NXT 프리마켓 시세는 그날 실거래가를 그대로 준다. 그래서 리포트일
+    다음 거래일이 권리락일이면 **일봉 라벨(next_*_ret)만 정상**이고, 미조정 가격 양 끝으로
+    계산하는 라벨(exec_leg_ret·nxt_open_ret)은 배정비율만큼 손실로 찍힌다.
+      2026-08-04 대동기어 실측: 8/3 19:50 분봉 9,594 → 8/4 09:03 분봉 7,510 = **-21.7%**.
+      실제로는 그날 +1.76% 오른 종목이고, ±SANE_RET_PCT 가드도 통과해 그대로 저장된다.
+    권리락 공시일로는 판정할 수 없다 — 공시일→권리락일 간격이 종목마다 다르다
+    (알테오젠 8/4 공시→8/5 권리락 / 대동기어 7/31 공시→8/4 권리락). 그래서 **가격 스케일**을
+    직접 비교한다: 조정·미조정 두 값은 권리락이 없으면 같아야 한다(2026-08-03 유니버스
+    48행 전건 일치, 오탐 0). 반올림 오차만 PRICE_SCALE_TOL_PCT 로 흘린다.
+
+    둘 중 하나라도 없으면 판정 불가 → False(미개입, 라벨을 버리지 않는다).
+    """
+    if not adj_close or not raw_close or adj_close <= 0 or raw_close <= 0:
+        return False
+    return abs(raw_close - adj_close) / adj_close * 100 > PRICE_SCALE_TOL_PCT
+
 
 def build_ohlc_by_date(api: KiwoomRestClient, code: str) -> dict[str, tuple[int, int, int, int]]:
     """{YYYYMMDD: (시가, 고가, 저가, 종가)} 맵 — 수정주가 일봉 1회 조회(분할 상쇄).

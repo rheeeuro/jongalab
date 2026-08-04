@@ -101,6 +101,67 @@ def capital_increase_methods(corp_code: str, date_yyyymmdd: str) -> dict[str, st
     }
 
 
+def bonus_issue_schedules(corp_code: str, bgn_de: str, end_de: str) -> list[dict]:
+    """무상증자 결정 상세(fricDecsn)에서 **신주배정기준일·배정비율**을 조회.
+
+    권리락일은 거래소 '권리락' 공시일로 역산할 수 없다 — 공시일→권리락일 간격이 종목마다
+    다르다(알테오젠 8/4 공시→8/5 / 대동기어 7/31 공시→8/4). 여기서 받는 신주배정기준일
+    (`nstk_asstd`)이 유일한 정확한 근거이고, **권리락일 = 기준일 직전 영업일**이다
+    (2026-08-04 실측 3건 일치 — 자세한 근거는 sql/48 주석).
+
+    반환: [{rcept_no, record_date(YYYY-MM-DD), ratio(float|None),
+            listing_date(YYYY-MM-DD|None), corp_name}] — 기준일이 없는 항목은 버린다.
+    조회 실패·데이터 없음은 빈 리스트(호출부가 스킵 = 미개입으로 처리한다).
+    """
+    if not is_configured() or not corp_code:
+        return []
+    params = {
+        "crtfc_key": DART_API_KEY,
+        "corp_code": corp_code,
+        "bgn_de": bgn_de,
+        "end_de": end_de,
+    }
+    try:
+        resp = requests.get(f"{DART_BASE_URL}/api/fricDecsn.json", params=params, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError) as e:
+        logger.warning("무상증자 일정 조회 실패 (corp_code=%s): %s", corp_code, e)
+        return []
+    if str(data.get("status") or "") != _STATUS_OK:
+        return []
+
+    out = []
+    for it in data.get("list") or []:
+        record_date = _parse_kdate(it.get("nstk_asstd"))
+        if not record_date:
+            continue
+        out.append({
+            "rcept_no": str(it.get("rcept_no") or ""),
+            "record_date": record_date,
+            "ratio": _parse_ratio(it.get("nstk_ascnt_ps_ostk")),
+            "listing_date": _parse_kdate(it.get("nstk_lstprd")),
+            "corp_name": str(it.get("corp_name") or "") or None,
+        })
+    return out
+
+
+def _parse_kdate(v: str | None) -> str | None:
+    """'2026년 08월 06일' → '2026-08-06'. 미정('-')·형식 불일치는 None."""
+    digits = "".join(ch for ch in str(v or "") if ch.isdigit())
+    if len(digits) != 8:
+        return None
+    return f"{digits[:4]}-{digits[4:6]}-{digits[6:]}"
+
+
+def _parse_ratio(v: str | None) -> float | None:
+    """'0.3' → 0.3. 파싱 불가는 None (배정비율은 추적용이라 없어도 스킵 판단에 영향 없음)."""
+    try:
+        return float(str(v or "").replace(",", "").strip())
+    except ValueError:
+        return None
+
+
 def list_filings(date_yyyymmdd: str) -> list[dict]:
     """하루치 유가·코스닥 공시 전체를 페이지 끝까지 수집.
 

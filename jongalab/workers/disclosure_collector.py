@@ -26,13 +26,16 @@
 """
 import argparse
 import logging
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from core.dart_client import (
-    DOC_URL, DartError, capital_increase_methods, is_configured, list_filings,
+    DOC_URL, DartError, bonus_issue_schedules, capital_increase_methods, is_configured,
+    list_filings,
 )
 from core.disclosure_events import UNKNOWN_IC, classify, refine_capital_increase
 from core.logging_setup import setup_logging
+from core.market_calendar import next_trading_day, prev_trading_day
+from core.repository import ex_rights as ex_rights_repo
 from core.repository import stock_event as event_repo
 
 setup_logging()
@@ -63,6 +66,80 @@ def _resolve_ic_methods(filings: list[dict]) -> dict[str, str]:
     if targets:
         logger.info("유상증자 방식 조회 %d개사 → %d건 확인", len(targets), len(methods))
     return methods
+
+
+EX_RIGHTS_TRIGGERS = ("무상증자", "권리락")
+# 권리락 공시가 트리거일 때 결정 공시를 얼마나 거슬러 찾을지(일). 무상증자 결정 → 권리락은
+# 보통 2~3주라 넉넉히 잡는다(실측: 알테오젠 결정 7/20 → 권리락 8/5 = 16일).
+EX_RIGHTS_LOOKBACK_DAYS = 120
+
+
+def _resolve_ex_rights(filings: list[dict], date_yyyymmdd: str) -> list[dict]:
+    """무상증자 건에 한해 **권리락 예정일**을 계산한다(sql/48 캘린더 행).
+
+    트리거는 두 가지이고 조회는 하나다(fricDecsn):
+      · `무상증자` 결정 공시 — 정상 경로(권리락 2~3주 전에 미리 채워진다)
+      · `권리락` 공시 — 결정 공시를 놓친 종목의 보완 경로(수집 시작 전 결정분 등).
+        권리락 1~2영업일 전에 오므로 NXT 19:30 매수는 막을 수 있다.
+    권리락일 = 신주배정기준일(nstk_asstd) **직전 영업일**. 근거는 sql/48 주석(실측 3건).
+
+    조회 실패·기준일 없음은 그 종목을 그냥 건너뛴다(미개입 — 캘린더에 없으면 매수는 정상 진행).
+    """
+    targets: dict[tuple[str, str], dict] = {}
+    for f in filings:
+        event_type = classify(f.get("report_nm") or "")["event_type"]
+        if event_type not in EX_RIGHTS_TRIGGERS:
+            continue
+        corp_code = (f.get("corp_code") or "").strip()
+        ticker = (f.get("stock_code") or "").strip()
+        rcept_no = (f.get("rcept_no") or "").strip()
+        if not (corp_code and ticker and rcept_no):
+            continue
+        # 권리락 공시가 트리거면 폴백(추정) 자격이 있다 — 그 공시 자체가 "곧 권리락"의 증거다.
+        # 무상증자 결정 공시만 본 경우엔 추정하지 않는다(기준일이 없으면 아직 일정 미확정).
+        prev = targets.get((corp_code, ticker)) or {}
+        targets[(corp_code, ticker)] = {
+            "corp_name": (f.get("corp_name") or "").strip() or prev.get("corp_name"),
+            "rcept_no": rcept_no,
+            "ex_notice": prev.get("ex_notice") or event_type == "권리락",
+        }
+
+    if not targets:
+        return []
+
+    end_de = date_yyyymmdd
+    disc_date = datetime.strptime(date_yyyymmdd, "%Y%m%d").date()
+    bgn_dt = disc_date - timedelta(days=EX_RIGHTS_LOOKBACK_DAYS)
+    rows, inferred = [], 0
+    for (corp_code, ticker), meta in targets.items():
+        found = bonus_issue_schedules(corp_code, bgn_dt.strftime("%Y%m%d"), end_de)
+        for s in found:
+            record = date.fromisoformat(s["record_date"])
+            rows.append({
+                "ticker": ticker,
+                "ex_rights_date": prev_trading_day(record).isoformat(),
+                "record_date": s["record_date"],
+                "ratio": s.get("ratio"),
+                "listing_date": s.get("listing_date"),
+                "source": "dart",
+                "source_key": s["rcept_no"],
+                "corp_name": s.get("corp_name") or meta.get("corp_name"),
+            })
+        if found or not meta["ex_notice"]:
+            continue
+        # 폴백 — 기준일을 못 얻었지만 권리락 공시는 왔다(자율공시 건 등, sql/48 주석).
+        # 공시일 직후 2영업일을 권리락 가능일로 추정 등록해 과잉 차단 쪽으로 기운다.
+        nxt = next_trading_day(disc_date)
+        for d in (nxt, next_trading_day(nxt)):
+            rows.append({
+                "ticker": ticker, "ex_rights_date": d.isoformat(), "record_date": None,
+                "ratio": None, "listing_date": None, "source": "inferred",
+                "source_key": meta["rcept_no"], "corp_name": meta.get("corp_name"),
+            })
+        inferred += 1
+    logger.info("무상증자 일정 조회 %d개사 → 권리락 예정 %d건(기준일 확정 %d / 추정 %d개사)",
+                len(targets), len(rows), len(rows) - inferred * 2, inferred)
+    return rows
 
 
 def _to_rows(filings: list[dict], seen_at: datetime) -> list[dict]:
@@ -134,6 +211,18 @@ def run(date_yyyymmdd: str) -> int:
     except Exception as e:
         logger.error("stock_event 적재 실패: %s", e)
         return 1
+
+    # 권리락 예정일 캘린더(sql/48) — trading 이 익일 권리락 종목 매수를 건너뛴다.
+    # 공시 적재와 독립: 실패해도 수집 결과를 되돌리지 않는다(캘린더가 비면 매수는 정상 진행).
+    try:
+        ex_rows = _resolve_ex_rights(filings, date_yyyymmdd)
+        if ex_rows:
+            new_ex = ex_rights_repo.save_schedules(ex_rows)
+            logger.info("권리락 예정 적재 — 신규 %d건 / 조회 %d건: %s", new_ex, len(ex_rows),
+                        ", ".join(f"{r['corp_name']}({r['ticker']}) {r['ex_rights_date']}"
+                                  f"×{r['ratio']}" for r in ex_rows[:10]))
+    except Exception as e:
+        logger.warning("권리락 예정 적재 실패(공시 수집은 정상 완료): %s", e)
 
     bad = [r for r in rows if r["is_veto_type"] and not r["is_correction"]]
     logger.info("공시 수집 %s — 조회 %d건 / 신규 %d건 / 당일 누적 %d건",

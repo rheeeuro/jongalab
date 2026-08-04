@@ -30,6 +30,7 @@ from core.repository import edge_rule as edge_rule_repo
 from core.kiwoom_data_client import KiwoomDataClient, to_int
 from core.kiwoom_order_client import KiwoomOrderClient
 from core.seed_allocator import allocate, conviction_from_signal
+from core.ex_rights import get_next_session_ex_rights
 from core.regime_gate import seed_multiplier
 from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
 from core.macro_gate import macro_keep, month_events
@@ -270,6 +271,9 @@ def buy_preview(date: str | None = None):
     trade_date = date or datetime.now().strftime("%Y%m%d")
     signals = signal_repo.get_pending_signals(trade_date)
     block = blocklist_repo.get_codes()
+    # 권리락 스킵도 executor 와 같이 반영한다 — 신호는 19:30 집행 전까지 pending 으로 남아 있어서
+    # 여기서 빼지 않으면 "안 살 종목이 매수 예정에 뜬다"(2026-08-04 알테오젠).
+    ex_rights = get_next_session_ex_rights()
     # 레버리지 대체매수 — 대시보드는 실제 매수 대상인 ETF 로 미리보기 표시(executor 와 동일 치환).
     lev_map = (leverage_map_repo.get_active_map()
                if risk_config_repo.get_risk_config().get("LEVERAGE_ENABLED", 0) else {})
@@ -279,7 +283,7 @@ def buy_preview(date: str | None = None):
     classified = []  # {sig, is_nxt, price}
     for sig in signals:
         stk = sig["stk_cd"]
-        if stk in block:
+        if stk in block or stk in ex_rights:
             continue
         m = lev_map.get(stk)
         if m and m.get("etf_cd"):

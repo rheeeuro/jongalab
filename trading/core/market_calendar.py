@@ -9,7 +9,7 @@ KRX 개장 여부는 `exchange_calendars` 의 'XKRX' 달력으로 판단한다(�
 """
 import sys
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,20 @@ def is_trading_day(dt: datetime | None = None) -> bool:
     except Exception as e:  # 달력 사용 불가 → 최소한 주말은 거른다
         logger.warning("XKRX 거래소 달력 조회 실패(%s) — 주말 여부로만 판단합니다.", e)
         return is_weekday
+
+
+def next_trading_day(d: date) -> date:
+    """d 직후 거래일 — '이 매수분을 언제 파는가'(익일 시가 청산일) 판정에 쓴다.
+
+    최대 14일까지만 앞으로 본다(연휴가 아무리 길어도 그 안에 개장일이 있다) —
+    달력 조회가 통째로 실패해 무한 루프가 되는 것을 막는 상한이다.
+    jongalab/core/market_calendar.py 에 동일 함수가 있다(최소 복제 유지).
+    """
+    for fwd in range(1, 15):
+        cand = d + timedelta(days=fwd)
+        if is_trading_day(datetime.combine(cand, time.min)):
+            return cand
+    return d + timedelta(days=1)
 
 
 def exit_if_not_trading_day() -> None:

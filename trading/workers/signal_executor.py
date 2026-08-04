@@ -31,6 +31,7 @@ from core.config import SEED_COMBINED_MIN_MULT, REALTIME_FEED_ENABLED
 from core.kiwoom_data_client import to_int
 from core.repository import trade_signal as signal_repo
 from core.repository import order as order_repo
+from core.ex_rights import get_next_session_ex_rights
 from core.repository import blocklist as blocklist_repo
 from core.repository import risk_config as risk_config_repo
 from core.repository import leverage_map as leverage_map_repo
@@ -360,6 +361,14 @@ def main() -> int:
         return 0
 
     block = blocklist_repo.get_codes()
+    # 권리락 스킵 — 다음 거래일(= 이 매수분의 청산일)이 권리락일인 종목은 사지 않는다.
+    # 기준가가 배정비율만큼 기계적으로 낮아져 그 폭이 실현손실로 찍히고, 공짜 신주는 3주 뒤에
+    # 들어와 그 자리에서 상계되지 않는다(core/ex_rights.py·jongalab sql/48). 조회 실패는 미개입.
+    ex_rights = get_next_session_ex_rights()
+    if ex_rights:
+        logger.info("익일 권리락 예정 %d종목: %s", len(ex_rights),
+                    ", ".join(f"{v.get('corp_name') or k}({k})×{v.get('ratio')}"
+                              for k, v in ex_rights.items()))
     # 레버리지 ETF 대체매수 매핑 (토글 off 면 빈 dict → 현행 동작 그대로).
     lev_map = (leverage_map_repo.get_active_map()
                if risk_config_repo.get_risk_config().get("LEVERAGE_ENABLED", 0) else {})
@@ -376,6 +385,19 @@ def main() -> int:
             logger.info("blocklist 제외 — signal %s [%s]", sig["id"], stk)
             signal_repo.update_status(sig["id"], "skipped", note="blocklist")
             audit_log.append("buy_skip", stk, {"reason": "blocklist"})
+            continue
+        # 권리락도 원종목 기준으로 검사한다(레버리지 치환 전) — 조정이 일어나는 건 원종목이다.
+        if stk in ex_rights:
+            ex = ex_rights[stk]
+            logger.info("권리락 제외 — signal %s [%s] 권리락 익일, 배정 %s주/주",
+                        sig["id"], stk, ex.get("ratio"))
+            signal_repo.update_status(sig["id"], "skipped", note="ex_rights")
+            audit_log.append("buy_skip", stk, {
+                "reason": "ex_rights",
+                "ratio": float(ex["ratio"]) if ex.get("ratio") is not None else None,
+                "record_date": str(ex.get("record_date") or ""),
+                "listing_date": str(ex.get("listing_date") or ""),
+            })
             continue
         # 레버리지 치환: is_nxt_enabled 조회 전에 하므로 거래소 라우팅도 ETF 기준.
         if lev_map:

@@ -20,6 +20,11 @@
   - '다음 거래일 시가'나 09:03 실집행 레그가 아직 없는 최근 날짜는 다음 실행에서 자동 재시도(NULL 유지).
   - exec_leg_ret 은 NXT 양 끝(19:50·08:03) 가격이 모두 있으면 NXT, 아니면 KRX(15:20·09:03)로 계산한다.
   - exec_leg_ret 은 활성 rule 의 registered_at 이후만 백필한다(평가에 안 쓰는 과거 분봉 조회 방지).
+  - **권리락 가드**: 다음 거래일이 권리락일(무상증자·분할)이면 일봉만 소급 조정되고 분봉·NXT
+    시세는 실거래가라, 미조정 가격으로 만드는 라벨(exec_leg_ret·nxt_open_ret)에 배정비율이
+    그대로 손실로 찍힌다. 수정 일봉 종가 ↔ 저장된 krx_close_price 의 스케일 불일치로 감지해
+    exec_leg_ret 은 비우고 nxt_open_ret 은 되돌린다(daily_ohlc.is_price_scale_shifted).
+    일봉 라벨 4종은 양 끝이 모두 조정 스케일이라 정상이므로 손대지 않는다.
 
 [후속 재료 실현 채점 — news_followup_days]
   뉴스 재료 지속성 라벨(news_durability, sql/40)이 **맞았는지** 채점하는 유일한 사후 값이다.
@@ -41,6 +46,7 @@ from core.daily_ohlc import (
     build_minute_price_by_time,
     first_later_chart_date,
     first_price_at_or_after,
+    is_price_scale_shifted,
     ret_pct,
 )
 from core.config import NEWS_FOLLOWUP_WINDOW_DAYS
@@ -53,6 +59,7 @@ from core.repository.stock_report import (
     get_dates_missing_exec_leg,
     get_rows_missing_exec_leg,
     save_exec_leg_labels,
+    clear_nxt_open_labels,
     get_rows_for_news_followup,
     save_news_followup,
 )
@@ -208,6 +215,7 @@ def _run_exec_leg(
         rows = get_rows_missing_exec_leg(d)
         report_dt = d.replace("-", "")
         results = []
+        ex_rights: list[str] = []
         for r in rows:
             stored_code = r["stock_code"]
             code = stored_code.split("_")[0].split(".")[0]
@@ -215,6 +223,19 @@ def _run_exec_leg(
                 cache[code] = build_ohlc_by_date(api, code)
             next_dt = first_later_chart_date(cache[code], report_dt)
             if not next_dt:
+                continue
+            # 권리락 가드 — 다음 거래일이 권리락일이면 수정주가 일봉만 소급 조정되고 분봉·NXT
+            # 시세는 실거래가를 그대로 준다. 그 상태로 계산하면 배정비율이 그대로 손실로 찍히고
+            # ±SANE_RET_PCT 도 통과한다(daily_ohlc.is_price_scale_shifted 주석의 대동기어 실측).
+            # 갭·수급이 아닌 기계적 조정이므로 채점 표본에서 빼는 게 맞다 — 일봉 라벨 4종은
+            # 양 끝이 모두 조정 스케일이라 정상이고, 여기서 손대지 않는다.
+            adj_close = (cache[code].get(report_dt) or (0, 0, 0, 0))[3]
+            if is_price_scale_shifted(adj_close, r.get("krx_close_price")):
+                logger.info(
+                    f"[{code}] 권리락 감지 → 미조정 라벨 제외 "
+                    f"(수정 일봉 종가 {adj_close} vs 실거래 종가 {r.get('krx_close_price')})"
+                )
+                ex_rights.append(stored_code)
                 continue
             label = _exec_leg_label(
                 api, code, report_dt, next_dt, r.get("nxt_listed") != 0, minute_cache
@@ -225,6 +246,11 @@ def _run_exec_leg(
         n = save_exec_leg_labels(d, results)
         total += n
         logger.info(f"{d}: 실집행 레그 {n}/{len(rows)}행 백필")
+        # 같은 원인(권리락)으로 오염되는 08:06 NXT 프리마켓 라벨도 함께 되돌린다.
+        # gap_check 는 그 시점에 권리락을 구분할 수 없어 저장했고, 정리는 여기 한 곳에서 한다.
+        if ex_rights:
+            cleared = clear_nxt_open_labels(d, ex_rights)
+            logger.info(f"{d}: 권리락 {len(ex_rights)}종목 — NXT 프리마켓 라벨 {cleared}행 무효화")
     return total
 
 

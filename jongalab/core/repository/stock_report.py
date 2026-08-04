@@ -813,16 +813,45 @@ def get_dates_missing_exec_leg(min_date: str | None = None) -> list[str]:
 
 
 def get_rows_missing_exec_leg(report_date: str) -> list[dict]:
-    """특정 report_date 에서 실집행 레그 라벨이 비어있는 행 목록."""
+    """특정 report_date 에서 실집행 레그 라벨이 비어있는 행 목록.
+
+    `krx_close_price`(그날 실거래 KRX 확정 종가, 미조정)를 함께 준다 — 백필이 수정주가 일봉
+    종가와 비교해 권리락을 감지하는 데 쓴다(core.daily_ohlc `is_price_scale_shifted`).
+    """
     with get_db() as (conn, cursor):
         cursor.execute(
-            """SELECT stock_code, stock_name, nxt_listed, exec_leg_ret, exec_leg_venue
+            """SELECT stock_code, stock_name, nxt_listed, exec_leg_ret, exec_leg_venue,
+                      krx_close_price
                  FROM daily_stock_report
                 WHERE report_date = %s AND exec_leg_ret IS NULL
                 ORDER BY rank_no ASC""",
             (report_date,),
         )
         return cursor.fetchall()
+
+
+def clear_nxt_open_labels(report_date: str, stock_codes: list[str]) -> int:
+    """08:06 NXT 프리마켓 라벨(nxt_open_price·nxt_open_ret)을 NULL 로 되돌린다.
+
+    권리락 종목 전용 — gap_check 는 08:06 시점에 권리락을 구분할 수 없어(전일 종가 대비
+    기계적 -N% 가 실제 급락과 구별되지 않는다) 일단 저장하고, 일봉을 이미 들고 있는
+    outcome_backfill 이 스케일 가드로 감지해 여기서 지운다. 삭제 행 수 반환.
+    """
+    if not stock_codes:
+        return 0
+    n = 0
+    with get_db() as (conn, cursor):
+        for code in stock_codes:
+            cursor.execute(
+                """UPDATE daily_stock_report
+                      SET nxt_open_price = NULL, nxt_open_ret = NULL
+                    WHERE report_date = %s AND stock_code = %s
+                      AND (nxt_open_price IS NOT NULL OR nxt_open_ret IS NOT NULL)""",
+                (report_date, code),
+            )
+            n += cursor.rowcount
+        conn.commit()
+    return n
 
 
 def save_exec_leg_labels(report_date: str, results: list[dict]) -> int:
