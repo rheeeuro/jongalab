@@ -48,6 +48,7 @@ trading/
 │   ├── market_calendar.py      # 거래일 판별(jongalab 복제): XKRX 달력 + EXTRA_HOLIDAYS 수동 오버라이드. 모든 워커가 진입부에서 휴장일이면 exit 0 (2026-07-17 제헌절 휴장일 오실행 사고 재발 방지 — 달력에 없는 신규 공휴일은 jongalab 쪽과 함께 추가). `next_trading_day` 는 '이 매수분을 언제 파는가'(권리락 스킵 판정) 계산용 — 달력 조회 실패 시 무한 루프를 막는 14일 상한
 │   ├── kiwoom_order_client.py  # 키움 REST 직접 호출(kt10000~3 주문, kt00018 잔고, ka10074~6)
 │   ├── kiwoom_data_client.py   # kiwoom 데이터 서버(:8001) 읽기(현재가·NXT·차트) + 실시간 피드 캐시 우선(attach_feed)
+│   ├── price_stream.py         # 모니터 탭 실시간 시세 공급자(표시 전용): 구독자(SSE)가 있을 때만 API 프로세스에서 같은 WS 피드를 띄워 1초 스냅샷을 만든다. 틱 없으면 종목당 15초 간격 REST 폴백. 주문·판정 미경유
 │   ├── realtime_feed.py        # 키움 WS 실시간 구독(0B 주식체결 · 00 주문체결통보 · 0w 종목프로그램매매=수급 관측). 백그라운드 스레드가 메모리 캐시만 갱신하고 DB·주문은 전부 호출부에서. **항상 옵셔널** — 끊김·무틱·TTL 초과 시 REST 폴백
 │   ├── fill_sync.py            # 실거래 체결 동기화(ka10076 → fill/position)
 │   ├── order_maintenance.py    # 스테일 주문 취소·미체결(dead) 정리
@@ -195,6 +196,7 @@ watchdog 은 **jongalab 통합 스케줄러의 dead-man's switch 도 겸한다**
 | 하드 손절 / 트레일링 | `monitor.py`, `settle_plan.py` | HARD_STOP_LOSS_PCT 즉시 전량(plan 유무 무관 — 보유 포지션 전부) / TRAIL_PCT 단조 상승 스톱(**갭하락 잔량 plan 에만 해당** — 갭상승은 2026-08-03 부터 시초가 전량매도라 잔량이 없다). 지난밤 US 정규장 급락이면 하드손절 폭을 보수적으로 좁힘(`US_STOP_TIGHTEN_ENABLED`, 위 monitor 흐름) |
 | 실시간 피드 폴백 | `realtime_feed.py`, `kiwoom_data_client.py` | WS 캐시는 **TTL 5초**(`REALTIME_TTL_SEC`) 안의 값만 유효. 초과·무틱·미구독·다른 보드·피드 예외면 `get_fresh`→None 이라 기존 REST 경로로 폴백한다. 보드(KRX/NXT)가 다르면 **다른 보드로 폴백하지 않는다** — 잘못된 보드 가격으로 손절을 판정하는 것이 값이 없는 것보다 위험. 조용히 끊긴 WS 의 stale 가격으로 손절이 미발동하는 최악 실패를 이 TTL 하나가 막는다. WS 스레드는 메모리 캐시만 갱신하고 DB·주문은 전부 메인 루프에서 일어난다(재진입·락 없음) |
 | 매도 재시도 쿨다운 | `monitor.MonitorState` | 판정은 틱 즉시지만 **주문 전송은 종목별 `SELL_RETRY_COOLDOWN_SEC`(15초) 간격**. 거부도 전송이라 성공·거부 무관하게 카운트. 하한가 매도 거부가 초당 반복돼 유량 제한에 걸리고 정작 하한가 풀림을 놓치는 것을 막는다(2026-07-10 HLB 238건 → 초당 재시도면 시간당 수천 건) |
+| 대시보드 시세 스트림 격리 | `price_stream.py`, `api /monitor/stream` | **표시 전용** — 주문·손절 판정을 경유하지 않고, 스레드는 스냅샷 메모리만 갱신한다. WS 세션은 **모니터 탭 구독자가 있는 동안만** 살아 있어(30초 유예) 워커 피드와 겹치는 시간을 최소화한다(같은 토큰 동시 세션의 틱 동시 수신은 미검증 — realtime-ws-migration.md §2.1). 스트림이 죽거나 `PRICE_STREAM_ENABLED=0` 이면 모니터 탭은 종전 15초 폴링으로 동작하고, 멈춘 뒤 남은 스냅샷은 `fresh_prices()` 신선도(5초)로 걸러 폴링이 stale 가격을 쓰지 않는다 |
 | 불변 감사로그 | `audit_log.py` | append-only(UPDATE/DELETE 없음) |
 | 블록리스트 | `blocklist.py`, `signal_executor.py` | 수동 보유 종목 자동매수 차단 |
 | 권리락 스킵 | `ex_rights.py`, `signal_executor.py`, `/buy-preview` + jongalab `ex_rights_schedule`(sql/48) | 2026-08-04 도입. **다음 거래일(=이 매수분의 청산일)이 권리락일인 종목은 매수하지 않는다** — 기준가가 배정비율만큼 기계적으로 낮아지고(무상증자 1주당 0.3주 → -23%) 공짜 신주는 신주 상장일(보통 3주 뒤)에나, 1주 매수면 단수주라 현금으로 들어와 **그 자리에서 상계되지 않는다**. 계기: 알테오젠(그날 1등) 종가 346,500 → 익일 기준가 267,000, 1주 매수 시 -79,500원 확정·보전분 8만원은 8/26 입금. 검증된 엣지(종가→익일시가)와 성격이 다른 거래라 **회피**를 택했다 — ⚠️ **평단 보정은 하지 않는다**(평단은 하드손절선의 기준값이라 추정 비율이 틀리면 손절선이 조용히 움직인다. 게다가 가격만 보정하면 수량 보정이 3주 뒤라 반쪽이다). 권리락일 판정은 jongalab 이 DART `fricDecsn` **신주배정기준일 직전 영업일**로 계산해 적재(자율공시 건은 기준일을 못 얻어 `source='inferred'` 로 공시일 직후 2영업일 과잉 등록). `blocklist` 바로 다음·레버리지 치환 **전**에 원종목 기준으로 검사하고(조정이 일어나는 건 원종목), 신호는 `skipped`/note=`ex_rights` + `audit_log('buy_skip', reason=ex_rights)`. 조회 실패·캘린더 비어 있음 → **미개입**(매수 정상 진행, 종전 위험과 동일). 당일 권리락 종목은 대상 아님(조정이 끝난 가격에 사서 다음날 파는 건 정상 거래) |
@@ -218,6 +220,20 @@ watchdog 은 **jongalab 통합 스케줄러의 dead-man's switch 도 겸한다**
 ## 프론트엔드 (`frontend/`, :3001)
 홈(당일 손익·매수·보유·매수 프리뷰) · 모니터(워커 하트비트·활성 플랜) · 히스토리(월/일 주문) ·
 캘린더(월간 손익) · 설정(킬스위치·리스크 한도·블록리스트·레버리지 ETF 대체매수). 관리자 비밀번호 로그인(httpOnly 쿠키).
+
+**모니터 탭 실시간 시세(SSE, 2026-08-04)**: 모니터 탭의 현재가·게이지가 매도 워커와 **같은 키움 WS 틱**으로
+움직인다. `GET /monitor/stream`(`core/price_stream.py`) → Next 프록시(`app/api/monitor-stream`) → 브라우저
+`EventSource`(`useLivePrices`). 1초마다 바뀐 것만 보내고, 15초 무변화면 `: ping` 으로 연결을 유지한다.
+- **가격만 보낸다.** 스탑선·활동 로그·주문은 계속 15초 `/monitor` 폴링이 출처다(표시용 스트림이 자금 경로
+  상태의 출처가 되지 않게). 프론트는 폴링 스냅샷 위에 가격만 덮어쓰고 평가금액·미실현손익을 재계산한다.
+- **구독자가 있을 때만 WS 세션이 산다**(refcount + `PRICE_STREAM_IDLE_SEC`=30초 유예). 탭이 백그라운드로
+  가면(`document.hidden`) 끊고 돌아오면 다시 붙는다. ⚠️ 같은 토큰으로 워커 세션과 동시에 살 때 **양쪽이 다
+  틱을 받는지는 미검증**(`docs/plan/realtime-ws-migration.md` §2.1)이라, 겹치는 시간을 '탭을 보는 동안'으로
+  한정한 것이다. 워커 하트비트(`monitor_poll.ws.ticks`/`reconnects`)에 이상이 보이면 `PRICE_STREAM_ENABLED=0`.
+- 틱이 없는 종목·시간(하한가·NXT 미상장·세션 공백·장 마감 후)은 종목당 `PRICE_STREAM_REST_TTL_SEC`(15초)
+  간격 REST 폴백(`src:"rest"`)이고, '실시간' 뱃지는 WS 틱이 10초 안에 들어올 때만 붙는다.
+- 스트림이 살아 있는 동안 `/monitor` 폴링도 그 스냅샷을 재사용하므로(`fresh_prices`, 5초 신선도) 종목당
+  REST 2콜이 사라지고 두 경로 가격이 일치한다. 스트림이 멈추면 스냅샷은 stale 로 걸러져 REST 로 되돌아간다.
 
 **거시 이벤트 표시** (`GET /macro-events?month=YYYYMM` — `macro_gate.month_events`, jongalab `macro_event` 읽기):
 - **캘린더 탭**: 날짜 셀 우상단 점 마커(주황=sev3 FOMC·CPI·고용 → 전야 시드 축소 대상 / 회색=sev2 PPI·금통위 관찰)

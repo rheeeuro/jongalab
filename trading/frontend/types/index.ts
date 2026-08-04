@@ -248,6 +248,33 @@ export interface MonitorEvent {
 /** 현재 폴링 단계 — 매도 감시 / KRX·NXT 매수 집행 / 미가동(null). */
 export type MonitorPhase = "sell" | "buy_krx" | "buy_nxt" | null;
 
+/** 실시간 시세 스트림(SSE `/api/monitor-stream`) 1건 — 종목별 표시 가격. */
+export interface LivePrice {
+  prc: number; // 현재가(원)
+  is_nxt: boolean; // NXT 보드 시세면 true
+  src: "ws" | "rest"; // ws=키움 실시간 틱 / rest=틱 없어 REST 폴백(최대 15초 지연)
+  age: number | null; // 이 값의 나이(초)
+}
+
+/** WS 피드 가동 상태(백엔드 `KiwoomRealtimeFeed.stats()`). */
+export interface LiveFeedStats {
+  connected: boolean;
+  ticks: number;
+  reconnects: number;
+  symbols: number;
+  last_tick_age: number | null;
+  error: string | null;
+}
+
+export interface PriceStreamMsg {
+  seq?: number;
+  at?: number;
+  ts?: string;
+  prices?: Record<string, LivePrice>;
+  ws?: LiveFeedStats | null;
+  disabled?: boolean; // PRICE_STREAM_ENABLED=0 → 폴링만으로 동작
+}
+
 export interface MonitorState {
   active: boolean; // 하트비트 기준 워커 가동 중 여부 (60초 이내 폴링)
   in_window: boolean; // 가동 구간(매도 08:00~09:30 / 매수 15:00·19:30) 여부

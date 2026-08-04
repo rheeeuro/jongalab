@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import type { MonitorState, MonitorPosition, NameMap, BuyPreview, BuyPreviewVenue, RegimeGateDiag } from "@/types";
+import type {
+  MonitorState, MonitorPosition, NameMap, BuyPreview, BuyPreviewVenue, RegimeGateDiag,
+  LiveFeedStats, LivePrice, PriceStreamMsg,
+} from "@/types";
 import { won, wonExact, pnlClass, ago, hhmmss } from "@/lib/format";
 import { eventMeta, eventDetail } from "@/lib/events";
 
@@ -25,6 +28,81 @@ function useNewIds<T extends { id: number }>(items: T[]): Set<number> {
     return () => clearTimeout(t);
   }, [items]);
   return fresh;
+}
+
+type LiveState = {
+  prices: Record<string, LivePrice>;
+  ws: LiveFeedStats | null;
+  connected: boolean; // SSE 연결 + 스냅샷 수신 중
+};
+
+const LIVE_OFF: LiveState = { prices: {}, ws: null, connected: false };
+const LIVE_RETRY_MS = 10_000;
+
+// 매도 워커와 같은 키움 WS 틱을 SSE(/api/monitor-stream)로 받아 현재가를 실시간 갱신한다.
+// 스탑선·활동 로그·주문은 계속 15초 폴링(/api/monitor)이 담당한다 — 여기선 가격만 온다.
+// 백엔드 WS 세션은 **구독자가 있는 동안만** 살아 있으므로(워커 피드와 겹치는 시간을 최소화),
+// 탭이 백그라운드로 가면(document.hidden) 연결을 끊고 돌아오면 다시 붙는다.
+function useLivePrices(enabled: boolean): LiveState {
+  const [live, setLive] = useState<LiveState>(LIVE_OFF);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let es: EventSource | null = null;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
+    let disabled = false; // 백엔드가 PRICE_STREAM_ENABLED=0 → 재시도하지 않는다
+
+    const drop = () => {
+      es?.close();
+      es = null;
+      setLive((s) => (s.connected ? { ...s, connected: false } : s));
+    };
+
+    const open = () => {
+      if (closed || disabled || es) return;
+      es = new EventSource("/api/monitor-stream");
+      es.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data) as PriceStreamMsg;
+          if (msg.disabled) {
+            disabled = true;
+            drop();
+            return;
+          }
+          setLive({ prices: msg.prices ?? {}, ws: msg.ws ?? null, connected: true });
+        } catch {
+          /* 깨진 프레임 1건은 다음 푸시로 회복 */
+        }
+      };
+      es.onerror = () => {
+        // EventSource 기본 재연결은 끊긴 사유를 못 가려 즉시·반복적으로 두드린다.
+        // 직접 닫고 일정 간격으로만 재시도해 백엔드 WS 세션이 깜빡이지 않게 한다.
+        drop();
+        if (!closed && !disabled) retry = setTimeout(open, LIVE_RETRY_MS);
+      };
+    };
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        if (retry) clearTimeout(retry);
+        drop();
+      } else {
+        open();
+      }
+    };
+
+    if (!document.hidden) open();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      closed = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (retry) clearTimeout(retry);
+      es?.close();
+    };
+  }, [enabled]);
+
+  return live;
 }
 
 const ORDER_STATUS: Record<string, string> = {
@@ -103,7 +181,27 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
     return () => clearInterval(t);
   }, [isBuyPhase, data.poll_sec, fetchPreview]);
 
-  const positions = data.positions ?? [];
+  // 실시간 시세 — 보유 종목이 있을 때만 구독한다(볼 게 없으면 WS 세션도 붙이지 않는다).
+  const feed = useLivePrices((data.positions?.length ?? 0) > 0);
+  // 폴링 스냅샷에 실시간 가격을 덮어씌운다(평가금액·미실현손익은 같은 규칙으로 재계산).
+  const positions = useMemo(() => {
+    const base = data.positions ?? [];
+    if (!feed.connected) return base;
+    return base.map((p) => {
+      const hit = feed.prices[p.stk_cd];
+      if (!hit?.prc) return p;
+      return {
+        ...p,
+        cur_prc: hit.prc,
+        is_nxt: hit.is_nxt,
+        eval_amt: hit.prc * p.qty,
+        unrealized_pnl: (hit.prc - p.avg_price) * p.qty,
+      };
+    });
+  }, [data.positions, feed]);
+  // 틱이 실제로 흐르는 중인지 — 연결만 됐고 틱이 없으면(세션 공백·하한가) '실시간'이라 하지 않는다.
+  const tickAge = feed.ws?.last_tick_age ?? null;
+  const streaming = feed.connected && Boolean(feed.ws?.connected) && tickAge !== null && tickAge < 10;
   const orders = data.orders ?? [];
   const events = data.events ?? [];
 
@@ -121,7 +219,9 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
     : data.in_window ? "신호 없음" : "모니터 대기";
   const activeDesc = isBuyPhase
     ? `매수 후보를 확정하고 마감(종가)에 매수해요.`
-    : `${data.poll_sec}초마다 보유 종목을 점검 중이에요. 손절 −${data.hard_stop_pct}% · 트레일링 −${data.trail_pct}%.`;
+    : `${data.poll_sec}초마다 보유 종목을 점검 중이에요. 손절 −${data.hard_stop_pct}% · 트레일링 −${data.trail_pct}%.${
+        streaming ? " 아래 현재가는 워커와 같은 실시간 체결(WS)이에요." : ""
+      }`;
 
   return (
     <div className="space-y-4">
@@ -144,6 +244,15 @@ export default function MonitorView({ initial, names }: { initial: MonitorState;
               />
             </span>
             <span className="truncate text-base font-bold">{statusTitle}</span>
+            {/* 시세가 WS 틱으로 흐르는 중임을 표시 (연결만 되고 틱이 없으면 표시하지 않음) */}
+            {streaming && (
+              <span
+                title={`실시간 시세 · 마지막 틱 ${tickAge}초 전`}
+                className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold leading-none text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-300"
+              >
+                실시간
+              </span>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <span className="text-xs text-slate-400 tabular-nums">

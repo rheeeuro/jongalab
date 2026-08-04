@@ -4,15 +4,19 @@ Trading Execution API — 자동매매 집행/조회/제어 FastAPI 서버 (loca
 대시보드(trading/frontend, :3001)의 백엔드이자 수동 제어 면(킬스위치·포지션·시그널 조회).
 주문 권한은 이 도메인에만 있으며, 모든 주문은 ExecutionEngine + RiskEngine 을 경유한다.
 """
+import asyncio
 import hashlib
+import json
 import logging
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.config import (  # noqa: F401  (import 시 루트 .env 로드)
     DB_CONFIG, TRADING_MODE, ADMIN_PASSWORD, HARD_STOP_LOSS_PCT, TRAIL_PCT,
+    PRICE_STREAM_PUSH_SEC,
 )
 from core.logging_setup import setup_logging
 from core.repository import kiwoom_token as token_repo
@@ -34,6 +38,7 @@ from core.ex_rights import get_next_session_ex_rights
 from core.regime_gate import seed_multiplier
 from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
 from core.macro_gate import macro_keep, month_events
+from core.price_stream import get_price_stream
 
 setup_logging()
 logger = logging.getLogger("TradingAPI")
@@ -209,8 +214,12 @@ def monitor():
     plans = {p["stk_cd"]: p for p in settle_plan_repo.get_active_plans()}
     if positions:
         dc = KiwoomDataClient()
+        # 모니터 탭 SSE 가 살아 있으면 그 WS 스냅샷을 쓴다(REST 중복 조회 생략 + 두 경로 값 일치).
+        live = get_price_stream().fresh_prices()
         for p in positions:
-            cur, is_nxt = dc.get_display_price(p["stk_cd"])
+            hit = live.get(p["stk_cd"])
+            cur, is_nxt = ((hit["prc"], hit["is_nxt"]) if hit
+                           else dc.get_display_price(p["stk_cd"]))
             p["cur_prc"] = cur
             p["is_nxt"] = is_nxt
             p["eval_amt"] = cur * p["qty"]
@@ -236,6 +245,49 @@ def monitor():
         "orders": list(reversed(order_repo.list_by_date(today_dash))),
         "events": audit_log.list_activity_events(50, date_dash=today_dash),
     }
+
+
+@app.get("/monitor/stream")
+async def monitor_stream(request: Request):
+    """모니터 탭 실시간 시세 SSE — 매도 워커와 **같은 키움 WS 틱**을 대시보드로 밀어 준다.
+
+    `core/price_stream.PriceStream` 이 조립한 스냅샷을 `PRICE_STREAM_PUSH_SEC`(1초)마다,
+    바뀐 것이 있을 때만 보낸다(`data: {"seq":..,"prices":{코드:{prc,is_nxt,src,age}},"ws":{..}}`).
+    보내는 것은 **가격뿐**이다 — 스탑선·활동 로그·주문은 15초 `/monitor` 폴링이 계속 담당한다
+    (표시 전용 스트림이 자금 경로 상태의 출처가 되지 않게).
+
+    ⚠️ WS 세션은 **구독자가 있을 때만** 살아 있다(§price_stream 설계 1). 스트림이 죽거나
+    `PRICE_STREAM_ENABLED=0` 이면 첫 이벤트로 `{"disabled":true}` 를 보내고 닫는다 →
+    프론트는 종전 15초 폴링만으로 동작한다.
+    """
+    stream = get_price_stream()
+
+    async def gen():
+        if not stream.acquire():
+            yield 'data: {"disabled": true}\n\n'
+            return
+        try:
+            last_seq = 0   # 프로듀서 첫 스냅샷은 seq=1 — 기동 전 빈 스냅샷(seq=0)은 보내지 않는다
+            since_ping = 0.0
+            while not await request.is_disconnected():
+                snap = stream.snapshot()
+                if snap.get("seq") != last_seq:
+                    last_seq = snap.get("seq")
+                    since_ping = 0.0
+                    yield f"data: {json.dumps(snap, ensure_ascii=False)}\n\n"
+                else:
+                    since_ping += PRICE_STREAM_PUSH_SEC
+                    if since_ping >= 15:  # 프록시·브라우저가 유휴 연결을 끊지 않게
+                        since_ping = 0.0
+                        yield ": ping\n\n"
+                await asyncio.sleep(PRICE_STREAM_PUSH_SEC)
+        finally:
+            stream.release()  # 클라이언트 이탈(취소)에도 반드시 반납 → 구독자 0 이면 WS 종료
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+    })
 
 
 @app.get("/names")

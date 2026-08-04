@@ -219,6 +219,21 @@ SUPPLY_FEED_ENABLED = os.getenv('SUPPLY_FEED_ENABLED', '1') == '1'
 # 관측 스냅샷 기록 주기(초) — 종목당 이 간격으로 audit_log 1행.
 SUPPLY_LOG_SEC = float(os.getenv('SUPPLY_LOG_SEC', '60'))
 
+# ── 모니터 탭 실시간 시세 스트림 (core/price_stream.py + api `GET /monitor/stream`, 2026-08-04) ──
+# 대시보드 모니터 탭이 워커와 **같은 키움 WS** 로 시세를 받아 SSE 로 실시간 표시한다. 표시 전용 —
+# 주문·손절 판정을 전혀 경유하지 않고, 꺼도 모니터 탭은 종전 15초 폴링(`/monitor`)으로 동작한다.
+# ⚠️ 워커 세션과 같은 토큰으로 WS 가 동시에 살아 있을 때 양쪽이 다 틱을 받는지는 미검증
+#   (realtime-ws-migration.md §2.1). 그래서 **모니터 탭을 보는 동안만** 세션을 붙이고,
+#   구독자가 없으면 닫는다. 워커 하트비트(monitor_poll.ws.ticks/reconnects)에 이상이 보이면 0 으로.
+PRICE_STREAM_ENABLED = os.getenv('PRICE_STREAM_ENABLED', '1') == '1'
+# 스냅샷 갱신·푸시 주기(초). NXT 는 초당 30틱까지 오므로 캐시를 이 간격으로 표집한다
+# (게이지 트랜지션이 700ms 라 1초면 육안상 연속으로 움직인다).
+PRICE_STREAM_PUSH_SEC = float(os.getenv('PRICE_STREAM_PUSH_SEC', '1.0'))
+# 마지막 구독자가 떠난 뒤 WS 를 닫기까지 유예(초) — 새로고침·탭 전환마다 세션이 깜빡이지 않게.
+PRICE_STREAM_IDLE_SEC = float(os.getenv('PRICE_STREAM_IDLE_SEC', '30'))
+# 틱이 없는 종목(하한가·NXT 미상장·세션 공백)의 REST 폴백 간격(초) — 1초 푸시가 REST 를 두드리지 않게.
+PRICE_STREAM_REST_TTL_SEC = float(os.getenv('PRICE_STREAM_REST_TTL_SEC', '15'))
+
 # ── ⚠️ 매매 안전장치 ──
 # 'paper': 모의(주문 미전송, 의도만 로깅·기록) / 'live': 실주문 전송. 기본값은 paper.
 TRADING_MODE = os.getenv('TRADING_MODE', 'paper').lower()
