@@ -57,6 +57,24 @@ def get_open_sent() -> list[dict]:
         return cursor.fetchall()
 
 
+def get_open_sent_aged(min_age_sec: int) -> list[dict]:
+    """전송 후 min_age_sec 초가 지난 'sent' 주문 — '죽은 주문' 판정 대상.
+
+    `get_open_sent`(체결 동기화용, 전체)와 달리 **갓 전송된 주문을 제외**한다. 전량체결 직후의
+    주문은 미체결 목록(ka10075)엔 이미 없고 체결내역(ka10076) 반영은 몇 초 늦을 수 있어,
+    그 구간에 판정하면 체결된 주문을 '소멸'로 오인한다(2026-08-05 레인보우로보틱스).
+    updated_at 은 'intended'→'sent' 로 바뀐 시각 = 전송 시각이다.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, stk_cd, side, qty, kiwoom_ord_no FROM `order` "
+            "WHERE status = 'sent' AND mode = 'live' AND kiwoom_ord_no IS NOT NULL "
+            "AND updated_at <= NOW() - INTERVAL %s SECOND",
+            (int(min_age_sec),),
+        )
+        return cursor.fetchall()
+
+
 def get_stale_sent() -> list[dict]:
     """전일 이전에 전송됐는데 아직 'sent'(미체결)인 주문 — 개장 시 자동취소 대상."""
     with get_db() as (conn, cursor):
@@ -90,6 +108,28 @@ def void_dead_order(order_id: int) -> None:
             (order_id,),
         )
         conn.commit()
+
+
+def unvoid_dead_order(order_id: int) -> bool:
+    """`void_dead_order` 오판정 되돌리기 — 'sent' 복귀 + 멱등키 원복. 되돌렸으면 True.
+
+    죽은 주문 판정은 '브로커 미체결(ka10075)에 없음 + 로컬 체결 0' 인데, **전량체결 직후**의
+    주문도 미체결 목록엔 없고 체결내역(ka10076) 반영은 몇 초 늦을 수 있다. 그 경합에 걸려
+    실제로는 체결된 주문이 canceled 로 마감되면 `sync_fills`(status='sent' 만 조회)가 다시는
+    보지 않아 체결·실현손익이 영구 누락되고 유령 포지션이 남는다. 이 함수로 'sent' 로 되돌리면
+    다음 `sync_fills` 가 정상 경로로 체결을 반영한다(값을 손으로 써넣지 않는다).
+    ':dead:<id>' 접미사를 떼어 원래 멱등키를 복원하므로 중복 매도 차단도 함께 되살아난다.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "UPDATE `order` SET status = 'sent', "
+            "idempotency_key = REPLACE(idempotency_key, CONCAT(':dead:', id), '') "
+            "WHERE id = %s AND status = 'canceled' "
+            "AND idempotency_key LIKE CONCAT('%%:dead:', id)",
+            (order_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def list_by_date(date_dash: str) -> list[dict]:

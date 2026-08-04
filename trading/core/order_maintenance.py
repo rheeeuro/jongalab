@@ -7,6 +7,8 @@ paper 는 미전송이라 no-op.
 """
 import logging
 
+from core.config import DEAD_ORDER_MIN_AGE_SEC
+from core.kiwoom_data_client import to_int
 from core.repository import order as order_repo
 from core.repository import fill as fill_repo
 
@@ -64,26 +66,37 @@ def reconcile_dead_sent(client) -> int:
     IOC 는 영원히 'sent' 로 남아 멱등키를 물고 같은 tag 재매도를 막는다. 이 함수가 그런
     '죽은' 주문을 canceled 로 마감하고 멱등키를 해제해, 다음 폴링에서 재매도가 가능하게 한다.
 
-    안전 가드: 브로커 미체결(oso)에 아직 살아있는 주문은 체결 여지가 있어 건드리지 않고,
-    체결분(fill)이 일부라도 있는 주문은 sync_fills 가 마감하도록 남긴다. 따라서 '브로커에
-    없음 + 체결 0' 인 순수 소멸 주문만 정리한다. sync_fills 직후 호출하는 것을 전제로 한다."""
+    안전 가드 4중 — 어느 하나라도 걸리면 정리하지 않는다(오판정 비용이 훨씬 크다):
+      1) 전송 후 DEAD_ORDER_MIN_AGE_SEC 초 미경과 → 판정 보류. **전량체결 직후**의 주문도
+         미체결 목록엔 없고 체결내역 반영은 몇 초 늦으므로, 이 구간에선 소멸과 구분이 안 된다.
+      2) 브로커 미체결(oso)에 아직 살아있음 → 체결 여지 있음
+      3) 브로커 체결내역(cntr)에 체결수량이 있음 → 체결된 주문. sync_fills 가 반영할 몫이다
+         (직전 sync_fills 가 예외로 실패해도 이 가드가 오판정을 막는다)
+      4) 로컬 체결분(fill)이 일부라도 있음 → sync_fills 가 마감 처리
+    2026-08-05 레인보우로보틱스: 1)3) 없이 전량체결된 매도를 1초 뒤 canceled 로 마감해
+    체결·실현손익이 영구 누락되고 유령 포지션이 남았다(복구는 order.unvoid_dead_order).
+    sync_fills 직후 호출하는 것을 전제로 한다."""
     if getattr(client, "paper", True):
         return 0
-    pending = order_repo.get_open_sent()
+    pending = order_repo.get_open_sent_aged(DEAD_ORDER_MIN_AGE_SEC)
     if not pending:
         return 0
     try:
         oso = client.get_open_orders(stex_tp="0").get("oso", []) or []
+        cntr = client.get_executions(qry_tp="0", sell_tp="0", stex_tp="0").get("cntr", []) or []
     except Exception as e:
-        logger.error("미체결 조회 실패 — 죽은주문 정리 보류: %s", e)
+        logger.error("미체결·체결 조회 실패 — 죽은주문 정리 보류: %s", e)
         return 0
     live = {o.get("ord_no") for o in oso}
+    filled_at_broker = {c.get("ord_no") for c in cntr if to_int(c.get("cntr_qty")) > 0}
 
     n = 0
     for od in pending:
         ono = od["kiwoom_ord_no"]
         if ono in live:
             continue  # 아직 브로커에 살아있음(체결 여지) → 보존
+        if ono in filled_at_broker:
+            continue  # 브로커에 체결이 있음 → 죽은 주문이 아니다(sync_fills 가 반영)
         if fill_repo.filled_qty(od["id"]) > 0:
             continue  # 부분체결 존재 → sync_fills 가 마감 처리
         order_repo.void_dead_order(od["id"])
