@@ -92,6 +92,17 @@ NAVER_NEWS_PAGE_SIZE = int(os.getenv('NAVER_NEWS_PAGE_SIZE', '40'))
 NAVER_NEWS_SLEEP_SEC = float(os.getenv('NAVER_NEWS_SLEEP_SEC', '0.3'))   # 종목 간 간격
 NAVER_NEWS_TIMEOUT = int(os.getenv('NAVER_NEWS_TIMEOUT', '10'))
 
+# ── 증권 섹션 뉴스 수집 (workers/sec_news_collector.py) — 뉴스 탭 표시 전용 ──
+# 종합 속보 채널(텔레그램)을 화면 소스에서 걷어내기 위한 경로다. 적재처가 sec_news 라
+# 라벨·rule·veto 와 완전히 분리돼 있고(sql/49), 그래서 NEWS_ACTIVE_SOURCES 게이트의
+# 대상이 아니다 — 끄면 뉴스 탭 헤드라인만 비고 나머지 파이프라인은 무영향.
+SEC_NEWS_ENABLED = os.getenv('SEC_NEWS_ENABLED', '1') == '1'
+# 한 사이클에 넘길 최대 페이지 수(1페이지 20건). 실측 증권 섹션은 하루 56페이지(~1,120건)라
+# 30분 증분은 2~3페이지면 덮인다. 상한을 두는 이유는 파서가 깨져 '신규 0건'을 못 만들 때
+# 56페이지를 끝까지 두드리는 폭주를 막기 위해서다(장 시작 직후 몰림은 8페이지로 충분).
+SEC_NEWS_MAX_PAGES = int(os.getenv('SEC_NEWS_MAX_PAGES', '8'))
+SEC_NEWS_SLEEP_SEC = float(os.getenv('SEC_NEWS_SLEEP_SEC', '0.3'))       # 페이지 간 간격
+
 # ── 미매칭 뉴스 섹터·거시 라벨 (workers/sector_news_labeler.py) — 관측 전용 ──
 # 사명이 안 잡혀 버려진 뉴스(content_skip no_match, 실측 수집률 34%)에 섹터·방향 라벨을 붙여
 # 검정 표본을 만든다. **소비 경로 없음** — 점수·시드·veto 어디에도 들어가지 않는다(sql/45 주석).

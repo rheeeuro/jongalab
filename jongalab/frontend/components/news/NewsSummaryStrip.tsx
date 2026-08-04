@@ -14,7 +14,7 @@ export function NewsSummaryStrip({
   articleCount,
 }: {
   rows: NewsMaterialRow[];
-  /** 그 날 수집된 기사 수 (스트림 total — 종목 중복을 접은 값) */
+  /** 그 날 수집된 증권 기사 수 (스트림 total — sec_news 는 기사 1행이라 그대로 전체 수다) */
   articleCount: number;
 }) {
   const durable = rows.filter((r) => r.news_durability === "연속").length;

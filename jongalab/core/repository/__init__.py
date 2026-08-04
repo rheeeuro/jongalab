@@ -27,8 +27,13 @@ from core.repository.news import (
     get_today_news_stats_by_stock,
     get_today_news_by_stock,
     get_news_heat,
-    get_news_stream,
     delete_old_news_mentions,
+)
+
+from core.repository.sec_news import (
+    save_sec_news,
+    get_sec_news_stream,
+    delete_old_sec_news,
 )
 
 from core.repository.source import (

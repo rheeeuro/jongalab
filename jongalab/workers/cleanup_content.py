@@ -13,6 +13,7 @@ from core.repository import (
     delete_old_content_skips,
     delete_old_analysis_fails,
     delete_old_news_mentions,
+    delete_old_sec_news,
 )
 
 setup_logging()
@@ -36,6 +37,14 @@ def main() -> int:
         logger.info(f"뉴스 언급 정리 완료: {NEWS_RETENTION_DAYS}일 이전 {news_deleted}건 삭제")
     except Exception as e:
         logger.error(f"뉴스 언급 정리 실패: {e}")
+        rc = 1
+    try:
+        # 뉴스 탭 표시용 원자료(sec_news). 집계에 안 쓰이므로 잘려도 표본이 상하지 않는다 —
+        # 같은 보존일을 쓰는 건 두 계층의 화면 날짜 이동 범위를 맞추기 위해서다.
+        sec_deleted = delete_old_sec_news(NEWS_RETENTION_DAYS)
+        logger.info(f"증권 섹션 뉴스 정리 완료: {NEWS_RETENTION_DAYS}일 이전 {sec_deleted}건 삭제")
+    except Exception as e:
+        logger.error(f"증권 섹션 뉴스 정리 실패: {e}")
         rc = 1
     try:
         skip_deleted = delete_old_content_skips(RETENTION_MONTHS)

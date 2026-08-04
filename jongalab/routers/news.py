@@ -1,10 +1,15 @@
-"""뉴스 재료 라우트 — 뉴스 속보 채널 언급 집계(news_mention) + 재료 지속성 라벨."""
+"""뉴스 라우트 — 재료 집계(news_mention) + 재료 지속성 라벨 + 헤드라인 스트림(sec_news).
+
+두 계층이 한 라우터에 있다. `/heat`·`/materials`·`/{ticker}` 는 **집계 계층**(news_mention,
+`NEWS_ACTIVE_SOURCES` 게이트 적용)이고, `/stream` 만 **표시 계층**(sec_news)이다 —
+왜 나눴는지는 sql/49 주석. 새 엔드포인트를 붙일 땐 어느 쪽인지 먼저 정할 것.
+"""
 from datetime import datetime
 
 from fastapi import APIRouter, Query
 
 from core.news_material_judge import is_price_report
-from core.repository import get_news_heat, get_news_stream, get_today_news_by_stock
+from core.repository import get_news_heat, get_sec_news_stream, get_today_news_by_stock
 from core.repository.stock_report import get_news_material_rows
 
 router = APIRouter(prefix="/api/news", tags=["news"])
@@ -34,15 +39,21 @@ def get_news_headline_stream(
     limit: int = Query(40, ge=1, le=100, description="한 페이지 기사 수"),
     offset: int = Query(0, ge=0, description="건너뛸 기사 수 (더 보기)"),
 ):
-    """그 날 헤드라인을 **기사 단위**로 최신순 반환 (뉴스 탭 헤드라인 스트림).
+    """그 날 **증권 섹션 기사**를 최신순 반환 (뉴스 탭 헤드라인 스트림).
 
-    같은 기사가 여러 종목을 언급하면 news_mention 은 종목당 1행이라, 여기서 기사 1건 +
-    종목 칩 N개로 접어 준다. 각 기사에 `is_price_report`("급등/상한가/특징주" 류인가)를
-    실어 화면이 시세 기사를 기본으로 숨길 수 있게 한다 — 판별은 후속 재료 채점과 **같은 함수**.
+    소스는 `sec_news`(네이버 증권 섹션 목록)다. 2026-08-05 이전엔 news_mention(텔레그램
+    종합 속보 채널)을 읽었는데, 그 채널은 주식 전용이 아니라 저장 여부가 사명 매칭 하나로만
+    갈렸다 — 실측 14일 5,674기사 중 4.1%가 `70대 남성 사망`(남성 004270)·`한화, 삼성 4-1
+    제압`(한화 000880) 류의 오탐이었다. 모집단이 원인이라 모집단을 바꿨다(sql/49).
+    집계(`/heat`·`/materials`·`/{ticker}`)는 그대로 news_mention 을 읽는다 — 이 교체는
+    화면만 건드리고 라벨·rule·veto 표본에는 닿지 않는다.
+
+    각 기사에 `is_price_report`("급등/상한가/특징주" 류인가)를 실어 화면이 시세 기사를
+    기본으로 숨길 수 있게 한다 — 판별은 후속 재료 채점과 **같은 함수**.
     """
     try:
         report_date = date or datetime.now().strftime("%Y-%m-%d")
-        items, total = get_news_stream(report_date, limit=limit, offset=offset)
+        items, total = get_sec_news_stream(report_date, limit=limit, offset=offset)
         for it in items:
             it["is_price_report"] = is_price_report(it.get("headline") or "")
         return {

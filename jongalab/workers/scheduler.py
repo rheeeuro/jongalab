@@ -95,6 +95,11 @@ JOBS = [
     # 의미가 없어 유예 10분. 실측 38종목 14초라 타임아웃은 넉넉히 5분.
     Job("naver_news_collector", UV_RUN + ["workers/naver_news_collector.py"],
         timeout=300, grace=600, minute="15,45", hour="8-20", day_of_week="mon-fri"),
+    # 평일 08:05~20:35 매 30분 증권 섹션 뉴스 수집(뉴스 탭 표시용, :05/:35 — 위 세 잡과 어긋나게).
+    # 멱등 적재라 지각 실행도 무해하지만 늦게 도는 건 의미가 없어 유예 10분. 실측 2~3페이지
+    # ×20건이라 한 사이클 5초 안쪽 — 타임아웃은 상한(8페이지) 기준으로 넉넉히 3분.
+    Job("sec_news_collector", UV_RUN + ["workers/sec_news_collector.py"],
+        timeout=180, grace=600, minute="5,35", hour="8-20", day_of_week="mon-fri"),
     # 평일 17:50 시간외/리스크 라벨. ka10087 이 16~18시에만 살아있어 유예 5분(18시 넘기면 무의미).
     Job("after_hours_labels", UV_RUN + ["workers/after_hours_labels.py"],
         timeout=900, grace=300, minute="50", hour="17", day_of_week="mon-fri"),
