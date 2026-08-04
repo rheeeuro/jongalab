@@ -256,6 +256,9 @@ export function EdgeRuleDetailContent({
                   { l: STAT_META.n_days.label, v: s.n_days != null ? `${s.n_days}일` : "—" },
                   { l: STAT_META.mean_net.label, v: fmtPct(s.mean_net), tone: retTone(s.mean_net) },
                   { l: STAT_META.win_rate.label, v: s.win_rate !== null ? `${Math.round(s.win_rate * 100)}%` : "—" },
+                  { l: STAT_META.ci_low.label, v: fmtPct(s.ci_low), tone: retTone(s.ci_low) },
+                  { l: STAT_META.t_days.label, v: fmtT(s.t_days), tone: dayTTone(s.t_days) },
+                  // 초과 계열은 적용 조건이 아니라 참고값 — 상세 화면에서만 보여준다(2026-08-04).
                   { l: STAT_META.mean_exc.label, v: fmtPct(s.mean_exc), tone: retTone(s.mean_exc) },
                   { l: STAT_META.ci_low_exc.label, v: fmtPct(s.ci_low_exc), tone: retTone(s.ci_low_exc) },
                   { l: STAT_META.t_days_exc.label, v: fmtT(s.t_days_exc), tone: dayTTone(s.t_days_exc) },

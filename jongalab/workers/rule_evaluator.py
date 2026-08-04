@@ -16,8 +16,8 @@
        승격 후보(게이트 전체 충족) / 집행 설계 필요(통계는 충족, 선정 시점 실행 불가 피처) /
        강등 검토(core.edge_policy.check_demotion — live 비대조군, 최근 10거래일 창
        n≥20·거래일≥5 + **역할별 부호**: selector 는 매수 종목 mean_net<0, veto 는 제외 종목
-       mean_net>0(이기는 종목을 버리는 중)일 때. benchmark 는 제외 — live 대조군이 사라지면
-       승격 게이트가 fail-closed 로 전 후보를 막는다). 승격/집행설계는 판정일 1회지만
+       mean_net>0(이기는 종목을 버리는 중)일 때. benchmark 는 제외 — 실탄이 아닌 페이퍼
+       기준선이라 유지 비용이 없다). 승격/집행설계는 판정일 1회지만
        **강등은 판정 일정(sql/39) 밖이라 매 평일 재검사**되어 조건이 유지되는 동안 반복된다 —
        알림에 일 등가중 최근 평균을 병기해 쏠림(부호 상충)을 눈으로 걸러낸다.
      실제 전이는 관리자 API 수동 승인.
@@ -126,10 +126,12 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
     """registered_at 이후 채점 결과에서 누적 통계 재계산(비용 차감 후 순수익 기준).
 
     두 계열을 함께 낸다 — 재는 자가 다르면 답도 다르기 때문에 이름으로 구분한다.
-      · 원시(mean_net·ci_low·t_days)     : 절대 순수익. **대조군 우위** 게이트와 veto
-        실익 게이트가 쓴다("현행 선정보다 나은가"는 절대값으로 물어야 답이 된다).
+      · 원시(mean_net·ci_low·t_days)     : 절대 순수익. **승격·확인창·강등 게이트가 전부 이
+        계열만 쓴다**(2026-08-04 사용자 결정 — "평균보다 크지 않아도 안정적으로 수익이 나면
+        그만"). 이전에는 유의성만 초과 계열로 쟀고 대조군 우위 조건이 따로 있었다(둘 다 제거).
       · 초과(mean_exc·ci_low_exc·t_days_exc): 그날 **유니버스 자기제외 평균** 대비 초과분.
-        selector 승격의 통계 유의성(ci_low_exc>0, t_days_exc≥PROMO_MIN_DAY_T)이 쓴다.
+        **게이트에 쓰지 않는다 — 룰 상세 화면 표기·수동 검토 전용 진단값**이다. 계산을 남겨두는
+        이유는 "장 덕에 올랐나"를 사람이 눈으로 확인할 수단은 여전히 필요하기 때문이다.
 
     왜 '자기제외'인가(2026-07-28): 대조군(=selected top10)을 기준선으로 쓰면 rule 매칭
     종목이 평균 54%(일부 100%) 그 안에 들어 있어 **자기 자신을 빼는** 꼴이 된다. 분산이
@@ -138,7 +140,7 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
     실측 잡음 감소는 26%(필요 거래일 1.8배 단축)다.
     비용(EDGE_COST_PCT)은 초과분에서 양쪽이 상쇄되므로 원시에만 적용한다.
 
-    uni_totals: {report_date: (라벨 합계, 종목 수)} — 없으면 초과 계열은 None(게이트 fail-closed).
+    uni_totals: {report_date: (라벨 합계, 종목 수)} — 없으면 초과 계열은 None(표기만 '—' 가 된다).
     """
     nets, lows, dated, dated_exc = [], [], [], []
     updated_through = None
@@ -207,7 +209,7 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
 
     mean_days, t_days = _day_cluster_t(_by_day(dated))
 
-    # 초과 계열 — selector 승격 게이트가 보는 값. 표본이 없으면 전부 None → fail-closed.
+    # 초과 계열 — **표기·수동 검토용 진단값**(2026-08-04 게이트에서 제외). 표본 없으면 None.
     n_exc = len(dated_exc)
     if n_exc:
         exc = [v for _, v in dated_exc]
@@ -227,10 +229,10 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
         "win_rate": round(win_rate, 3),
         "std": round(std, 3),
         "ci_low": round(ci_low, 3),
-        # 원시 일 등가중 평균과 그 t — 참고·표시용(쏠림 진단). 게이트는 아래 초과 계열을 본다.
+        # 원시 일 등가중 평균과 그 t — **게이트(유의성)가 쓰는 값**이자 쏠림 진단값.
         "mean_net_days": round(mean_days, 3) if mean_days is not None else None,
         "t_days": round(t_days, 2) if t_days is not None else None,
-        # ── 유니버스 자기제외 초과 계열 — selector 승격 통계 게이트가 쓰는 값 ──
+        # ── 유니버스 자기제외 초과 계열 — 룰 상세 화면 표기 전용(게이트 미사용) ──
         "n_exc": n_exc,
         "mean_exc": round(mean_exc, 3) if mean_exc is not None else None,
         "ci_low_exc": round(ci_low_exc, 3) if ci_low_exc is not None else None,
@@ -361,7 +363,7 @@ def run():
         rule["_daily_rows"] = daily_rows   # pass2 판정이 발견/확인 구간으로 잘라 쓴다
         rule["_new_scored"] = new_scored
 
-    # ── pass 2: 승격/강등 게이트 (모든 rule 의 stats 가 신선해진 뒤 — 대조군 비교 정합) ──
+    # ── pass 2: 승격/강등 게이트 (모든 rule 의 stats 가 신선해진 뒤 — 판정 시점 정합) ──
     controls = [r for r in rules if rule_role(r) == "benchmark" and r["status"] == "live"]
     promotions, exec_pending, demotions = [], [], []
     for rule in rules:
@@ -402,6 +404,8 @@ def run():
                     "discovery": {
                         "at": str(date.today()), "n_days": d_stats.get("n_days"),
                         "pass": d_pass,
+                        # 판정에 쓴 값(mean_net·t_days)을 기록하고, 초과 계열은 참고로 병기한다.
+                        "mean_net": d_stats.get("mean_net"), "t_days": d_stats.get("t_days"),
                         "mean_exc": d_stats.get("mean_exc"), "t_days_exc": d_stats.get("t_days_exc"),
                         "reasons": d_gate["stat_reasons"],
                         "exec_blocked": d_gate["exec_reasons"] or None,
@@ -415,14 +419,15 @@ def run():
                 logger.info(
                     f"[판정:발견] {rule['name']} — {'통과→확인창 대기' if d_pass else '탈락(종결)'}"
                     f"{' (단 선정 시점 실행 불가)' if d_gate['exec_reasons'] else ''}"
-                    f" (거래일 {d_stats.get('n_days')}, 초과 {d_stats.get('mean_exc')}%, t {d_stats.get('t_days_exc')})"
+                    f" (거래일 {d_stats.get('n_days')}, 평균수익 {d_stats.get('mean_net')}%, "
+                    f"t {d_stats.get('t_days')}, 참고 초과 {d_stats.get('mean_exc')}%)"
                 )
             elif due == "confirm":
                 c_stats = _recompute_stats(
                     _slice_sample_days(rule["_daily_rows"], DISCOVERY_DAYS,
                                        DISCOVERY_DAYS + CONFIRM_DAYS), rule["_uni"])
-                # 확인창도 **role 별로 자·부호가 다르다**(2026-07-29) — veto 는 제외 종목 원시
-                # mean_net<0 을 본다. role 을 안 넘기면 veto 가 '잘 작동한다는 이유로' 종결된다.
+                # 확인창은 **role 별로 부호가 반대다**(2026-07-29) — 자는 양쪽 다 mean_net 이고
+                # veto 만 <0 을 본다. role 을 안 넘기면 veto 가 '잘 작동한다는 이유로' 종결된다.
                 conf = check_confirmation(c_stats, rule_role(rule))
                 dec = dict(rule.get("decision") or {})
                 dec["confirm"] = {
@@ -436,8 +441,8 @@ def run():
                 update_rule_decision(rule["id"], dec)
                 logger.info(
                     f"[판정:확인] {rule['name']} — {'확증(승격 후보)' if conf['pass'] else '재현 실패(종결)'}"
-                    f" (확인창 거래일 {conf['n_days']}, 초과 {conf['mean_exc']}%, "
-                    f"원시 {conf.get('mean_net')}%)"
+                    f" (확인창 거래일 {conf['n_days']}, 평균수익 {conf.get('mean_net')}%, "
+                    f"참고 초과 {conf['mean_exc']}%)"
                 )
                 if conf["pass"]:
                     # 확인창까지 통과 — 이때만 알린다. 실행 가능성은 여기서 다시 확인한다
@@ -445,7 +450,11 @@ def run():
                     if gate["exec_reasons"]:
                         exec_pending.append({**row, "reason": gate["exec_reasons"][0]})
                     else:
-                        promotions.append({**row, "mean_exc": c_stats.get("mean_exc")})
+                        promotions.append({
+                            **row,
+                            "confirm_mean_net": c_stats.get("mean_net"),   # 판정에 쓴 값
+                            "mean_exc": c_stats.get("mean_exc"),           # 참고 표기
+                        })
         elif rule["status"] == "live":
             # 강등 게이트도 core.edge_policy 단일 소스 — 역할별 mean_net 부호가 반대다
             # (selector 는 음수, veto 는 제외 종목이 양수일 때 강등 검토). benchmark 면제.

@@ -34,15 +34,18 @@ def _rule(family="f1_news", role=None, predicate=None, stats=None, min_sample=40
 
 
 def _control(mean_net):
-    """live 대조군. 게이트는 **일 등가중**(mean_net_days)으로 비교한다 — 시드가 하루 총액
+    """live 대조군. 2026-08-04 부터 **게이트는 대조군을 보지 않는다**(조건 제거) — 이 헬퍼는
+    호출부 시그니처를 유지하며 '대조군이 무엇이든 판정이 바뀌지 않는다'를 고정하는 데 쓴다.
+    (구 동작 메모) 게이트는 **일 등가중**(mean_net_days)으로 비교했다 — 시드가 하루 총액
     고정·종목 등분이라 계좌 실현치가 그 값이기 때문(양쪽 같은 가중이어야 비교가 성립)."""
     return {"name": "control", "family": "control", "role": "benchmark", "status": "live",
             "stats": {"mean_net": mean_net, "mean_net_days": mean_net}}
 
 
-GOOD_STATS = {"n": 50, "n_days": 12, "mean_net": 0.5, "mean_net_days": 0.5, "mean_exc": 0.3,
-              # 통계 게이트는 초과 계열을 본다(원시 ci_low/t_days 는 표시용).
-              "ci_low_exc": 0.1, "t_days_exc": 2.1}
+# 2026-08-04: 게이트는 **절대 계열만** 본다(mean_net·ci_low·t_days). 초과 계열(mean_exc·
+# ci_low_exc·t_days_exc)은 룰 상세 화면 표기 전용이라 여기서는 판정에 영향이 없다.
+GOOD_STATS = {"n": 50, "n_days": 12, "mean_net": 0.5, "mean_net_days": 0.5,
+              "ci_low": 0.1, "t_days": 2.1, "mean_exc": 0.3}
 
 
 # ── rule 역할 ──
@@ -108,7 +111,7 @@ def test_selector_blocked_on_ci_but_not_on_stock_day_count():
     # 그 자체로는 탈락 사유가 아니고, 남는 사유는 CI 하한뿐이다.
     gate = check_promotion(
         _rule(stats={"n": 10, "n_days": 12, "mean_net": 0.5, "mean_net_days": 0.5, "mean_exc": 0.3,
-                     "ci_low_exc": -0.1, "t_days_exc": 2.1}),
+                     "ci_low": -0.1, "t_days": 2.1}),
         [_control(0.2)],
     )
     assert not gate["eligible"]
@@ -121,7 +124,7 @@ def test_selector_blocked_on_few_trading_days():
     # f5_supply_band_d 사례: 광역 rule 은 2거래일 만에 n=70 을 채우지만 같은 날 표본은
     # 시장 무브로 상관 — 종목-일 n 이 아니라 거래일 수(n_days)가 실효 표본이다.
     few_days = {"n": 70, "n_days": 2, "ci_low": 0.46, "mean_net": 1.25, "mean_net_days": 1.25,
-                "mean_exc": 0.5, "ci_low_exc": 0.46, "t_days_exc": 2.5}
+                "mean_exc": 0.5, "t_days": 2.5}
     gate = check_promotion(_rule(stats=few_days), [_control(0.2)])
     assert not gate["eligible"]
     assert any("거래일 부족" in r for r in gate["stat_reasons"])
@@ -132,21 +135,22 @@ def test_selector_blocked_on_few_trading_days():
     assert any("거래일 부족" in r for r in gate2["stat_reasons"])
 
 
-def test_selector_blocked_when_control_missing_fail_closed():
-    # 대조군 부재/미평가는 fail-open(검사 생략)이 아니라 fail-closed(승격 불가)여야 한다.
+# ── 대조군 우위 제거 (2026-08-04 사용자 결정) ──
+# "평균보다 수익이 크지 않더라도 안정적으로 수익이 나면 그만" — 현행 선정(대조군)을 못 이겨도
+# 그 자체로 돈을 버는 rule 은 실탄에 올린다. 게이트는 이제 대조군을 아예 보지 않는다.
+
+def test_control_is_not_a_gate_condition():
+    # 대조군이 없어도(구 동작에서는 fail-closed) 판정은 통계만으로 결정된다.
     gate = check_promotion(_rule(stats=GOOD_STATS), [])
-    assert not gate["eligible"]
-    assert any("대조군 부재" in r for r in gate["stat_reasons"])
-
-    gate2 = check_promotion(_rule(stats=GOOD_STATS), [_control(None)])
-    assert not gate2["eligible"]
+    assert gate["eligible"], gate["stat_reasons"]
+    assert not any("대조군" in r for r in gate["stat_reasons"])
 
 
-def test_selector_blocked_when_below_best_control():
-    # 대조군이 여럿이면 최고 mean_net 을 이겨야 한다.
+def test_selector_passes_even_when_below_best_control():
+    # 대조군 성적이 rule 보다 좋아도(0.9 > 0.5) 탈락 사유가 되지 않는다.
     gate = check_promotion(_rule(stats=GOOD_STATS), [_control(0.2), _control(0.9)])
-    assert not gate["eligible"]
-    assert any("대조군 우위" in r for r in gate["stat_reasons"])
+    assert gate["eligible"], gate["stat_reasons"]
+    assert not any("대조군" in r for r in gate["stat_reasons"])
 
 
 def test_selector_blocked_on_non_executable_predicate():
@@ -291,7 +295,7 @@ def test_selector_demoted_on_negative_recent_mean():
 
 
 def test_benchmark_never_demote_candidate():
-    # live 대조군이 사라지면 check_promotion 의 '대조군 우위'가 fail-closed 로 전 후보를 막는다.
+    # 페이퍼 기준선이라 유지 비용이 없고, 성적이 나쁜 것 자체가 정보다(대조군의 존재 이유).
     assert not check_demotion(_live("benchmark", -0.494, family="control"))["demote_candidate"]
 
 
@@ -311,7 +315,7 @@ def test_selector_blocked_on_weak_day_cluster_t():
     gate = check_promotion(
         _rule(family="f4_laggard",
               stats={"n": 52, "n_days": 10, "mean_net": 1.192, "mean_net_days": 1.192, "mean_exc": 0.79,
-                     "ci_low_exc": 0.207, "t_days_exc": 0.37}),
+                     "ci_low": 0.207, "t_days": 0.37}),
         [_control(-0.227)])
     assert not gate["eligible"]
     assert any("일 클러스터 t" in r for r in gate["stat_reasons"])
@@ -319,7 +323,7 @@ def test_selector_blocked_on_weak_day_cluster_t():
 
 def test_selector_day_cluster_t_is_fail_closed_when_missing():
     # 거래일 1일 등으로 분산 추정 불가(None) → 규율이 조용히 증발하지 않도록 차단.
-    stats = dict(GOOD_STATS); stats["t_days_exc"] = None
+    stats = dict(GOOD_STATS); stats["t_days"] = None
     gate = check_promotion(_rule(stats=stats), [_control(0.2)])
     assert not gate["eligible"]
     assert any("일 클러스터 t" in r for r in gate["stat_reasons"])
@@ -332,9 +336,9 @@ def test_day_cluster_threshold_uses_t_distribution_not_fixed_165():
     assert day_t_threshold(1) is None        # 거래일 1  → 분산 추정 불가
     assert day_t_threshold(200) == 1.645     # 대표본 → 정규 극한
     # GOOD_STATS(n_days=12, df=11 → 1.796): 정규 1.65 는 이제 통과가 아니다.
-    stats = dict(GOOD_STATS); stats["t_days_exc"] = PROMO_MIN_DAY_T
+    stats = dict(GOOD_STATS); stats["t_days"] = PROMO_MIN_DAY_T
     assert not check_promotion(_rule(stats=stats), [_control(0.2)])["eligible"]
-    stats["t_days_exc"] = day_t_threshold(12)
+    stats["t_days"] = day_t_threshold(12)
     assert check_promotion(_rule(stats=stats), [_control(0.2)])["eligible"]
 
 
@@ -343,7 +347,7 @@ def test_veto_exempt_from_day_cluster_t():
     # 은 대체효과 t=0.95 로 평균 유의성이 없는데도 HLB 하한가 때문에 유지가 맞았다).
     gate = check_promotion(
         _rule(family="f7_risk", role="veto",
-              stats={"n": 36, "n_days": 11, "mean_net": -0.203, "t_days_exc": -0.4},
+              stats={"n": 36, "n_days": 11, "mean_net": -0.203, "t_days": -0.4},
               predicate=[{"col": "is_bio", "op": "==", "value": 1}]), [])
     assert gate["eligible"]
 
@@ -378,25 +382,28 @@ def test_decided_rule_is_never_retested():
         assert decision_due(done, nd) is None
 
 
-def test_confirmation_requires_positive_excess_on_fresh_sample():
-    assert check_confirmation({"mean_exc": 0.4, "n_days": 10})["pass"]
-    assert not check_confirmation({"mean_exc": -0.1, "n_days": 10})["pass"]
-    assert not check_confirmation({"mean_exc": 0.0, "n_days": 10})["pass"]   # 0 은 미달
+def test_confirmation_requires_positive_mean_net_on_fresh_sample():
+    # 2026-08-04: 확인창도 발견 게이트와 같은 자(절대 평균수익). 초과수익은 판정에 안 쓴다.
+    assert check_confirmation({"mean_net": 0.4, "n_days": 10})["pass"]
+    assert not check_confirmation({"mean_net": -0.1, "n_days": 10})["pass"]
+    assert not check_confirmation({"mean_net": 0.0, "n_days": 10})["pass"]   # 0 은 미달
+    # 초과수익이 음수여도(장이 더 올랐어도) 절대 수익이 양수면 재현으로 본다.
+    assert check_confirmation({"mean_net": 0.4, "mean_exc": -1.2, "n_days": 10})["pass"]
 
 
 def test_confirmation_fail_closed_without_samples():
-    for s in (None, {}, {"n_days": 5}):
+    for s in (None, {}, {"n_days": 5}, {"n_days": 10, "mean_exc": 1.0}):
         r = check_confirmation(s)
         assert not r["pass"] and r["reasons"]
 
 
 # ── 확인창 부호 (2026-07-29 수정) ──
-# 확인창이 role 을 안 보고 mean_exc>0 만 요구하면 veto 는 "제외할 종목이 시장을 이겨야 확증"이
-# 된다. 즉 **잘 작동하는 veto 가 그 이유로 종결**된다(veto_short_surge 실례: 확인창 표본
-# mean_exc -0.98%·제외 종목 mean_net -0.38% = veto 로선 정상 방향인데 confirm_failed 예정).
+# 확인창이 role 을 안 보면 veto 는 "제외할 종목이 벌어야 확증"이 된다. 즉 **잘 작동하는 veto 가
+# 그 이유로 종결**된다(veto_short_surge 실례: 제외 종목 mean_net -0.38% = veto 로선 정상 방향인데
+# confirm_failed 예정이었다). 자는 양쪽 다 mean_net 이고 **부호만** 반대다.
 
 def test_veto_confirmation_requires_negative_raw_mean_on_fresh_sample():
-    # veto 는 발견 게이트와 **같은 자**(제외 종목 원시 mean_net<0)로 재확인한다.
+    # veto 는 발견 게이트와 **같은 자**(제외 종목 mean_net<0)로 재확인한다.
     working = {"n_days": 10, "mean_net": -0.38, "mean_exc": -0.98}
     assert check_confirmation(working, "veto")["pass"]
     assert not check_confirmation(working, "selector")["pass"]   # selector 자로는 탈락(부호 반대)
@@ -410,83 +417,91 @@ def test_veto_confirmation_requires_negative_raw_mean_on_fresh_sample():
 
 
 def test_veto_confirmation_fail_closed_without_raw_sample():
-    # 초과 표본만 있고 원시 평균이 없으면 veto 는 판정 불가 → fail-closed.
+    # 초과 표본만 있고 평균수익이 없으면 veto 는 판정 불가 → fail-closed.
     for s in (None, {}, {"n_days": 5}, {"n_days": 10, "mean_exc": -1.0}):
         r = check_confirmation(s, "veto")
         assert not r["pass"] and r["reasons"]
 
 
-# ── 절대 수익성 하한 (2026-07-28) ──
-# 초과수익만 보면 '유니버스보다 낫지만 돈은 잃는' rule 이 통과한다. 대조군 우위로도 막히지
-# 않는다 — 대조군(control_legacy_top10) 자체가 -0.227% 라 문턱이 음수이기 때문.
+# ── 평균수익 하한 (2026-07-28 도입, 2026-08-04 유일한 수익성 자로 승격) ──
+# 초과수익이 좋아도 돈을 잃는 rule 은 올리지 않는다. 대조군 우위로도 막히지 않는다 —
+# 대조군(control_legacy_top10) 자체가 음수인 구간이면 문턱이 음수이기 때문.
 
 def test_selector_blocked_when_excess_positive_but_absolute_loses():
     # f5_late_day_strength 실례: 절대 -0.39% / 초과 +0.20%. 유의성이 아무리 좋아도 실탄 불가.
     losing = {"n": 79, "n_days": 11, "mean_net": -0.39, "mean_net_days": -0.39, "mean_exc": 0.20,
-              "ci_low_exc": 0.05, "t_days_exc": 3.0}
+              "ci_low": 0.05, "t_days": 3.0}
     gate = check_promotion(_rule(family="f5_supply", stats=losing), [_control(-0.227)])
     assert not gate["eligible"]
-    assert any("절대 수익성" in r for r in gate["stat_reasons"])
+    assert any("평균수익 미충족" in r for r in gate["stat_reasons"])
 
 
 def test_beating_a_losing_control_is_not_enough():
     # 대조군이 -0.227% 라고 해서 -0.1% 인 rule 을 올리면 안 된다('덜 잃는 쪽' 선택 금지).
+    # 대조군 조건이 사라진 뒤에는 **평균수익>0 이 이 방어선의 전부**라 더 중요해졌다.
     gate = check_promotion(
         _rule(stats={"n": 50, "n_days": 12, "mean_net": -0.1, "mean_net_days": -0.1, "mean_exc": 0.2,
-                     "ci_low_exc": 0.2, "t_days_exc": 2.5}),
+                     "ci_low": 0.2, "t_days": 2.5}),
         [_control(-0.227)])
     assert not gate["eligible"]
-    assert any("절대 수익성" in r for r in gate["stat_reasons"])
-    # 대조군 우위 사유로는 걸리지 않는다(-0.1 > -0.227) → 절대 하한이 유일한 방어선
+    assert any("평균수익 미충족" in r for r in gate["stat_reasons"])
+    # 대조군은 아예 판정에 안 들어간다(2026-08-04) → 평균수익 하한이 유일한 방어선
     assert not any("대조군" in r for r in gate["stat_reasons"])
 
 
-def test_absolute_and_excess_are_both_required():
-    # 절대만 좋고 초과가 없으면(장 덕에 오른 경우) 통과하지 못한다.
-    market_ride = {"n": 50, "n_days": 12, "mean_net": 1.5, "mean_net_days": 1.5, "mean_exc": 0.4,
-                   "ci_low_exc": -0.3, "t_days_exc": 0.2}
-    assert not check_promotion(_rule(stats=market_ride), [_control(-0.227)])["eligible"]
-    # 둘 다 충족하면 통과
-    both = {"n": 50, "n_days": 12, "mean_net": 1.5, "mean_net_days": 1.5, "mean_exc": 0.4,
-            "ci_low_exc": 0.3, "t_days_exc": 2.5}
-    assert check_promotion(_rule(stats=both), [_control(-0.227)])["eligible"]
+def test_excess_return_is_not_a_gate_condition():
+    # 2026-08-04 사용자 결정 — "평균보다 수익이 크지 않더라도 안정적으로 수익이 나면 그만".
+    # 초과수익이 **음수**여도(같은 날 유니버스가 더 올랐어도) 평균수익·안정성을 충족하면
+    # 통과한다. 초과 계열은 상세 화면 표기 전용이다.
+    below_universe = {"n": 50, "n_days": 12, "mean_net": 1.5, "mean_net_days": 1.5,
+                      "ci_low": 0.3, "t_days": 2.5,
+                      "mean_exc": -0.8, "ci_low_exc": -1.9, "t_days_exc": -0.6}
+    gate = check_promotion(_rule(stats=below_universe), [_control(-0.227)])
+    assert gate["eligible"]
+    assert not any("초과" in r for r in gate["stat_reasons"])
+
+    # 반대로 절대 계열이 불안정하면(원시 CI 하한 음수) 초과가 아무리 좋아도 막힌다.
+    unstable = {"n": 50, "n_days": 12, "mean_net": 1.5, "mean_net_days": 1.5,
+                "ci_low": -0.3, "t_days": 0.2,
+                "mean_exc": 0.9, "ci_low_exc": 0.5, "t_days_exc": 2.9}
+    assert not check_promotion(_rule(stats=unstable), [_control(-0.227)])["eligible"]
 
 
 # ── 가중 방식 (2026-07-28 결정) ──
-# 효과 크기(절대 수익성·대조군 우위·강등)는 **종목-일 가중**(mean_net) — 시드 배분을 반영하지
+# 효과 크기(평균수익 하한·강등)는 **종목-일 가중**(mean_net) — 시드 배분을 반영하지
 # 않는다. 근거: ① rule 채점은 유니버스 전체 대상이라 매칭 종목-일 대부분은 사지도 않은 종목
 # → '그날 계좌 수익률' 개념이 성립하지 않는다. ② 시드 배분은 바뀌므로(SEED_MAX_NAME_PCT
 # 50%→25% 이력) 측정이 배분에 의존하면 배분 변경 시 과거 점수가 무효가 된다.
-# 쏠림(매칭 많은 날에 수익 집중)은 **유의성 쪽에서 t_days_exc(일 등가중)가 잡는다.**
+# 쏠림(매칭 많은 날에 수익 집중)은 **유의성 쪽에서 t_days(일 등가중)가 잡는다.**
 
 def test_absolute_floor_uses_stock_day_weighting_not_seed_logic():
     # mean_net_days 가 음수여도 게이트는 mean_net(종목-일)으로 판정한다 — 가설 검증을
     # 집행(시드 배분) 방식과 분리하기 위한 의도된 선택이다.
     concentrated = {"n": 23, "n_days": 12, "mean_net": 0.950, "mean_net_days": -0.745,
-                    "mean_exc": 0.33, "ci_low_exc": 0.3, "t_days_exc": 2.5}
+                    "mean_exc": 0.33, "ci_low": 0.3, "t_days": 2.5}
     gate = check_promotion(_rule(family="f5_supply", stats=concentrated), [_control(-0.227)])
     assert gate["eligible"]
-    assert not any("절대 수익성" in r for r in gate["stat_reasons"])
+    assert not any("평균수익 미충족" in r for r in gate["stat_reasons"])
 
 
 def test_concentration_is_caught_by_significance_not_by_the_floor():
     # 쏠림이 심해 일 클러스터 t 가 문턱 미달이면 그쪽에서 걸린다(절대 하한이 아니라).
     concentrated = {"n": 23, "n_days": 12, "mean_net": 0.950, "mean_net_days": -0.745,
-                    "mean_exc": 0.33, "ci_low_exc": 0.3, "t_days_exc": 0.4}
+                    "mean_exc": 0.33, "ci_low": 0.3, "t_days": 0.4}
     gate = check_promotion(_rule(family="f5_supply", stats=concentrated), [_control(-0.227)])
     assert not gate["eligible"]
     assert any("일 클러스터 t" in r for r in gate["stat_reasons"])
 
 
-def test_control_comparison_uses_same_weighting_on_both_sides():
-    # 한쪽만 다른 가중으로 바꾸면 비교가 무의미해진다 — 양쪽 mean_net 으로 고정한다.
+def test_control_stats_never_change_the_verdict():
+    # 대조군 조건 제거(2026-08-04)의 계약 — 대조군 stats 가 어떻든 판정이 같아야 한다.
+    # (구 동작에서는 이 rule 이 mean_net 0.2 < 대조군 0.5 로 탈락했다.)
     rule = _rule(stats={"n": 40, "n_days": 12, "mean_net": 0.2, "mean_net_days": 0.2,
-                        "mean_exc": 0.15, "ci_low_exc": 0.1, "t_days_exc": 2.1})
+                        "mean_exc": 0.15, "ci_low": 0.1, "t_days": 2.1})
     ctrl = {"name": "c", "family": "control", "role": "benchmark", "status": "live",
             "stats": {"mean_net": 0.5, "mean_net_days": -9.0}}
-    gate = check_promotion(rule, [ctrl])
-    assert not gate["eligible"]
-    assert any("대조군 우위" in r for r in gate["stat_reasons"])
+    assert check_promotion(rule, [ctrl])["eligible"]
+    assert check_promotion(rule, [])["eligible"]
 
 
 def test_demotion_uses_same_weighting_as_promotion():
@@ -500,11 +515,11 @@ def test_demotion_uses_same_weighting_as_promotion():
 
 
 # ── 승격 게이트 정책 (2026-07-28: strict / experimental) ──
-# experimental 은 유의성(ci_low_exc·t_days_exc)만 면제한다. 절대 순수익>0 · 초과수익>0 ·
-# 거래일≥10 · 대조군 우위 · 실행 가능성은 **그대로 남는다** — 안전망이므로 면제하면 안 된다.
+# experimental 은 유의성(ci_low·t_days)만 면제한다. 평균수익>0 · 거래일≥10 · 실행 가능성은
+# **그대로 남는다** — 안전망이므로 면제하면 안 된다.
 
 _WEAK_SIG = {"n": 52, "n_days": 10, "mean_net": 1.19, "mean_net_days": 0.45,
-             "mean_exc": 0.79, "ci_low_exc": 0.14, "t_days_exc": 1.17}
+             "ci_low": 0.14, "t_days": 1.17, "mean_exc": 0.79}
 
 
 def test_default_policy_is_strict_fail_safe():
@@ -520,21 +535,20 @@ def test_experimental_waives_significance_only():
     assert gate["eligible"], gate["stat_reasons"]
 
 
-def test_experimental_still_requires_absolute_profit():
+def test_experimental_still_requires_positive_mean_net():
     losing = {**_WEAK_SIG, "mean_net": -0.3}
     gate = check_promotion(_rule(family="f4_laggard", stats=losing), [_control(-0.5)],
                            policy="experimental")
     assert not gate["eligible"]
-    assert any("절대 수익성" in r for r in gate["stat_reasons"])
+    assert any("평균수익 미충족" in r for r in gate["stat_reasons"])
 
 
-def test_experimental_still_requires_positive_excess():
-    # 절대는 양수인데 초과가 음수 = 장 덕에 오른 것 → experimental 에서도 막는다.
-    market_ride = {**_WEAK_SIG, "mean_net": 1.5, "mean_exc": -0.2}
-    gate = check_promotion(_rule(family="f4_laggard", stats=market_ride), [_control(-0.227)],
+def test_experimental_does_not_require_positive_excess():
+    # 2026-08-04: 초과수익은 어느 정책에서도 게이트 조건이 아니다(상세 화면 표기 전용).
+    below_universe = {**_WEAK_SIG, "mean_net": 1.5, "mean_exc": -0.2}
+    gate = check_promotion(_rule(family="f4_laggard", stats=below_universe), [_control(-0.227)],
                            policy="experimental")
-    assert not gate["eligible"]
-    assert any("초과수익 미충족" in r for r in gate["stat_reasons"])
+    assert gate["eligible"], gate["stat_reasons"]
 
 
 def test_experimental_still_requires_trading_days_and_executability():

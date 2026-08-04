@@ -159,7 +159,7 @@ PROMO_MIN_DAYS = 10
 
 # 일 클러스터 t 문턱 (2026-07-28) — `ci_low` 는 종목-일 iid 가정이라 같은 날 종목들이 시장
 # 무브로 상관된 만큼 유의성을 과신한다. PROMO_MIN_DAYS 는 문턱만 세우고 CI 는 그대로 iid 였다.
-# 거래일을 관측 단위로 묶은 t(stats.t_days_exc)를 selector 승격 조건에 추가한다. 단측 95% ≈ 1.65.
+# 거래일을 관측 단위로 묶은 t(stats.t_days)를 selector 승격 조건에 추가한다. 단측 95% ≈ 1.65.
 # 이 게이트 없이 후보로 올라와 재계산에서 뒤집힌 사례 2건:
 #   f5_prog_persistent(7/27) iid t=1.82 → 일 t=0.47 / f4_sector_follower(7/28) 1.99 → 0.37.
 # **veto 에는 적용하지 않는다** — reduce-only 라 최악이 기회비용이고, veto 의 가치는 평균이 아니라
@@ -202,8 +202,11 @@ DISCOVERY_DAYS = 10
 CONFIRM_DAYS = 10
 
 # 확인창 통과 기준 — 발견 단계만큼 엄격하게 요구하면 진짜 엣지도 대부분 탈락한다(검출력 붕괴).
-# '새 표본에서도 초과수익이 양수'만 요구한다. 이 조합이 오탐 2.4%·검출력 32%(+1%/일)다.
-CONFIRM_MIN_MEAN_EXC = 0.0
+# '새 표본에서도 평균수익이 양수'만 요구한다.
+# 2026-08-04: 자를 **발견 게이트와 같은 절대 평균수익**으로 통일했다(이전에는 확인창만
+# 초과수익 mean_exc>0 을 봤다). 자가 다르면 "발견은 절대로 통과했는데 확인은 초과로 탈락"처럼
+# 판정 기록에 단위가 다른 사유가 섞여 사람이 읽을 수 없다.
+CONFIRM_MIN_MEAN_NET = 0.0
 
 # **veto 는 부호가 반대다** (2026-07-29 수정) — 확인창이 role 을 안 보고 mean_exc>0 만 요구해서
 # "제외할 종목이 시장을 이겨야 확증"이라는 뒤집힌 판정을 하고 있었다. veto 는 발견 게이트가
@@ -214,10 +217,10 @@ CONFIRM_VETO_MAX_MEAN_NET = 0.0
 
 DECISION_STAGES: tuple[str, ...] = ("discovery", "confirming", "decided")
 
-# ── 승격 게이트 정책 (2026-07-28) ──
-# strict       : 통계 유의성(ci_low_exc>0 + t_days_exc≥t분포임계값) 요구 + 판정 일정 강제.
-# experimental : 유의성·판정 일정 면제. 남는 조건은 거래일≥10 · **절대 순수익>0** ·
-#                초과수익>0 · 대조군 우위 · 선정 시점 실행 가능성.
+# ── 승격 게이트 정책 (2026-07-28, 자는 2026-08-04 절대 평균수익으로 통일) ──
+# strict       : 통계 유의성(ci_low>0 + t_days≥t분포임계값) 요구 + 판정 일정 강제.
+# experimental : 유의성·판정 일정 면제. 남는 조건은 거래일≥10 · **평균수익>0** · 실행 가능성.
+#                (대조군 우위는 2026-08-04 양쪽 정책에서 제거.)
 # 근거·대가·롤백은 core/config.py 의 EDGE_PROMO_POLICY 주석에 적었다(실측 근거 포함).
 # **기본값은 strict** — 호출부가 정책을 넘기지 않으면 엄격한 쪽으로 동작해야 한다(fail-safe).
 # 실제 운영 정책은 config.EDGE_PROMO_POLICY 이고, 라우터·평가기가 그 값을 명시로 넘긴다.
@@ -260,10 +263,11 @@ def check_promotion(rule: dict, control_rules: list[dict], policy: str = "strict
 
     rule: stats 가 최신으로 갱신된 rule dict. control_rules: role=benchmark 인 live rule 목록.
     반환: {"eligible": bool, "stat_reasons": [...], "exec_reasons": [...]}
-      - stat_reasons: selector 는 **절대 수익성**(원시 mean_net>0 — "돈을 버는가")·거래일 수·
-        신뢰구간·**일 클러스터 t**(뒤 둘은 유니버스 자기제외 **초과** 계열 — "우연이 아닌가")·
-        **대조군 우위**(원시 — "현행보다 나은가"), veto 는 최소 실익 게이트(거래일 수 +
-        제외 종목 원시 평균 음수) 미충족 사유(benchmark 는 면제)
+      - stat_reasons: selector 는 **평균수익**(mean_net>0 — "돈을 버는가")·거래일 수·
+        신뢰구간·**일 클러스터 t**(2026-08-04 부터 뒤 둘도 **원시(절대) 계열** ci_low·t_days —
+        "우연이 아닌가"), veto 는 최소 실익 게이트(거래일 수 + 제외 종목 평균 음수) 미충족
+        사유(benchmark 는 면제). **대조군 우위는 2026-08-04 게이트에서 제거**됐고
+        `control_rules` 인자는 호출부 시그니처 유지를 위해 남아 있다(현재 미사용).
       - exec_reasons: 선정 시점 실행 불가 사유(benchmark 는 면제 — 선정에 안 쓰므로)
     월 승격 상한은 시점 의존 운영 제약이라 여기 넣지 않고 라우터가 별도 검사한다.
     """
@@ -275,17 +279,24 @@ def check_promotion(rule: dict, control_rules: list[dict], policy: str = "strict
     # 통계 게이트 — selector 는 기대값 전체 검증, benchmark 는 실탄이 아니라 기준선 교체라 면제.
     # veto 는 아래 별도의 최소 실익 게이트만 적용한다.
     if role == "selector":
-        # 두 질문에 자가 각각 따로 붙는다(2026-07-28) —
-        #   "돈을 버는가?"   → **절대** 순수익 mean_net > 0 (실현 손익은 절대값이다)
-        #   "우연이 아닌가?" → **초과** 계열 ci_low_exc·t_days_exc (같은 날 시장 무브를 걷어내야
-        #                      잡음이 절반이 되고 다른 룰·현행과의 비교가 성립한다)
-        # 하나만 쓰면 각각 다른 구멍이 난다:
-        #   초과만 → 유니버스보다 낫지만 **돈은 잃는** 룰이 통과(실측: f5_late_day_strength
-        #            절대 -0.39%/초과 +0.20%, f8_op_earnings_yield -0.76%/+0.15%).
-        #            대조군 우위만으론 막히지 않는다 — 대조군 자체가 -0.227% 라 문턱이 음수다.
-        #   절대만 → 그 기간 장이 오른 몫을 실력으로 착각(실측: 이 유니버스 기간 평균 +0.320%,
-        #            양수일 7/14). 게다가 절대 계열은 잡음이 2배라 유의성에 도달하지 못한다.
-        ci_low = stats.get("ci_low_exc")
+        # ── 자는 **절대 평균순수익(mean_net) 하나로 통일**한다 (2026-08-04 사용자 결정) ──
+        # 이전에는 질문마다 자가 달랐다: "돈을 버는가"는 절대(mean_net), "우연이 아닌가"는
+        # 초과 계열(ci_low_exc·t_days_exc). 그 구성은 화면·알림·판정 기록에 서로 다른 단위의
+        # 숫자가 섞여 나와 "이 룰이 통과인가"를 읽기 어려웠고, 실제로 초과는 양수인데 절대는
+        # 음수인 룰들이 '거의 통과'처럼 보였다. 이제 게이트의 세 질문을 모두 절대 계열로 묻는다:
+        #   "돈을 버는가?"   → mean_net > 0 (비용 차감 후 실현 손익의 부호)
+        #   "우연이 아닌가?" → ci_low(CI 하한) · t_days(일 클러스터 t)
+        # 초과 계열(mean_exc·ci_low_exc·t_days_exc)은 stats 에 계속 계산·저장되지만
+        # **게이트에서는 쓰지 않고 룰 상세 화면 표기·수동 검토용 진단값**으로만 남긴다.
+        # 같은 날 상대 비교를 요구하던 조건(초과수익·대조군 우위)은 둘 다 제거됐다 — 아래
+        # '대조군 우위' 주석에 그 대가와 남은 방어선을 적었다.
+        # 대가(알고 택한다): 절대 계열은 같은 날 시장 무브가 분산에 그대로 남아 잡음이 초과
+        # 계열의 약 2배다 → strict 정책의 ci_low·t_days 문턱을 통과하기 더 어렵다. 지금 운영
+        # 값인 experimental 은 그 두 조건을 면제하므로 실효 기준은
+        # **mean_net>0 + 거래일≥10 + 실행 가능성**이다(2026-08-04 사용자 확인 — 안정성 조건은
+        # 면제 상태를 유지한다). 즉 지금 게이트는 "10거래일 이상 표본에서 비용 차감 후 평균이
+        # 양수"이고, 그 이상의 판단은 승격 승인 시 사람이 한다.
+        ci_low = stats.get("ci_low")
         n_days = stats.get("n_days") or 0
         # 절대 수익성 하한 — 비용(EDGE_COST_PCT) 차감 후 순수익이 양수여야 한다.
         # 손실 최소화가 1순위이므로 '덜 잃는 쪽'을 고르는 게 아니라 '버는 것만' 올린다.
@@ -297,12 +308,12 @@ def check_promotion(rule: dict, control_rules: list[dict], policy: str = "strict
         # 점수가 무효가 된다 — 가설 검증은 집행 방식과 분리해야 한다.
         # 참고: `mean_net_days`(일 등가중)도 stats 에 함께 있다. 둘의 격차가 크면 수익이 매칭
         # 많은 날에 쏠렸다는 신호다(실측: f5_frgn_surge_pullback1 종목-일 +0.950% vs 일 등가중
-        # -0.745%) → 화면·수동 검토용 진단값. **유의성은 그 쏠림을 t_days_exc(일 등가중)가 잡는다.**
+        # -0.745%) → 화면·수동 검토용 진단값. **유의성은 그 쏠림을 t_days(일 등가중)가 잡는다.**
         mean_net = stats.get("mean_net")
         if mean_net is None or mean_net <= 0:
             stat_reasons.append(
-                f"절대 수익성 미충족: mean_net={mean_net}%(>0 필요) — 비용 차감 후 실제로 "
-                "돈을 버는 rule 만 실탄에 올린다(초과수익이 양수여도 절대 손실이면 제외)"
+                f"평균수익 미충족: mean_net={mean_net}%(>0 필요) — 비용 차감 후 실제로 "
+                "돈을 버는 rule 만 실탄에 올린다"
             )
         # **min_sample(종목-일)은 게이트에서 뺐다**(2026-07-28, 항목 ③). 이 프로젝트는 이미
         # "실효 표본은 거래일"이라고 결론냈는데(PROMO_MIN_DAYS·t_days) min_sample 만 종목-일
@@ -315,48 +326,36 @@ def check_promotion(rule: dict, control_rules: list[dict], policy: str = "strict
                 f"거래일 부족: n_days={n_days} < {PROMO_MIN_DAYS} — 같은 날 표본은 "
                 "시장 무브로 상관되어 종목-일 n 만으로는 과신"
             )
-        # 초과수익 방향 — 정책 무관 공통. 시장 몫을 걷어낸 알파가 양수여야 한다.
-        mean_exc = stats.get("mean_exc")
-        if mean_exc is None or mean_exc <= 0:
-            stat_reasons.append(
-                f"초과수익 미충족: mean_exc={mean_exc}%(>0 필요) — 같은 날 유니버스(자기 제외) "
-                "대비 초과분이 양수여야 시장 몫이 아닌 선정 실력이다"
-            )
         # ── 아래 두 조건(신뢰구간·일 클러스터 t)은 **통계 유의성** 요구다 ──
         # experimental 정책에서는 면제한다: 현행 legacy 선정이 마이너스라 도전자 오탐의 기대
         # 비용이 낮고(무작위가 legacy 를 82.8% 이김), 유의성을 기다리면 44종 중 통과가 0종이다.
-        # 안전망은 강등 감지(최근 창, 최소 5거래일)와 절대 순수익>0 하한이 맡는다.
+        # 안전망은 강등 감지(최근 창, 최소 5거래일)와 평균수익>0 하한이 맡는다.
         if policy != "experimental":
             if ci_low is None or ci_low <= 0:
-                stat_reasons.append(f"신뢰구간 하한 미충족: ci_low_exc={ci_low}(>0 필요)")
+                stat_reasons.append(f"신뢰구간 하한 미충족: ci_low={ci_low}(>0 필요)")
             # 일 클러스터 t — ci_low(종목-일 iid)의 과신을 거래일 단위로 교정. 문턱은 고정 1.65 가
             # 아니라 **거래일 자유도의 t 분포 임계값**을 쓴다(소표본에서 1.65 는 너무 관대 — 거래일
-            # 10일이면 1.833). None(분산 추정 불가·초과 표본 부재)은 fail-closed.
-            t_days = stats.get("t_days_exc")
+            # 10일이면 1.833). None(거래일 1일이라 분산 추정 불가)은 fail-closed.
+            t_days = stats.get("t_days")
             t_need = day_t_threshold(n_days) or PROMO_MIN_DAY_T
             if t_days is None or t_days < t_need:
                 stat_reasons.append(
-                    f"일 클러스터 t 미충족: t_days_exc={t_days}(>={t_need} 필요, 거래일 {n_days}일 "
+                    f"일 클러스터 t 미충족: t_days={t_days}(>={t_need} 필요, 거래일 {n_days}일 "
                     "자유도 기준) — 같은 날 종목은 시장 무브로 상관되어 거래일을 관측 단위로 묶어야 "
                     "실효 유의성이 나온다"
                 )
-        # 대조군 우위 — live benchmark 의 mean_net 최대값 이상. 대조군이 없거나 미평가면
-        # fail-closed(승격 불가): '대조군 우위' 규율이 조용히 증발하는 fail-open 을 막는다.
-        # **양쪽 모두 종목-일 가중(mean_net)** — 위 절대 하한과 같은 자여야 한다. 한쪽만 바꾸면
-        # 가중이 다른 값을 견주게 되어 비교가 무의미해진다(2026-07-28 실제로 그 상태를 만들었다).
-        control_means = [
-            (c.get("stats") or {}).get("mean_net")
-            for c in control_rules
-            if (c.get("stats") or {}).get("mean_net") is not None
-        ]
-        if not control_means:
-            stat_reasons.append("대조군 부재/미평가: live control rule 의 stats.mean_net 이 없습니다")
-        elif mean_net is None or mean_net < max(control_means):
-            stat_reasons.append(
-                f"대조군 우위 미충족: mean_net={mean_net} < control 최고={max(control_means)}"
-            )
+        # ── 대조군 우위는 **게이트에서 제거했다** (2026-08-04 사용자 결정) ──
+        # 이전 조건: live benchmark(control_legacy_top10) 의 mean_net 최대값 이상.
+        # 제거 근거(사용자): "평균보다 수익이 크지 않더라도 안정적으로 수익이 나면 그만이다" —
+        # 현행 선정을 못 이기더라도 그 자체로 돈을 버는 rule 이면 실탄에 올린다.
+        # ⚠️ 대가를 명시한다: 초과수익과 대조군 우위를 **둘 다** 뺐으므로 "그 기간 장이 오른 몫"을
+        # 걸러내는 자동 장치가 게이트에 없다(상승장에 등록된 rule 이 유리해진다). 남은 방어선은
+        # ① mean_net>0(비용 차감 후 실제 수익) ② 거래일≥10 ③ 강등 감시(check_demotion, 최근 창)
+        # ④ 승격 시 관리자 수동 승인 + 월 상한. 초과수익은 계속 계산되어 룰 상세 화면에 뜨므로
+        # **승인 전 그 값을 눈으로 확인하는 것이 이 방어선의 일부**다.
+        # `control_rules` 인자는 호출부(라우터·평가기) 시그니처와 되돌릴 여지를 남기려고 유지한다.
 
-    # veto 최소 실익 게이트 — reduce-only 라 selector 급 검증(CI·대조군)은 요구하지 않지만,
+    # veto 최소 실익 게이트 — reduce-only 라 selector 급 검증(CI)은 요구하지 않지만,
     # 완전 면제하면 등록 당일 표본 몇 개로도 '승격 후보' 알림이 매일 반복된다
     # (2026-07-13 veto_bio 사례: 1거래일 n=3, 제외 종목 평균 +0.01%인데 eligible).
     # 거래일이 쌓이고, 제외했을 종목 평균이 음수(제외가 실제로 손실을 걸러냈다는 증거)여야 후보.
@@ -403,10 +402,12 @@ def check_confirmation(confirm_stats: dict | None, role: str = "selector") -> di
     발견 단계와 같은 강도를 요구하면 진짜 엣지도 대부분 탈락하므로(검출력 붕괴),
     '새 표본에서도 방향이 재현되는가'만 본다. 표본 부재는 fail-closed.
 
-    **role 별로 재는 자와 부호가 다르다** — 발견 게이트(check_promotion)와 같은 자를 쓴다:
-      selector : 초과수익 mean_exc > 0 (같은 날 유니버스 자기제외 대비 알파가 재현)
-      veto     : 제외 종목 원시 mean_net < 0 (제외가 여전히 손실을 걸러내고 있다)
+    **자는 양쪽 다 절대 평균수익(mean_net) 이고 부호만 반대다** — 발견 게이트(check_promotion)와
+    같은 자를 쓴다(2026-08-04 selector 를 초과수익에서 절대로 통일):
+      selector : mean_net > 0 (새 표본에서도 돈을 벌고 있다)
+      veto     : mean_net < 0 (제외가 여전히 손실을 걸러내고 있다 — 제외 대상의 성적)
     role 기본값은 selector(구 동작) — 호출부는 rule_role(rule) 로 명시해 넘긴다.
+    반환에는 `mean_exc`(초과수익)도 담지만 **판정에는 쓰지 않는다** — 화면·알림 표기용이다.
     """
     s = confirm_stats or {}
     n_days = s.get("n_days") or 0
@@ -426,19 +427,19 @@ def check_confirmation(confirm_stats: dict | None, role: str = "selector") -> di
             "mean_net": mean_net,
             "n_days": n_days,
         }
-    mean_exc = s.get("mean_exc")
-    if mean_exc is None:
-        return {"pass": False, "reasons": ["확인창 초과 표본 없음 — 기준선을 구할 수 없었습니다"],
-                "mean_exc": None, "mean_net": s.get("mean_net"), "n_days": n_days}
-    ok = mean_exc > CONFIRM_MIN_MEAN_EXC
+    mean_net = s.get("mean_net")
+    if mean_net is None:
+        return {"pass": False, "reasons": ["확인창 표본 없음 — 새 표본 성적을 구할 수 없었습니다"],
+                "mean_exc": s.get("mean_exc"), "mean_net": None, "n_days": n_days}
+    ok = mean_net > CONFIRM_MIN_MEAN_NET
     return {
         "pass": ok,
         "reasons": [] if ok else [
-            f"확인창 초과수익 미달: mean_exc={mean_exc}(>{CONFIRM_MIN_MEAN_EXC} 필요) — "
+            f"확인창 평균수익 미달: mean_net={mean_net}(>{CONFIRM_MIN_MEAN_NET} 필요) — "
             "발견 단계 성적이 새 표본에서 재현되지 않았습니다"
         ],
-        "mean_exc": mean_exc,
-        "mean_net": s.get("mean_net"),
+        "mean_exc": s.get("mean_exc"),   # 표기용(판정 무관)
+        "mean_net": mean_net,
         "n_days": n_days,
     }
 
@@ -459,8 +460,10 @@ def check_demotion(rule: dict) -> dict:
                   (음수는 veto 가 손실을 제대로 걸러냈다는 뜻 — check_promotion 의 승격 조건과
                   같은 방향이다. 부호를 selector 와 공유하면 잘 작동하는 veto 를 매일 강등
                   후보로 올린다: veto_bio_kosdaq 이 recent_mean_net=-0.158 로 오탐 알림.)
-      - benchmark: 강등 감시 제외 — 페이퍼 기준선이라 유지 비용이 없고, live 대조군이 사라지면
-                  check_promotion 의 '대조군 우위'가 fail-closed 로 전 후보를 막는다.
+      - benchmark: 강등 감시 제외 — 실탄이 아닌 페이퍼 기준선이라 유지 비용이 없고, 성적이
+                  나쁜 것 자체가 정보다(현행 선정이 얼마나 나쁜지가 대조군의 존재 이유).
+                  (2026-08-04 까지는 '대조군이 사라지면 승격 게이트가 fail-closed 로 전 후보를
+                  막는다'가 추가 이유였는데, 대조군 우위 조건이 제거되어 더는 해당하지 않는다.)
     반환: {"demote_candidate": bool, "reasons": [...]} (reasons 는 해당 시 사람이 읽을 사유)
     """
     role = rule_role(rule)

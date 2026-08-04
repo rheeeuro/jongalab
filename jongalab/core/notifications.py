@@ -274,14 +274,14 @@ def send_edge_rule_alert(
 
     promotions:   승격 후보 — **확인창까지 통과해 확증된** candidate. 2026-07-28 판정 일정
                   도입 후로는 매일 뜨지 않고 **판정일에 1회만** 온다(sql/39). 알림이 왔다는 것은
-                  발견 구간과 겹치지 않는 새 표본에서 초과수익이 재현됐다는 뜻이다.
+                  발견 구간과 겹치지 않는 새 표본에서 평균수익이 재현됐다는 뜻이다.
     exec_pending: 집행 설계 필요 — 통계는 확증됐지만 선정 시점(13~15시) 실행 불가 피처를 써서
                   승격이 막힌 candidate(집행 시점 재설계 후보). 통계 탈락이 아니므로 종결이 아니다.
     demotions:    강등 검토 — live rule 의 최근 창 성적. **역할별 부호가 반대**다
                   (selector 는 매수 종목 mean_net<0, veto 는 제외 종목 mean_net>0).
                   승격과 달리 **판정 일정 밖이라 매 평일 재검사**된다 — 조건이 유지되는 동안
                   같은 알림이 반복된다(그 사실을 푸터에 명시).
-    각 항목: {name, family, n, mean_net, ci_low[, mean_net_days, mean_exc, reason]}.
+    각 항목: {name, family, n, mean_net, ci_low[, mean_net_days, confirm_mean_net, mean_exc, reason]}.
     전부 비면 전송하지 않는다.
     """
     exec_pending = exec_pending or []
@@ -299,9 +299,13 @@ def send_edge_rule_alert(
         line = f"• *{r['name']}* (`{r['family']}`) — n={r['n']}, {prefix} {_pct(r.get('mean_net'))}"
         if "ci_low" in r:
             line += f", CI하한 {_pct(r.get('ci_low'))}"
-        # 확인창 초과수익 — 승격 후보의 핵심 근거(발견에 쓰지 않은 새 표본에서의 성적)
+        # 확인창 평균수익 — 승격 후보의 핵심 근거(발견에 쓰지 않은 새 표본에서의 성적).
+        # 2026-08-04: 판정 자가 초과수익 → 절대 평균수익으로 바뀌어 이 줄도 같은 자로 찍는다.
+        if r.get("confirm_mean_net") is not None:
+            line += f", 확인창 평균수익 {_pct(r.get('confirm_mean_net'))}"
+        # 초과수익은 게이트에 쓰지 않지만 "장 덕에 올랐나"의 참고값이라 함께 보여준다.
         if r.get("mean_exc") is not None:
-            line += f", 확인창 초과 {_pct(r.get('mean_exc'))}"
+            line += f", 참고 초과 {_pct(r.get('mean_exc'))}"
         # 일 등가중 최근 평균(강등 검토 전용) — 게이트는 종목-일 가중을 보지만, 두 가중의
         # **부호가 갈리면 몇 종목의 급등이 평균을 만든 쏠림**이라 강등 근거가 되지 못한다.
         # 게이트 조건은 2026-07-28 결정(효과 크기는 종목-일)대로 두고 판단 재료만 노출한다.

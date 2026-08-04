@@ -1,7 +1,7 @@
 """Edge Ledger 라우트 — 가설 원장 조회(공개) + 등록·승격·강등(admin).
 
 GET 은 대시보드 스코어보드가 쓰므로 공개, 변경(POST)만 개별 require_admin.
-승격은 코드가 정량 게이트(표본·신뢰구간 하한·대조군 우위·월 승격 상한)를 강제하며,
+승격은 코드가 정량 게이트(평균수익·거래일 수·신뢰구간 하한·월 승격 상한)를 강제하며,
 미충족 시 409 + 사유로 거부한다(force 없음 — 사전 등록·다중 가설 보정 규율).
 """
 from datetime import datetime
@@ -132,9 +132,9 @@ def promote_edge_rule(rule_id: int):
     """candidate → live 승격. 정량 게이트 미충족 시 409(force 불가).
 
     게이트 판정은 core.edge_policy.check_promotion **단일 소스**(라우터·평가기·프론트 공유):
-    (selector) 거래일 수 · ci_low_exc>0 · 일 클러스터 t(초과, t분포 임계값) · live 대조군
-    (role=benchmark) 우위 — 대조군 부재/미평가면 fail-closed(승격 불가).
-    (selector·veto) 선정 시점 실행 가능성.
+    (selector) 평균수익>0 · 거래일 수 · ci_low>0 · 일 클러스터 t(t분포 임계값).
+    2026-08-04: 초과수익·대조군 우위 조건은 제거됐다(자는 절대 평균수익 하나).
+    (selector·veto) 선정/집행 시점 실행 가능성.
     여기에 라우터만 시점 의존 운영 제약(상태=candidate, 월 승격 상한, **판정 일정**)을 더한다.
     """
     rule = get_rule(rule_id)

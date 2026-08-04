@@ -372,15 +372,16 @@ export interface EdgeRuleStats {
   mean_net: number | null;      // 비용(EDGE_COST_PCT) 차감 후 평균 순수익(%)
   win_rate: number | null;
   std: number | null;
-  ci_low: number | null;        // 원시 단측 95% 신뢰구간 하한(참고 — 게이트는 ci_low_exc)
-  mean_net_days?: number | null; // 원시 일 등가중 평균(%) — 매칭 많은 날 쏠림을 드러냄
-  t_days?: number | null;        // 원시 일 클러스터 t(참고 — 게이트는 t_days_exc)
-  // ── 유니버스 자기제외 초과 계열 — selector 승격의 통계 게이트가 보는 값 ──
+  ci_low: number | null;        // 단측 95% 신뢰구간 하한 — 승격 게이트(>0, strict 정책)
+  mean_net_days?: number | null; // 일 등가중 평균(%) — 매칭 많은 날 쏠림을 드러냄
+  t_days?: number | null;        // 일 클러스터 t — 승격 게이트(>=거래일 자유도 t 임계값)
+  // ── 유니버스 자기제외 초과 계열 — **게이트 미사용, 룰 상세 화면 표기 전용**(2026-08-04) ──
+  // "평균보다 수익이 크지 않더라도 안정적으로 수익이 나면 그만"이라 판정에서 빼고 참고값으로만 둔다.
   n_exc?: number;                // 초과 표본 수(기준선을 구할 수 있었던 종목-일)
   mean_exc?: number | null;      // 그날 유니버스(자기 제외) 대비 초과수익(%)
-  ci_low_exc?: number | null;    // 초과 기준 CI 하한 — 승격 게이트(>0)
+  ci_low_exc?: number | null;    // 초과 기준 CI 하한
   mean_exc_days?: number | null; // 초과 일 등가중 평균(%)
-  t_days_exc?: number | null;    // 초과 일 클러스터 t — 승격 게이트(>=PROMO_MIN_DAY_T)
+  t_days_exc?: number | null;    // 초과 일 클러스터 t
   worst_low_ret: number | null; // 매칭 종목 익일 저가 최악값(꼬리)
   updated_through: string | null;
   recent_n?: number;            // 강등 감시 최근 창(최근 10거래일) 표본 수
@@ -409,10 +410,11 @@ export interface EdgeRuleDecisionStep {
   at: string;
   n_days: number | null;
   pass: boolean;
-  mean_exc: number | null;
-  // 확인창 원시 평균 — **veto 는 이 값(제외 종목 mean_net<0)으로 판정**한다(2026-07-29).
-  // 초과수익(mean_exc>0)은 selector 기준이라 veto 에 쓰면 부호가 뒤집힌다.
+  // 판정에 쓴 값 — selector 는 mean_net>0, veto 는 mean_net<0(부호만 반대, 2026-08-04 통일).
   mean_net?: number | null;
+  t_days?: number | null;
+  // 아래 초과 계열은 참고 기록(판정 무관).
+  mean_exc: number | null;
   t_days_exc?: number | null;
   reasons: string[];
   exec_blocked?: string[] | null;  // 선정 시점 실행 불가 — 통계 탈락과 구분(설계 변경 시 재검토)

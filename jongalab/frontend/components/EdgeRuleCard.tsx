@@ -16,6 +16,8 @@ import {
   promoBlockers,
   isPromotionCandidate,
   isMeasurementOnly,
+  isDecided,
+  decisionLabel,
   verifyProgress,
 } from "@/lib/edge";
 
@@ -32,6 +34,9 @@ export function EdgeRuleCard({
   const isLive = rule.status === "live" && !measure;
   const isRetired = rule.status === "retired";
   const promo = isPromotionCandidate(rule);
+  // 판정이 끝난 candidate — '심사 중'이 아니라 결과(판정 탈락·재현 실패)를 찍는다.
+  const decided = isDecided(rule);
+  const verdict = decisionLabel(rule);
 
   // 스파크라인: 일별 평균 수익 시계열(결측 제외). 2점 미만이면 미표시.
   const series = rule.daily.map((d) => d.mean_net_ret).filter((v): v is number => v !== null);
@@ -68,15 +73,25 @@ export function EdgeRuleCard({
           </span>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          {/* 측정용은 검증/투입 대상이 아니라 상태를 숨긴다(단, '종료'는 수명 정보라 유지) */}
-          {(!measure || isRetired) && (
+          {/* 측정용은 검증/투입 대상이 아니라 상태를 숨긴다(단, '종료'는 수명 정보라 유지).
+              판정 종결도 상태 배지를 숨긴다 — status 는 candidate 그대로라 '검증 중' 배지가
+              바로 옆 '판정 탈락' 배지와 정면으로 모순되고, 배지 수가 달라 카드 키도 어긋난다. */}
+          {(!measure || isRetired) && !decided && (
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[rule.status]}`}>
               {STATUS_LABEL[rule.status]}
             </span>
           )}
-          {promo && (
+          {promo && !decided && (
             <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-600 dark:bg-rose-500/15 dark:text-rose-300">
               검증 통과
+            </span>
+          )}
+          {decided && verdict && (
+            <span
+              className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+              title={rule.decision?.confirm?.reasons?.[0] ?? rule.decision?.discovery?.reasons?.[0] ?? undefined}
+            >
+              {verdict.text}
             </span>
           )}
         </div>
@@ -112,12 +127,12 @@ export function EdgeRuleCard({
         </p>
       )}
 
-      {/* 하단 슬롯: 보수적 초과수익 + 스파크라인 — 항상 렌더해 높이 고정 */}
+      {/* 하단 슬롯: 보수적 수익(게이트가 보는 값) + 스파크라인 — 항상 렌더해 높이 고정 */}
       <div className="mt-0.5 flex h-6 items-center justify-between gap-3">
         <span className="shrink-0 text-[11px] text-slate-400 dark:text-slate-500">
-          {STAT_META.ci_low_exc.label}{" "}
+          {STAT_META.ci_low.label}{" "}
           {hasData && s ? (
-            <span className={`font-semibold tabular-nums ${TONE_TEXT[retTone(s.ci_low_exc)]}`}>{fmtPct(s.ci_low_exc)}</span>
+            <span className={`font-semibold tabular-nums ${TONE_TEXT[retTone(s.ci_low)]}`}>{fmtPct(s.ci_low)}</span>
           ) : (
             <span className="font-semibold tabular-nums">—</span>
           )}
@@ -132,15 +147,24 @@ export function EdgeRuleCard({
       {/* 검증 상태 — 표본 진행바(거래일)와 **막고 있는 항목**을 분리해 보여준다.
           예전엔 진행바가 min_sample(회수)까지 포함해, 그 조건이 게이트에서 빠진 뒤
           '바는 꽉 찼는데 검증 중'이 되는 모순이 있었다. 이제 바는 심사 대상이 되는 시점만
-          나타내고, 통과를 막는 이유는 서버가 준 blockers 를 그대로 적는다. */}
+          나타내고, 통과를 막는 이유는 서버가 준 blockers 를 그대로 적는다.
+          **3줄 구조(상태·진행바·설명)를 항상 같은 높이로 렌더한다** — 설명줄을 조건부로 넣었더니
+          '남은 조건'이 있는 카드만 키가 커져 그리드가 들쭉날쭉했다(2026-08-04 사용자 지적).
+          판정 종결도 같은 3줄을 쓰고 텍스트·색만 바꾼다(더 심사하지 않으므로 바는 회색 고정). */}
       {rule.status === "candidate" && !measure && (
         <div className="mt-0.5">
           <div className="flex items-center justify-between gap-2 text-[10px] text-slate-400 dark:text-slate-500">
             <span className="shrink-0">
-              {nDays < PROMO_MIN_DAYS ? "표본 쌓는 중" : promo ? "검증 통과" : "심사 중"}
+              {decided
+                ? (verdict?.text ?? "판정 종결")
+                : nDays < PROMO_MIN_DAYS
+                  ? "표본 쌓는 중"
+                  : promo
+                    ? "검증 통과"
+                    : "심사 중"}
             </span>
             <span className="tabular-nums">
-              <span className={nDays < PROMO_MIN_DAYS ? "text-amber-500 dark:text-amber-400" : ""}>
+              <span className={!decided && nDays < PROMO_MIN_DAYS ? "text-amber-500 dark:text-amber-400" : ""}>
                 {nDays}/{PROMO_MIN_DAYS}일
               </span>
               {n > 0 && <span className="text-slate-300 dark:text-slate-600">{" · "}{n}회</span>}
@@ -148,16 +172,23 @@ export function EdgeRuleCard({
           </div>
           <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
             <div
-              className={`h-full rounded-full ${promo ? "bg-rose-500" : "bg-slate-300 dark:bg-slate-600"}`}
+              className={`h-full rounded-full ${
+                decided ? "bg-slate-200 dark:bg-slate-700" : promo ? "bg-rose-500" : "bg-slate-300 dark:bg-slate-600"
+              }`}
               style={{ width: `${progress}%` }}
             />
           </div>
-          {/* 표본이 찬 뒤에도 통과가 아니면 이유를 밝힌다 — 이게 없으면 '왜 아직?'이 남는다 */}
-          {!promo && nDays >= PROMO_MIN_DAYS && blockers.length > 0 && (
-            <p className="mt-1 truncate text-[10px] text-slate-400 dark:text-slate-500">
-              남은 조건: {blockers.join(" · ")}
-            </p>
-          )}
+          {/* 설명줄 — 종결이면 판정 사유, 심사 중이면 막고 있는 항목. 내용이 없어도 같은 높이를
+              차지하도록 공백을 넣어 항상 렌더한다(카드 높이 통일). */}
+          <p className="mt-1 h-3.5 truncate text-[10px] leading-[0.875rem] text-slate-400 dark:text-slate-500">
+            {decided
+              ? (rule.decision?.confirm?.reasons?.[0] ??
+                 rule.decision?.discovery?.reasons?.[0] ??
+                 "검증이 끝나 더 심사하지 않습니다.")
+              : !promo && nDays >= PROMO_MIN_DAYS && blockers.length > 0
+                ? `남은 조건: ${blockers.join(" · ")}`
+                : "\u00A0"}
+          </p>
         </div>
       )}
     </Link>

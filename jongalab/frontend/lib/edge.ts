@@ -75,9 +75,13 @@ export const STAT_META = {
   n_days: { label: '검증 거래일', help: '검증 횟수가 쌓인 서로 다른 거래일 수. 같은 날 여러 종목은 시장 흐름에 함께 움직여 우연을 걸러내기 어렵기 때문에, 횟수와 별개로 서로 다른 거래일이 10일 이상 쌓여야 적용을 검토합니다.' },
   mean_net: { label: '평균 수익', help: '조건에 걸린 종목을 다음날 팔았다고 가정한 회당 평균 수익률. 세금·수수료 등 거래비용(0.25%)을 뺀 값입니다.' },
   win_rate: { label: '성공률', help: '수익이 난 비율. 단, 성공률보다 평균 수익이 더 중요합니다(한 번의 큰 손실이 여러 번의 작은 수익을 지울 수 있음).' },
-  mean_exc: { label: '초과 수익', help: '같은 날 후보 종목 전체(그 전략이 고른 종목은 빼고)의 평균보다 얼마나 더 벌었는지입니다. 시장이 좋아서 오른 몫을 걷어내고 "고르기를 잘해서 번 몫"만 남긴 값이라, 위의 평균 수익보다 이 값이 전략의 실력에 가깝습니다.' },
-  ci_low_exc: { label: '보수적 초과수익', help: '위 초과 수익을 운이 나쁜 경우까지 감안해 낮춰 잡은 하한 추정치(통계적 신뢰구간). 이 값이 0%보다 커야 "우연이 아니다"라고 보고 적용 조건을 충족합니다.' },
-  t_days_exc: { label: '날짜별 신뢰도', help: '초과 수익을 하루 한 판으로 세어 계산한 신뢰도 점수. 같은 날 걸린 종목들은 시장이 좋으면 다 같이 오르기 때문에, 종목 수로 세면 실제보다 훨씬 믿을 만해 보입니다. 1.65 이상이어야 적용을 검토합니다(매수 전략에만 적용 — 제외 규칙은 평균보다 큰 사고를 막는 것이 목적이라 면제).' },
+  ci_low: { label: '보수적 수익', help: '위 평균 수익을 운이 나쁜 경우까지 감안해 낮춰 잡은 하한 추정치(통계적 신뢰구간). 이 값이 0%보다 커야 "우연이 아니다"라고 보고 적용 조건을 충족합니다.' },
+  t_days: { label: '날짜별 신뢰도', help: '평균 수익을 하루 한 판으로 세어 계산한 신뢰도 점수. 같은 날 걸린 종목들은 시장이 좋으면 다 같이 오르기 때문에, 종목 수로 세면 실제보다 훨씬 믿을 만해 보입니다. 1.65 이상이어야 적용을 검토합니다(매수 전략에만 적용 — 제외 규칙은 평균보다 큰 사고를 막는 것이 목적이라 면제).' },
+  // ── 아래 초과 계열은 **적용 조건이 아니다**(2026-08-04). 상세 화면에서 "장이 좋아서 오른 건
+  // 아닌지" 눈으로 확인하는 참고값이다 — 평균보다 덜 벌어도 안정적으로 수익이 나면 통과다.
+  mean_exc: { label: '초과 수익(참고)', help: '같은 날 후보 종목 전체(그 전략이 고른 종목은 빼고)의 평균보다 얼마나 더 벌었는지입니다. 시장이 좋아서 오른 몫을 걷어낸 값이라 "고르기 실력"을 가늠하는 참고 지표이고, 적용 조건에는 쓰지 않습니다.' },
+  ci_low_exc: { label: '보수적 초과수익(참고)', help: '위 초과 수익의 신뢰구간 하한. 참고용이며 적용 조건에는 쓰지 않습니다.' },
+  t_days_exc: { label: '날짜별 신뢰도(초과, 참고)', help: '초과 수익을 하루 한 판으로 세어 계산한 신뢰도 점수. 참고용이며 적용 조건에는 쓰지 않습니다.' },
   worst_low_ret: { label: '최악 하락', help: '조건에 걸렸던 종목이 다음날 장중 기록한 가장 큰 하락률 — 이 전략의 최악의 날입니다.' },
 } as const;
 
@@ -208,7 +212,7 @@ export const TONE_FILL: Record<Tone, string> = {
 //
 // 2026-07-28 정리: 예전엔 `min_sample`(종목-일 40회)도 진행률에 넣었는데, 그날 min_sample 이
 // 승격 게이트에서 빠지면서 **"진행바는 꽉 찼는데 여전히 검증 중"** 이라는 모순이 생겼다.
-// 게이트는 표본 외에도 절대 수익성·초과수익·유의성·대조군 우위를 보고, 그 조건은 백엔드만 안다.
+// 게이트는 표본 외에도 평균수익·유의성을 보고, 그 조건은 백엔드만 안다.
 // → 진행바는 "언제 심사 대상이 되는가"(거래일 10일)만 보여주고, **무엇이 막고 있는지는 서버가
 //   내려주는 stats.promo_blockers 를 그대로 렌더링**한다(프론트에서 재계산 금지).
 export function verifyProgress(rule: EdgeRule): { n: number; nDays: number; progress: number } {
@@ -222,14 +226,17 @@ export function verifyProgress(rule: EdgeRule): { n: number; nDays: number; prog
 // 백엔드에 새 조건이 생겨도 화면이 조용히 빠뜨리지 않게 한다.
 const BLOCKER_LABEL: Record<string, string> = {
   '거래일 부족': '검증 거래일 부족',
-  '절대 수익성 미충족': '회당 순수익이 0% 이하',
-  '초과수익 미충족': '같은 날 다른 후보보다 못함',
+  '평균수익 미충족': '회당 평균 수익이 0% 이하',
   '신뢰구간 하한 미충족': '보수적 수익이 0% 이하',
   '일 클러스터 t 미충족': '날짜별 신뢰도 부족',
-  '대조군 우위 미충족': '기준선보다 못함',
   '실익 미입증': '제외 효과 미입증',
   '선정 시점 실행 불가': '매수 시점에 못 쓰는 조건',
+  '실행 불가': '매수 시점에 못 쓰는 조건',
   '표본 부족': '검증 횟수 부족',
+  // 2026-08-04 게이트에서 제거된 조건 — stats 는 평가기(평일 09:40)가 다시 굽기 전까지
+  // 예전 값이 남아 있으므로 그때까지의 표기를 위해 매핑만 남긴다.
+  '초과수익 미충족': '같은 날 다른 후보보다 못함(옛 조건)',
+  '대조군 우위 미충족': '기준선보다 못함(옛 조건)',
 };
 
 export function promoBlockers(rule: EdgeRule): string[] {
@@ -252,7 +259,7 @@ export const POLICY_META: Record<'strict' | 'experimental', { label: string; hel
     help:
       '현행 점수 방식이 무작위 선정보다도 못하다는 실측에 따라, 통계적 확신을 기다리지 않고 ' +
       '기대값이 양수인 전략을 먼저 적용해 보고 성적이 나빠지면 내리는 모드입니다. ' +
-      '수익성(회당 순수익 > 0)과 초과수익 조건은 그대로 요구합니다.',
+      '회당 평균 수익이 0%보다 큰지, 그리고 검증 거래일이 10일 이상 쌓였는지는 그대로 요구합니다.',
   },
 };
 
@@ -281,10 +288,13 @@ export function isPromotionCandidate(rule: EdgeRule): boolean {
   );
 }
 
-// 판정 진행 상태 — "아직 심사 중"과 "이미 탈락"을 구분하는 라벨. 탈락한 candidate 를 그냥
+// 판정 진행 상태 — "아직 심사 중"과 "이미 종결"을 구분하는 라벨. 종결된 candidate 를 그냥
 // 'candidate' 로만 두면 계속 심사 중인 것처럼 읽힌다.
-// **판정 일정을 면제하는 정책(experimental)에서는 표시하지 않는다** — 단계가 진행되지 않으므로
-// '발견 단계'가 영구 고정돼 잘못된 인상을 준다.
+// **판정 기록(decision)이 있을 때만 표시한다.** 2026-08-04 수정: 예전엔 experimental 정책이면
+// 무조건 숨겼는데, 평가기(rule_evaluator)는 **정책과 무관하게 판정 일정을 실행**해 종결까지
+// 기록한다. 그래서 experimental 에서 실제로 종결된 rule 이 화면에는 '심사 중'으로 보였다
+// (게이지는 꽉 찬 채로 목록 맨 위 — 승격을 기다리게 만드는 오해). 기록이 없으면 null 을 돌려
+// '발견 단계'가 영구 고정되는 문제도 함께 피한다.
 export const DECISION_LABEL: Record<string, { text: string; tone: 'wait' | 'pass' | 'fail' }> = {
   discovery: { text: '발견 단계', tone: 'wait' },
   confirming: { text: '확인창 진행', tone: 'wait' },
@@ -295,8 +305,18 @@ export const DECISION_LABEL: Record<string, { text: string; tone: 'wait' | 'pass
 
 export function decisionLabel(rule: EdgeRule): { text: string; tone: 'wait' | 'pass' | 'fail' } | null {
   if (rule.status !== 'candidate' || isMeasurementOnly(rule)) return null;
-  if (promoPolicy(rule) === 'experimental') return null;
   const v = rule.decision?.verdict;
   if (v && DECISION_LABEL[v]) return DECISION_LABEL[v];
-  return DECISION_LABEL[rule.decision?.discovery?.pass ? 'confirming' : 'discovery'];
+  if (rule.decision?.discovery?.pass) return DECISION_LABEL.confirming;
+  return null;   // 판정 기록 없음 = 아직 아무 판정도 안 된 상태(표기 없음)
+}
+
+// 판정이 끝난(종결) candidate — 더 이상 심사하지 않으므로 목록에서 맨 아래로 내리고 카드에도
+// '심사 중' 대신 판정 결과를 찍는다. 전이(retire)는 관리자 판단이라 status 는 candidate 그대로다.
+export function isDecided(rule: EdgeRule): boolean {
+  return (
+    rule.status === 'candidate' &&
+    !isMeasurementOnly(rule) &&
+    Boolean(rule.decision?.decided_at || rule.decision?.verdict)
+  );
 }

@@ -111,8 +111,8 @@ export default function EdgeRulesAdminPage() {
       <div className="flex items-start gap-2 rounded-2xl border border-slate-100 bg-slate-50/60 px-4 py-3 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
         <Info className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
-          실전 투입 조건(서로 다른 거래일 10일 이상 · 회당 순수익 &gt; 0% · 같은 날 다른 후보 대비
-          초과수익 &gt; 0% · 기준선보다 좋은 성적 · 매수 시점에 실행 가능한 조건)은{" "}
+          실전 투입 조건(서로 다른 거래일 10일 이상 · 회당 평균 수익 &gt; 0% · 매수 시점에 실행
+          가능한 조건)은{" "}
           <b>서버가 검증</b>하며, 미충족 시 사유와 함께 거부됩니다(강제 불가). 각 카드의{" "}
           <b>&ldquo;남은 조건&rdquo;</b>이 서버가 판단한 미충족 항목입니다. 과도한 투입을 막기 위해
           실전 투입은 <b>월 3개까지</b>입니다.
@@ -298,16 +298,16 @@ function RuleRow({ rule, action }: { rule: EdgeRule; action?: React.ReactNode })
             {STAT_META.mean_net.label}{" "}
             <b className={`tabular-nums ${TONE_TEXT[retTone(s.mean_net)]}`}>{fmtPct(s.mean_net)}</b>
             {" · "}
-            {STAT_META.ci_low_exc.label}{" "}
-            <b className={`tabular-nums ${TONE_TEXT[retTone(s.ci_low_exc)]}`}>{fmtPct(s.ci_low_exc)}</b>
-            {/* 초과 계열(유니버스 자기제외) — selector 승격 게이트가 보는 값. 원시 평균만
-                보면 통과처럼 보이는 후보를 걸러내므로 승격 판단 화면에는 반드시 함께 뜬다
+            {STAT_META.ci_low.label}{" "}
+            <b className={`tabular-nums ${TONE_TEXT[retTone(s.ci_low)]}`}>{fmtPct(s.ci_low)}</b>
+            {/* 승격 게이트가 보는 안정성 값(2026-08-04 부터 절대 계열). 평균만 보면 통과처럼
+                보이는 후보를 걸러내므로 승격 판단 화면에는 반드시 함께 뜬다
                 (제외 규칙은 이 게이트가 면제라 미표기). */}
             {rule.role !== "veto" && (
               <>
                 {" · "}
-                {STAT_META.t_days_exc.label}{" "}
-                <b className={`tabular-nums ${TONE_TEXT[dayTTone(s.t_days_exc)]}`}>{fmtT(s.t_days_exc)}</b>
+                {STAT_META.t_days.label}{" "}
+                <b className={`tabular-nums ${TONE_TEXT[dayTTone(s.t_days)]}`}>{fmtT(s.t_days)}</b>
               </>
             )}
             {s.worst_low_ret !== null && (
