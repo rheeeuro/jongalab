@@ -173,6 +173,9 @@ reconcile (20:00) · kt00018 잔고 vs 로컬 position 대조 → 드리프트 �
 ```
 
 > **첫 구현 범위는 종가베팅 집행만**이다. 장중 상시 손절 감시(`position_monitor`)·멀티 전략은 다음 단계.
+> 장중매매로 넓히기 전 구조 점검은 `docs/plan/intraday-readiness.md`(2026-08-04) — 멱등키·settle_plan PK·
+> trade_signal 키가 "하루 1사이클"을 전제하고, 리스크 한도가 회전율을 전제하지 않는다는 점이 live 진입의
+> 전제 조건으로 정리돼 있다.
 
 **미실행 감시(dead-man's switch)**: monitor·settle 은 cron 미발동·크래시로 안 돌아도 스스로 알리지
 않으므로(거래 없으면 조용히 끝남), 각 워커가 성공 완료 시 `audit_log` 에 `worker_done` 마커를 남긴다.
