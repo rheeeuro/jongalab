@@ -460,7 +460,7 @@ def test_excess_return_is_not_a_gate_condition():
     assert gate["eligible"]
     assert not any("초과" in r for r in gate["stat_reasons"])
 
-    # 반대로 절대 계열이 불안정하면(원시 CI 하한 음수) 초과가 아무리 좋아도 막힌다.
+    # 반대로 절대 계열이 불안정하면(CI 하한 음수) 초과가 아무리 좋아도 막힌다(정책 무관).
     unstable = {"n": 50, "n_days": 12, "mean_net": 1.5, "mean_net_days": 1.5,
                 "ci_low": -0.3, "t_days": 0.2,
                 "mean_exc": 0.9, "ci_low_exc": 0.5, "t_days_exc": 2.9}
@@ -515,8 +515,8 @@ def test_demotion_uses_same_weighting_as_promotion():
 
 
 # ── 승격 게이트 정책 (2026-07-28: strict / experimental) ──
-# experimental 은 유의성(ci_low·t_days)만 면제한다. 평균수익>0 · 거래일≥10 · 실행 가능성은
-# **그대로 남는다** — 안전망이므로 면제하면 안 된다.
+# experimental 은 **일 클러스터 t 와 판정 일정만** 면제한다(2026-08-04: ci_low 는 면제에서 빼냈다).
+# 평균수익>0 · 거래일≥10 · ci_low>0 · 실행 가능성은 **그대로 남는다** — 안전망이므로 면제 금지.
 
 _WEAK_SIG = {"n": 52, "n_days": 10, "mean_net": 1.19, "mean_net_days": 0.45,
              "ci_low": 0.14, "t_days": 1.17, "mean_exc": 0.79}
@@ -529,10 +529,24 @@ def test_default_policy_is_strict_fail_safe():
     assert any("일 클러스터 t" in r for r in gate["stat_reasons"])
 
 
-def test_experimental_waives_significance_only():
+def test_experimental_waives_day_cluster_t_only():
+    # _WEAK_SIG 는 ci_low +0.14(양수)·일 t 1.17(문턱 1.833 미달) — t 만 면제되므로 통과한다.
     gate = check_promotion(_rule(family="f4_laggard", stats=_WEAK_SIG), [_control(-0.227)],
                            policy="experimental")
     assert gate["eligible"], gate["stat_reasons"]
+
+
+def test_experimental_still_requires_positive_ci_low():
+    # 2026-08-04 사용자 결정 — 안정성 하한은 **정책 무관 공통**이다. 초과수익·대조군 우위를
+    # 제거하자 experimental 의 실효 조건이 '10거래일 평균 양수'뿐이 되어(무엣지 통과 확률 ≈50%)
+    # 과적합 방어가 월 승격 상한 하나에 걸렸다. 월 상한을 올리는 대신 이 하한을 되살렸다.
+    # 실측 대상: f5_prog_pm_reversal(평균 +0.496% / ci_low -0.745%).
+    unstable = {**_WEAK_SIG, "mean_net": 0.496, "mean_net_days": -0.54, "ci_low": -0.745,
+                "t_days": -0.4}
+    gate = check_promotion(_rule(family="f5_supply", stats=unstable), [_control(-0.227)],
+                           policy="experimental")
+    assert not gate["eligible"]
+    assert any("신뢰구간 하한" in r for r in gate["stat_reasons"])
 
 
 def test_experimental_still_requires_positive_mean_net():
