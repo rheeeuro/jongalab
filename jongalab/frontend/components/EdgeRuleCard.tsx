@@ -37,6 +37,18 @@ export function EdgeRuleCard({
   // 판정이 끝난 candidate — '심사 중'이 아니라 결과(판정 탈락·재현 실패)를 찍는다.
   const decided = isDecided(rule);
   const verdict = decisionLabel(rule);
+  // 판정 사유는 **판정 당시(발견 창) 값**이라 지금 누적 성적과 다를 수 있다 — 실제로
+  // f5_universe_new_entry 는 판정 시점 평균 -0.405% / 현재 누적 +0.18% 로 부호가 반대다.
+  // 날짜를 앞에 붙여야 카드에 나란히 뜬 '평균 수익'과 모순돼 보이지 않는다(2026-08-04).
+  // 채점은 종결 후에도 매일 계속되므로(rule_evaluator 가 retired 까지 채점) 성적은 계속 움직인다.
+  const decidedReason = (() => {
+    const step = rule.decision?.confirm ?? rule.decision?.discovery;
+    const reason = step?.reasons?.[0];
+    if (!reason) return "검증이 끝나 더 심사하지 않습니다(채점은 계속됩니다).";
+    const at = step?.at ?? rule.decision?.decided_at;
+    const md = at?.match(/^\d{4}-(\d{2})-(\d{2})/);
+    return md ? `${+md[1]}/${+md[2]} 판정 기준 — ${reason}` : reason;
+  })();
 
   // 스파크라인: 일별 평균 수익 시계열(결측 제외). 2점 미만이면 미표시.
   const series = rule.daily.map((d) => d.mean_net_ret).filter((v): v is number => v !== null);
@@ -89,7 +101,7 @@ export function EdgeRuleCard({
           {decided && verdict && (
             <span
               className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-              title={rule.decision?.confirm?.reasons?.[0] ?? rule.decision?.discovery?.reasons?.[0] ?? undefined}
+              title={decidedReason}
             >
               {verdict.text}
             </span>
@@ -182,9 +194,7 @@ export function EdgeRuleCard({
               차지하도록 공백을 넣어 항상 렌더한다(카드 높이 통일). */}
           <p className="mt-1 h-3.5 truncate text-[10px] leading-[0.875rem] text-slate-400 dark:text-slate-500">
             {decided
-              ? (rule.decision?.confirm?.reasons?.[0] ??
-                 rule.decision?.discovery?.reasons?.[0] ??
-                 "검증이 끝나 더 심사하지 않습니다.")
+              ? decidedReason
               : !promo && nDays >= PROMO_MIN_DAYS && blockers.length > 0
                 ? `남은 조건: ${blockers.join(" · ")}`
                 : "\u00A0"}
