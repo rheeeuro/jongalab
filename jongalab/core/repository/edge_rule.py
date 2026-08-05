@@ -152,16 +152,8 @@ def set_rule_status(rule_id: int, status: str) -> None:
         conn.commit()
 
 
-def count_promoted_in_month(year: int, month: int) -> int:
-    """해당 연·월에 live 로 승격된 rule 수 (월 승격 상한 게이트용)."""
-    with get_db() as (conn, cursor):
-        cursor.execute(
-            """SELECT COUNT(*) AS c FROM edge_rule
-               WHERE promoted_at IS NOT NULL
-                 AND YEAR(promoted_at) = %s AND MONTH(promoted_at) = %s""",
-            (year, month),
-        )
-        return int(cursor.fetchone()["c"])
+# (2026-08-05) `count_promoted_in_month` 는 월 승격 상한 폐지와 함께 삭제했다.
+# 승격 이력이 필요하면 `edge_rule.promoted_at` 을 직접 조회한다.
 
 
 # ── edge_rule_daily ──

@@ -1,11 +1,11 @@
 """Edge Ledger 라우트 — 가설 원장 조회(공개) + 등록·승격·강등(admin).
 
 GET 은 대시보드 스코어보드가 쓰므로 공개, 변경(POST)만 개별 require_admin.
-승격은 코드가 정량 게이트(평균수익·거래일 수·신뢰구간 하한·월 승격 상한)를 강제하며,
-미충족 시 409 + 사유로 거부한다(force 없음 — 사전 등록·다중 가설 보정 규율).
+승격은 코드가 정량 게이트(평균수익·거래일 수·신뢰구간 하한)를 강제하며,
+미충족 시 409 + 사유로 거부한다(force 없음 — 사전 등록 규율).
+**게이트를 통과하면 그대로 승격한다** — 통과 건수를 사람이 다시 줄이는 장치는 두지 않는다
+(2026-08-05 월 승격 상한 폐지, 아래 promote_edge_rule 주석).
 """
-from datetime import datetime
-
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
@@ -19,7 +19,6 @@ from core.repository.edge_rule import (
     get_rule,
     get_rule_by_name,
     set_rule_status,
-    count_promoted_in_month,
     get_rule_daily,
     get_latest_matched,
     get_rule_matched_history,
@@ -28,13 +27,21 @@ from core.repository.edge_rule import (
 
 router = APIRouter(prefix="/api/edge-rules", tags=["edge-rules"])
 
-# 다중 가설 보정: live 승격 월 상한(README §5·계획 §4).
-# 2026-07-28 에 2→3 으로 올렸다. 이유: experimental 정책(config.EDGE_PROMO_POLICY)이 이미
-# 통계 유의성 요구를 내려놓았으므로 같은 목적의 월 상한만 남겨두는 건 일관성이 없고, 무엇보다
-# **live selector 1종으로는 hybrid 모드가 legacy 와 거의 같은 종목을 산다**(실측 재현:
-# 1종 +0.016%p / 3종 +0.443%p / 8종 +0.810%p) — 상한 때문에 실험 자체가 성립하지 않는다.
-# strict 로 되돌릴 때 이 값도 2 로 함께 되돌릴 것.
-_MONTHLY_PROMOTE_CAP = 3
+# ── 월 승격 상한은 **폐지했다** (2026-08-05 사용자 결정) ──
+# 있던 것: `_MONTHLY_PROMOTE_CAP`(2→3, 다중 가설 보정 = 게이트가 오탐을 흘려도 실탄으로 넘어가는
+# **유량**을 월 N 개로 제한). 폐지 근거 3가지:
+#  ① **진짜 상한은 선정 슬롯 10개다.** hybrid 는 `TRADED_TOP_N=10` 고정이라 live selector 를
+#     늘려도 사는 종목 수도 시드도 늘지 않고 구성만 바뀐다(edge_selection.select_signals).
+#  ② **실측 차이가 없다.** 7/7~8/4 20거래일 반사실(실집행 라벨·비용 차감): live selector 5종
+#     +0.751%/일(t 1.33) vs 게이트 통과 4종을 더한 9종 +0.771%/일(t 1.25) — +0.02%p.
+#     매칭은 하루 13.2종 → 21.1종으로 늘지만 슬롯 초과분은 어차피 점수순으로 잘린다.
+#  ③ **상한은 사람이 순위를 매기게 강제한다.** 통과 4종 > 잔여 슬롯 2 였던 2026-08-05 에
+#     실제로 사후 재계산(어떤 날·어떤 종목을 빼면 평균이 어떻게 되는가)으로 통과 룰을
+#     떨어뜨리는 일이 벌어졌다 — 게이트를 자동화한 이유와 정면으로 충돌한다.
+# → 규율은 이제 하나다: **게이트를 통과하면 승격한다.** 과적합 방어는 게이트 자신(ci_low>0 ·
+# 거래일≥10 · 평균수익>0)과 강등 감시(edge_policy.check_demotion)가 진다.
+# ⚠️ 대신 드러난 숙제: 매칭이 슬롯을 넘을 때 hybrid 는 **점수순**으로 자르는데 그 점수는 엣지가
+# 없다. rule 기대값(mean_net) 순으로 자르는 `rules` 모드 정렬을 hybrid 초과분에도 쓸지는 별건.
 
 
 class RuleCreate(BaseModel):
@@ -135,7 +142,8 @@ def promote_edge_rule(rule_id: int):
     (selector) 평균수익>0 · 거래일 수 · ci_low>0 · 일 클러스터 t(t분포 임계값).
     2026-08-04: 초과수익·대조군 우위 조건은 제거됐다(자는 절대 평균수익 하나).
     (selector·veto) 선정/집행 시점 실행 가능성.
-    여기에 라우터만 시점 의존 운영 제약(상태=candidate, 월 승격 상한, **판정 일정**)을 더한다.
+    여기에 라우터만 시점 의존 운영 제약(상태=candidate, **판정 일정**)을 더한다.
+    월 승격 상한은 2026-08-05 폐지했다(파일 상단 주석) — 통과 건수는 더 이상 제한하지 않는다.
     """
     rule = get_rule(rule_id)
     if not rule:
@@ -165,13 +173,6 @@ def promote_edge_rule(rule_id: int):
                         + " / ".join((decision.get("confirm") or {}).get("reasons")
                                      or (decision.get("discovery") or {}).get("reasons") or ["기록 없음"])),
             )
-
-    now = datetime.now()
-    if count_promoted_in_month(now.year, now.month) >= _MONTHLY_PROMOTE_CAP:
-        raise HTTPException(
-            status_code=409,
-            detail=f"이번 달 승격 상한({_MONTHLY_PROMOTE_CAP}개)에 도달했습니다(다중 가설 보정 규율).",
-        )
 
     controls = [r for r in list_rules(status="live") if rule_role(r) == "benchmark"]
     gate = check_promotion(rule, controls, policy=EDGE_PROMO_POLICY)

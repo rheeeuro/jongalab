@@ -74,7 +74,6 @@ from core.repository.edge_rule import (
     get_rule_by_name,
     update_rule_stats,
     set_rule_status,
-    count_promoted_in_month,
     upsert_rule_daily,
     get_scored_dates,
     get_rule_daily,
