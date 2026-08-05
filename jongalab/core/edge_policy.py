@@ -51,6 +51,21 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     "content_score",
     "news_count", "news_unique_count", "news_pm_count", "news_first_today",
     "news_prior_avg", "news_sentiment", "news_catalyst",
+    # 재료 지속성 라벨 (2026-07-29 sql/40, 축·합성 v2 = 2026-08-05 sql/52) — closing_bet 이
+    # 선정 시점에 OpenAI 벌크 판정으로 채우는 컬럼이라 선정 레이어에서 실행 가능하다.
+    # ⚠️ **누락 버그였다**(2026-08-05 발견): sql/41 로 `f1_news_durable`·`veto_news_spent` 를
+    # 등록한 7/29 부터 이 집합에 `news_durability` 가 없어서 두 rule 이
+    # `rule_layer=None`(선정·집행 어느 레이어에서도 실행 불가)으로 판정됐고, 통계 게이트를
+    # 통과해도 **실행 가능성 게이트에서 영구히 막히는** 상태였다. 컬럼을 추가하는 것만으로
+    # live 가 되는 건 아니다 — 통계 게이트는 그대로다.
+    # `news_material_size_ratio` 는 LLM 이 뽑은 금액을 코드가 시총으로 나눈 파생이라 같은 시점.
+    # `mat_run_ret_3d`·`mat_up_days` 는 **결과 라벨**(D+3)이므로 여기 넣지 않는다.
+    "news_next_milestone", "news_milestone_horizon", "news_amount_locked",
+    "news_material_size_ratio", "news_driver_scope", "news_stage",
+    "news_durability", "news_durability_v",
+    # 재료 신선도 (2026-08-05, sql/56) — 판정 코퍼스 최신 재료 기사의 경과 시간(h).
+    # closing_bet 실행 시각 기준 파생이라 선정 레이어 값이다.
+    "news_material_age_h",
     "score", "rank_no", "selected",
     "sector_rel_ret", "sector_leader_chg",
     # F5 수급 구조·테마 피처 (2026-07-05) — closing_bet 선정 시점 수집

@@ -27,6 +27,9 @@ _PRESERVE_ON_NULL = frozenset({
     "news_next_milestone", "news_amount_locked", "news_driver_scope", "news_stage",
     "news_durability", "news_label_reason", "news_judge_max_at",
     "news_milestone_horizon", "news_material_size_ratio", "news_durability_v",
+    # news_material_age_h — LLM 무관 파생이지만 **코퍼스 조회 실패 시 None** 이 되므로 같이 보존.
+    # (조회가 실패한 회차가 앞선 회차의 신선도 값을 NULL 로 덮으면 그날 축이 사라진다.)
+    "news_material_age_h",
 })
 
 
@@ -85,6 +88,7 @@ def _analysis_row(c: dict) -> dict:
         "news_stage": c.get("news_stage"),
         "news_durability": c.get("news_durability"),
         "news_durability_v": c.get("news_durability_v"),
+        "news_material_age_h": c.get("news_material_age_h"),
         "news_label_reason": c.get("news_label_reason"),
         "news_judge_max_at": c.get("news_judge_max_at"),
         "news_headlines": json.dumps(

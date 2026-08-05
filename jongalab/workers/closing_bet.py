@@ -44,7 +44,7 @@ from core.repository.trade_signal import push_trade_signals
 from core.repository.edge_rule import list_rules
 from core.edge_selection import select_signals
 from core.edge_policy import rule_role
-from core.news_material_judge import judge_materials
+from core.news_material_judge import is_price_report, judge_materials
 from core.news_matcher import mentions_ticker
 from core.config import NEWS_JUDGE_ENABLED, NEWS_JUDGE_LOOKBACK_DAYS
 from core.notifications import send_report_save_alert
@@ -747,6 +747,19 @@ class ClosingBetStrategy:
             if not any(it.get("d") == today for it in items):
                 continue     # 오늘 재료가 없으면 판정 대상이 아니다(룩백만 있는 건 과거 재료)
             targets.append(r)
+            # 재료 신선도 — **가장 최신 재료 기사가 몇 시간 전인가**(sql/56, LLM 무관·결정론).
+            # "내일도 살 만한가"를 가르는 결정적 사실 하나가 '오늘 소화됐는지'다. 14:50 에 터진
+            # 재료는 종가까지 반영될 시간이 없어 내일 아침에 반응하고, 08:00 재료는 하루 종일
+            # 반영됐다. 기존 `news_pm_count`(12시 이후 건수)가 같은 축이지만 **카운트 게이트
+            # (텔레그램)라 종목 커버리지가 44%** 이고 건수라 '몇 시'를 잃는다. 이 값은 텍스트
+            # 게이트 코퍼스(네이버 포함, 시세보도·비귀속 제외)의 최신 시각이라 커버리지가 넓다.
+            fresh = [it["created_at"] for it in items
+                     if it.get("d") == today and not is_price_report(it.get("headline") or "")
+                     and it.get("created_at")]
+            if fresh:
+                age_h = (datetime.now() - max(fresh)).total_seconds() / 3600
+                # 음수(발행시각이 미래로 들어온 이상치)는 0 으로, 24h 초과는 당일 기사가 아니다.
+                r["news_material_age_h"] = round(min(max(age_h, 0.0), 24.0), 1)
             # 캐시 기준 시각은 **판정에 실제로 쓰는 코퍼스**의 마지막 시각이다(items 는 ASC).
             # 걸러낸 노이즈 기사로 시각이 밀리면 새 재료가 없는데도 매 회차 재호출한다.
             latest = items[-1].get("created_at")

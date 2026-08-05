@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     news_stage VARCHAR(12) DEFAULT NULL,         -- 첫발표/진행/마무리/불명
     news_durability VARCHAR(6) DEFAULT NULL,     -- 파생 등급: 연속/중립/소진
     news_durability_v TINYINT DEFAULT NULL,      -- 합성 규칙 버전(현재 2) — v1/v2 표본 분리용
+    news_material_age_h DECIMAL(5,1) DEFAULT NULL, -- 재료 신선도: 당일 최신 재료 기사 경과 시간(h, sql/56)
     news_label_reason VARCHAR(255) DEFAULT NULL, -- 지속성 판정 근거(육안 감사용)
     news_judge_max_at DATETIME DEFAULT NULL,     -- 판정 반영 마지막 언급 시각(30분 재실행 캐시 기준)
     news_followup_days TINYINT DEFAULT NULL,     -- 채점(참고값): +1~+N일 중 시세보도 제외 언급 날짜 수
