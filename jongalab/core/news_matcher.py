@@ -104,3 +104,26 @@ def match_companies(text: str) -> list[dict]:
             seen.add(ticker)
             out.append({"ticker": ticker, "name": name})
     return out
+
+
+def mentions_ticker(text: str, ticker: str) -> bool:
+    """이 텍스트가 그 종목을 **제목에서 직접 다루는가** (2026-08-05).
+
+    쓰임은 `match_companies` 와 정반대 방향이다 — 저쪽은 "종목이 뭔지 모를 때 찾아내는" 용도
+    (텔레그램 경로의 귀속)이고, 이쪽은 **종목이 이미 정해진 기사의 귀속을 확인**하는 용도다.
+
+    왜 필요한가: 네이버 종목별 뉴스는 종목코드로 조회해 커버리지가 좋지만(유니버스 94%),
+    그 종목이 본문에 **스쳐 언급된** 기사까지 다 준다. 실측 2026-08-05 5일 코퍼스에서
+    한화오션 56건 중 제목이 실제로 한화오션을 다룬 건 3건이었고(나머지는 "폭염 산업현장"·
+    "LIG D&A 장보고-III"·"대기업 89곳 오너家" 류), SK텔레콤은 181건 중 5건이었다. 이 상태로
+    재료 지속성을 판정하면 LLM 이 재료를 특정하지 못해 전부 '판단 보류'(라벨 없음)로 나온다
+    — 실제로 그렇게 나왔다(4종목 중 3종목).
+    제목 매칭으로 걸러내면 코퍼스 보유 종목이 94%→74% 로 줄지만, 남은 코퍼스는 그 종목에
+    관한 기사다. 텔레그램만 쓸 때의 30% 보다는 여전히 2.5배다.
+    리드문까지 매칭 대상에 넣어봐도 74% 로 동일해서 제목만 본다(리드문은 시점·금액 판정
+    근거로만 쓴다).
+    """
+    if not text or not ticker:
+        return False
+    code = ticker.split("_")[0].split(".")[0]
+    return any(m["ticker"] == code for m in match_companies(text))

@@ -67,19 +67,40 @@ NEWS_FOLLOWUP_WINDOW_DAYS = int(os.getenv('NEWS_FOLLOWUP_WINDOW_DAYS', '10'))
 # 14일이면 검증 창이 앞에서 잘린다. 승격 판정이 끝나면 14로 되돌려도 된다.
 NEWS_RETENTION_DAYS = int(os.getenv('NEWS_RETENTION_DAYS', '30'))
 
-# ── 뉴스 소스 게이트 (news_mention.source) ──
-# **뉴스 원자료의 어느 소스를 소비할지**를 한 곳에서 정한다. repository/news.py 의 모든 조회가
-# 이 집합으로 필터하므로, 새 소스를 수집만 해두고 라벨·룰·veto·LLM 판정에는 일절 반영하지 않는
-# '관측 전용' 기간을 둘 수 있다(승격은 .env 한 줄).
-#   왜 필요한가: 소스를 늘리면 news_count·news_prior_avg·surprise 배수가 도입일에 계단식으로
-#   튄다. 실측(2026-07-31 프로브) 네이버 당일 562행 vs 텔레그램 273행이고 **헤드라인 중복은
-#   2%뿐**이라 상쇄 없이 3배로 순증한다. news_unique_count 를 쓰는 rule 3종(그중
-#   `veto_bad_news` 는 **live = 자금 경로**)의 표본이 중간에 성질이 바뀌므로, 검증 전 유입을
-#   막는 게이트가 없으면 도입 자체가 실탄 변경이 된다.
+# ── 뉴스 소스 게이트 (news_mention.source) — **용도별로 둘로 쪼갠다** (2026-08-05) ──
+# 원자료는 늘 전 소스를 적재하고, **소비**만 게이트로 막아 관측 전용 기간을 둔다. 게이트를 소스
+# 단위 하나로 두던 것을 '카운트 소비'와 '텍스트 소비'로 분리한 이유:
+#   · 소스를 늘리면 계단식으로 튀는 건 **카운트 계열**이다(news_count·news_prior_avg·
+#     news_unique_count). 실측 네이버 2,800행/일 vs 텔레그램 500행/일이고 헤드라인 중복은
+#     2%뿐이라 상쇄 없이 순증한다. 그 표본을 `veto_bad_news`(live=자금 경로)가 쓰므로 동결한다.
+#   · **재료 지속성은 카운트가 아니라 헤드라인 텍스트에서 나오는 속성**이라 이 위험이 적용되지
+#     않는다. 그런데 같은 게이트에 묶여 있어서 지속성 라벨 커버리지가 유니버스의 30%에 머물렀다
+#     (실측 8/4: 유니버스 62 중 텔레그램 뉴스 보유 27 = 44%, 네이버는 60 = 97%).
+#     지속성을 선정의 1급 축으로 쓰려면 이 커버리지가 먼저 풀려야 한다.
 # 값은 쉼표 구분(예: 'telegram,naver'). 순서는 무관.
-NEWS_ACTIVE_SOURCES = tuple(
-    s.strip() for s in os.getenv('NEWS_ACTIVE_SOURCES', 'telegram').split(',') if s.strip()
+#
+# 카운트 소비 — news_count/news_unique_count/news_pm_count/news_first_today/news_prior_avg.
+# 텔레그램 고정이 기본이다. 넓히면 위 표본의 성질이 그날부터 바뀌므로 rule 판정과 함께 결정한다.
+NEWS_COUNT_SOURCES = tuple(
+    s.strip() for s in os.getenv(
+        'NEWS_COUNT_SOURCES', os.getenv('NEWS_ACTIVE_SOURCES', 'telegram')
+    ).split(',') if s.strip()
 ) or ('telegram',)
+# 텍스트 소비 — 재료 지속성 판정(news_material_judge)·뉴스 베토 판정(news_guard)·화면 헤드라인.
+# 네이버를 포함한다: **지속성 라벨 커버리지 유니버스의 30% → 45%**(실측 2026-08-05).
+#   네이버 단독 종목 커버리지는 94% 지만 그 종목이 스쳐 언급된 기사까지 들어와, 판정 코퍼스는
+#   제목 귀속 확인(news_matcher.mentions_ticker)으로 좁힌다 — 그래서 45% 다. 필터를 빼면 대상은
+#   94% 로 늘지만 LLM 이 재료를 특정하지 못해 판정 성공률이 29% 로 떨어져 실효 커버리지가 더 낮다.
+#   ⚠️ `veto_bad_news`(live)의 `news_sentiment` 판정 근거가 같이 넓어진다. **발동 조건인
+#   news_unique_count>=2 는 카운트 게이트(텔레그램)에 남으므로 발동 범위는 그대로**이고 판정
+#   근거만 정확해진다. 네이버 코퍼스에 대량으로 섞인 시세보도("급락·약세")가 sentiment 를
+#   끌어내려 오탐을 만드는 경로는 판정 코퍼스 선별에서 is_price_report 로 막는다
+#   (news_material_judge.select_headlines).
+NEWS_TEXT_SOURCES = tuple(
+    s.strip() for s in os.getenv('NEWS_TEXT_SOURCES', 'telegram,naver').split(',') if s.strip()
+) or ('telegram',)
+# 레거시 별칭 — 예전 이름을 읽는 곳(문서·로그)이 남아 있어 카운트 게이트를 가리킨다.
+NEWS_ACTIVE_SOURCES = NEWS_COUNT_SOURCES
 
 # ── 네이버 증권 종목별 뉴스 수집 (workers/naver_news_collector.py) ──
 # 유니버스 종목의 재료 라벨 커버리지가 47%(2026-07-31 실측 18/38)뿐인 것을 메우기 위한 소스.
@@ -94,7 +115,7 @@ NAVER_NEWS_TIMEOUT = int(os.getenv('NAVER_NEWS_TIMEOUT', '10'))
 
 # ── 증권 섹션 뉴스 수집 (workers/sec_news_collector.py) — 뉴스 탭 표시 전용 ──
 # 종합 속보 채널(텔레그램)을 화면 소스에서 걷어내기 위한 경로다. 적재처가 sec_news 라
-# 라벨·rule·veto 와 완전히 분리돼 있고(sql/49), 그래서 NEWS_ACTIVE_SOURCES 게이트의
+# 라벨·rule·veto 와 완전히 분리돼 있고(sql/49), 그래서 위 두 소스 게이트의
 # 대상이 아니다 — 끄면 뉴스 탭 헤드라인만 비고 나머지 파이프라인은 무영향.
 SEC_NEWS_ENABLED = os.getenv('SEC_NEWS_ENABLED', '1') == '1'
 # 한 사이클에 넘길 최대 페이지 수(1페이지 20건). 실측 증권 섹션은 하루 56페이지(~1,120건)라

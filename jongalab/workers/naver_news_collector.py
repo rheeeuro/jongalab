@@ -19,12 +19,17 @@ created_at 은 news_pm_count(12시 이후)·get_news_heat(NOW() 기준 창)·new
 기준이다. 30분 주기 수집기가 '수집 시각'을 넣으면 저녁 사이클 분이 전부 오후 재료로 잡히고
 창 분석이 오염된다. 그래서 발행시각(분 단위 정확)을 created_at·published_at 둘 다에 넣는다.
 
-[관측 전용 — 지금은 라벨·룰·veto 에 일절 영향 없다]
-적재하는 source='naver' 행은 config.NEWS_ACTIVE_SOURCES(기본 'telegram')에서 빠져 있어
-repository 조회가 전부 걸러낸다. 소스를 늘리면 집계 라벨이 계단식으로 튀고(실측 네이버
-562행 vs 텔레그램 273행, 헤드라인 중복 2%뿐이라 상쇄 없이 순증) news_unique_count 를 쓰는
-rule 3종 중 `veto_bad_news` 가 live(자금 경로)라, 2~3주 병행 관측 후 .env 로 승격한다.
-승격 시 함께 할 일은 sql/44 주석에 적어뒀다.
+[소비 범위 — 텍스트만 반영, 카운트는 동결] (2026-08-05)
+`source='naver'` 행은 **텍스트 게이트(NEWS_TEXT_SOURCES)에 포함**돼 재료 지속성 판정·뉴스
+베토 판정·화면 헤드라인의 원자료가 된다. 이걸 연 이유는 지속성 라벨 커버리지가 유니버스의
+30%(실측 8/4: 62행 중 18행)뿐이었고, 그 원인이 텔레그램 종목 커버리지 44% 였기 때문이다
+(네이버는 97%).
+**카운트 게이트(NEWS_COUNT_SOURCES)는 telegram 으로 동결한다** — news_count·prior_avg·
+unique_count 는 소스를 늘리면 도입일에 계단식으로 튀고(네이버 2,800행/일 vs 텔레그램
+500행/일, 헤드라인 중복 2%뿐) 그 표본을 `veto_bad_news`(live=자금 경로)가 쓴다.
+→ live veto 의 **발동 조건(news_unique_count>=2)은 그대로**고 sentiment 판정 근거만 넓어진다.
+  네이버 코퍼스에 대량으로 섞인 시세보도가 sentiment 를 끌어내리는 오탐 경로는 판정 코퍼스
+  선별에서 걷어낸다(news_material_judge.select_headlines 의 is_price_report 필터).
 
 [실패 안전] 조회 실패는 종목 단위로 건너뛰고 계속한다. 403/429(차단)만 사이클을 조기
 종료한다 — 막힌 상태로 60종목을 계속 두드리면 차단이 길어진다. 수집 공백은 관측 전용
@@ -40,7 +45,7 @@ import time
 from datetime import datetime
 
 from core.config import (
-    NAVER_NEWS_ENABLED, NAVER_NEWS_SLEEP_SEC, NEWS_ACTIVE_SOURCES,
+    NAVER_NEWS_ENABLED, NAVER_NEWS_SLEEP_SEC, NEWS_COUNT_SOURCES, NEWS_TEXT_SOURCES,
 )
 from core.logging_setup import setup_logging
 from core.naver_news_client import (
@@ -99,6 +104,7 @@ def _to_rows(code: str, name: str, articles: list[dict], date_str: str) -> list[
             "published_at": published_at,
             "created_at": published_at,   # 라벨 창 기준 — 수집 시각이 아니다(모듈 주석 참고)
             "source": SOURCE,
+            "body_preview": a.get("body_preview"),
         })
     return rows
 
@@ -154,9 +160,13 @@ def run(date_str: str, limit: int | None = None, dry_run: bool = False) -> int:
         len(covered) / max(len(codes), 1) * 100, failed, time.time() - started,
         " [dry-run]" if dry_run else "",
     )
-    if SOURCE not in NEWS_ACTIVE_SOURCES:
-        logger.info("관측 전용 — source='%s' 는 NEWS_ACTIVE_SOURCES%s 에서 제외돼 "
-                    "라벨·룰·veto 에 반영되지 않는다", SOURCE, list(NEWS_ACTIVE_SOURCES))
+    # 소비 게이트는 용도별로 둘이라 소스 하나가 '반영/미반영' 이진이 아니다 — 어느 쪽에
+    # 들어가 있는지 매 사이클 남긴다(승격·동결 상태를 로그만 보고 알 수 있어야 한다).
+    logger.info("소비 게이트 — 텍스트(재료·베토 판정) %s / 카운트(집계 라벨·룰) %s → "
+                "source='%s' 는 텍스트 %s, 카운트 %s",
+                list(NEWS_TEXT_SOURCES), list(NEWS_COUNT_SOURCES), SOURCE,
+                "반영" if SOURCE in NEWS_TEXT_SOURCES else "미반영",
+                "반영" if SOURCE in NEWS_COUNT_SOURCES else "미반영")
     # 차단은 다음 주기 재시도로 충분하지만, 반복되면 스케줄러 job_run 에 남도록 실패로 알린다.
     return 1 if blocked else 0
 

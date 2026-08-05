@@ -4,7 +4,7 @@
 있고, 여기서 반드시 지킬 규칙은 하나다:
 
 ⚠️ **이 모듈은 라벨·rule·veto·점수 경로에서 import 하지 않는다.**
-   읽는 순간 '표시 전용'이라는 성질이 조용히 깨지고, `config.NEWS_ACTIVE_SOURCES`(sql/44)가
+   읽는 순간 '표시 전용'이라는 성질이 조용히 깨지고, `config.NEWS_COUNT_SOURCES`/`NEWS_TEXT_SOURCES` 게이트(sql/44)가
    지키던 게이트를 우회하는 두 번째 뉴스 유입로가 생긴다. 재료 집계가 필요하면
    `repository/news.py` 를 쓴다 — 그쪽은 소스 필터를 전부 통과한다.
 

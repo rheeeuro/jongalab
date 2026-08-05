@@ -15,14 +15,19 @@
 네이버 종목별 뉴스는 **종목코드로 조회하므로 사명 매칭이 아예 없다** — 그 공백에
 정확히 맞는다(실측 커버리지 92% = 35/38, 신규 확보 17종목).
 
-[계약 고정] 두 함수 모두 → [{headline, source_url, channel_name, published_at}]
-이 반환 계약만 지키면 소스를 갈아끼울 수 있다(공식 검색 OpenAPI 등). 호출부(워커)는
-네이버 응답 스키마를 모른다.
+[계약 고정] 두 함수 모두 → [{headline, source_url, channel_name, published_at, body_preview}]
+이 반환 계약만 지키면 소스를 갈아끼울 수 있다(공식 검색 OpenAPI, 다음 금융 종목뉴스 등 —
+**종목코드로 조회되는 소스**여야 한다. 섹션 RSS 는 종목 귀속이 없어 사명 매칭으로 되돌아가고
+그건 커버리지 47% 문제의 원인이다). 호출부(워커)는 네이버 응답 스키마를 모른다.
+`body_preview` 는 종목별 경로만 채운다(섹션 목록 HTML 에는 없다) — 없으면 None.
 
 [엔드포인트 ①] GET {BASE}/api/news/stock/{code}?pageSize=&page=1 → JSON
   응답은 '기사 묶음' 배열이고 각 묶음의 items 가 실제 기사다(관련기사 그룹). 평탄화해서 쓴다.
   item: officeId/articleId(안정 URL 키) · officeName(언론사) · datetime(YYYYMMDDHHMM) ·
-        titleFull(전체 제목 — title 은 목록용으로 잘려 온다) · body(발췌, 현재 미사용)
+        titleFull(전체 제목 — title 은 목록용으로 잘려 온다) ·
+        body(리드문 발췌 ~135자 → body_preview. 2026-08-05 부터 사용: 재료 지속성의
+        `milestone_horizon`(촉매 시점)·`material_size_eok`(재료 규모) 축은 제목만으로는
+        판정이 안 돼 '존재 여부'만 묻고 있었다)
 
 [왜 섹션 목록 경로가 따로 필요한가]
 뉴스 탭 헤드라인이 텔레그램 종합 속보 채널을 읽는 동안, 주식과 무관한 기사가 화면에
@@ -82,6 +87,7 @@ _WS_RE = re.compile(r"\s+")
 
 _HEADLINE_MAX = 500      # headline 컬럼 한도 (실측 최대 46자 — 여유 충분)
 _URL_MAX = 500           # source_url 컬럼 한도 (실측 최대 53자)
+_BODY_MAX = 500          # body_preview 컬럼 한도 (실측 리드문 ~135자)
 
 
 class NaverNewsError(RuntimeError):
@@ -113,6 +119,9 @@ def _parse_item(item: dict) -> dict | None:
         "source_url": ARTICLE_URL.format(office_id=office_id, article_id=article_id)[:_URL_MAX],
         "channel_name": (item.get("officeName") or "")[:100] or None,
         "published_at": published_at,
+        # 리드문 발췌 — 헤드라인으로는 판정 불가한 축(촉매 시점·재료 규모)의 유일한 근거다.
+        # 제목과 같은 엔티티·공백 정리를 거친다(프롬프트에 그대로 들어간다).
+        "body_preview": (_clean_title(item.get("body") or "")[:_BODY_MAX] or None),
     }
 
 
@@ -192,6 +201,7 @@ def _parse_section_block(subject: re.Match, block: str) -> dict | None:
         )[:_URL_MAX],
         "channel_name": (_clean_title(press.group(1))[:100] if press else None) or None,
         "published_at": published_at,
+        "body_preview": None,   # 목록 HTML 에는 발췌가 없다(계약 유지용)
     }
 
 

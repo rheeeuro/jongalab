@@ -26,6 +26,7 @@ _PRESERVE_ON_NULL = frozenset({
     "news_summary", "news_sentiment", "news_catalyst",
     "news_next_milestone", "news_amount_locked", "news_driver_scope", "news_stage",
     "news_durability", "news_label_reason", "news_judge_max_at",
+    "news_milestone_horizon", "news_material_size_ratio", "news_durability_v",
 })
 
 
@@ -77,10 +78,13 @@ def _analysis_row(c: dict) -> dict:
         # 재료 지속성 라벨 (sql/40) — LLM 사실 4축 + 코드 합성 등급 + 판정 근거·캐시 기준.
         # 전부 _PRESERVE_ON_NULL 대상(판정 스킵/실패의 NULL 이 그날 판정을 지우지 않는다).
         "news_next_milestone": c.get("news_next_milestone"),
+        "news_milestone_horizon": c.get("news_milestone_horizon"),
         "news_amount_locked": c.get("news_amount_locked"),
+        "news_material_size_ratio": c.get("news_material_size_ratio"),
         "news_driver_scope": c.get("news_driver_scope"),
         "news_stage": c.get("news_stage"),
         "news_durability": c.get("news_durability"),
+        "news_durability_v": c.get("news_durability_v"),
         "news_label_reason": c.get("news_label_reason"),
         "news_judge_max_at": c.get("news_judge_max_at"),
         "news_headlines": json.dumps(
@@ -703,6 +707,7 @@ _NEWS_LABEL_COLS = (
     "news_summary", "news_sentiment", "news_catalyst",
     "news_next_milestone", "news_amount_locked", "news_driver_scope", "news_stage",
     "news_durability", "news_label_reason", "news_judge_max_at",
+    "news_milestone_horizon", "news_material_size_ratio", "news_durability_v",
 )
 
 
@@ -733,6 +738,10 @@ def get_news_material_rows(report_date: str) -> list[dict]:
     `get_stock_reports_by_date` 는 SELECT * 라 hourly_candles·supply_history 같은 무거운 JSON
     까지 실어 목록 화면에는 과하다. 비선정(selected=0) 후보도 포함한다 — 뉴스 화면은 '오늘 뜬
     재료' 전체를 보여주는 곳이고, 매매 선정 여부와 축이 다르다.
+
+    조건이 `news_count>0` 만이 아닌 이유(2026-08-05): news_count 는 **카운트 게이트(텔레그램)**
+    값이라, 텔레그램에 안 뜨고 네이버에만 있는 종목은 재료 라벨이 있어도 화면에서 사라진다.
+    라벨이 있으면 보여준다 — 라벨이 곧 '재료가 있다'는 판정이다.
     """
     with get_db() as (conn, cursor):
         cursor.execute(
@@ -740,10 +749,12 @@ def get_news_material_rows(report_date: str) -> list[dict]:
                       rank_no, selected, score,
                       news_count, news_unique_count, news_pm_count, news_first_today,
                       news_prior_avg, news_summary, news_sentiment, news_catalyst,
-                      news_next_milestone, news_amount_locked, news_driver_scope,
+                      news_next_milestone, news_milestone_horizon, news_amount_locked,
+                      news_material_size_ratio, news_driver_scope,
                       news_stage, news_durability, news_label_reason, news_followup_days
                  FROM daily_stock_report
-                WHERE report_date = %s AND news_count > 0
+                WHERE report_date = %s
+                  AND (news_count > 0 OR news_durability IS NOT NULL)
                 ORDER BY rank_no ASC""",
             (report_date,),
         )
@@ -767,6 +778,47 @@ def get_rows_for_news_followup(window_days: int) -> list[dict]:
             (int(window_days),),
         )
         return cursor.fetchall()
+
+
+def get_rows_for_material_run(lookback_days: int = 30) -> list[dict]:
+    """재료 지속성 **가격 채점** 대상 — 라벨이 있고 아직 채점되지 않은 과거 행.
+
+    `news_followup_days`(언급 날짜 수)와 달리 이 채점은 **주가가 이어서 올랐는지**를 본다.
+    사장님 정의("주가를 지속적으로 올려줄 수 있는 재료")에 맞는 정답지는 언급이 아니라 가격이다
+    — 실측에서 followup_days 는 단조성이 없었다(fu=4 +0.69%p / fu=1 -1.23%p).
+    라벨이 있는 행만 대상으로 잡아 키움 일봉 호출을 하루 ~20종목으로 묶는다(전 유니버스면
+    수백 종목이 되고, 라벨 없는 행에는 채점할 대상이 없다).
+    D+3 까지 완결돼야 값이 나오므로 최근 행은 자연히 NULL 로 남고 다음 실행에서 재시도된다.
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT report_date, stock_code FROM daily_stock_report
+                WHERE news_durability IS NOT NULL
+                  AND mat_run_ret_3d IS NULL
+                  AND report_date < CURDATE()
+                  AND report_date >= CURDATE() - INTERVAL %s DAY
+                ORDER BY report_date ASC""",
+            (int(lookback_days),),
+        )
+        return cursor.fetchall()
+
+
+def save_material_run(rows: list[dict]) -> int:
+    """재료 가격 채점 UPDATE. rows: [{report_date, stock_code, mat_run_ret_3d, mat_up_days}]."""
+    if not rows:
+        return 0
+    n = 0
+    with get_db() as (conn, cursor):
+        for r in rows:
+            cursor.execute(
+                """UPDATE daily_stock_report
+                    SET mat_run_ret_3d = %s, mat_up_days = %s
+                    WHERE report_date = %s AND stock_code = %s""",
+                (r["mat_run_ret_3d"], r["mat_up_days"], r["report_date"], r["stock_code"]),
+            )
+            n += cursor.rowcount
+        conn.commit()
+    return n
 
 
 def save_news_followup(rows: list[dict]) -> int:

@@ -116,6 +116,26 @@ def op_earnings_yield(op_profit_eok: int | None, market_cap_won: int | None) -> 
     return round(op_profit_eok * 100_000_000 / market_cap_won, 4)
 
 
+def material_size_ratio(size_eok: int | None, market_cap_won: int | None) -> float | None:
+    """재료 규모 ÷ 시가총액 (2026-08-05, 재료 지속성 축).
+
+    size_eok: LLM 이 헤드라인·리드문에서 뽑은 재료 금액(**억원** — news_material_judge 가 추출),
+    market_cap_won: market_cap(원). 단위 규약은 위 op_earnings_yield 와 같다.
+    **억원으로 받는 이유**: 원 단위로 물었더니 "최대 5,219억 원 규모 기술수출"을 5.219조로 뽑는
+    자릿수 착오가 실제로 나왔다(비율이 10배로 튄다). 한국 기사는 금액을 억·조로 쓰므로 억원이
+    원문 표기와 일치해 0 을 세는 단계가 사라진다.
+    **왜 비율인가**: "1,200억 수주"는 시총 3천억 회사엔 사업의 판을 바꾸는 재료이고 시총 400조
+    회사엔 반올림 오차다. 같은 절대 금액을 같은 재료로 취급하면 대형주 뉴스가 전부 '큰 재료'로
+    잡힌다(언급 수 라벨이 시총 프록시로 판명난 것과 같은 함정).
+    금액 추출은 LLM(텍스트에 적힌 사실), 시총 대비 환산은 코드 — 사실 층과 판단 층을 섞지 않는다.
+    상한을 두지 않는다(합병·유증은 시총을 넘는 규모가 실제로 나온다).
+    결측·시총 0 이하면 None(edge_predicate NULL=매칭실패). 점수 무영향.
+    """
+    if size_eok is None or size_eok <= 0 or not market_cap_won or market_cap_won <= 0:
+        return None
+    return round(size_eok * 100_000_000 / market_cap_won, 4)
+
+
 # ── 호가 미시구조 스냅샷 (2026-07-22) — ka10004 주식호가요청 파생 ──
 # 선정 시점(closing_bet 13~15시) 호가창의 잔량 불균형·스프레드. 오버나이트 갭 방향의
 # 단기 미시구조 신호. 연속장 밖(장 종료·개장 전)엔 잔량이 전부 0 으로 와서 분모 0 가드로

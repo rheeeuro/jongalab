@@ -67,12 +67,18 @@ class StockReport(BaseModel):
     news_summary: Optional[str] = None
     news_sentiment: Optional[int] = None
     news_catalyst: Optional[str] = None
-    # 재료 지속성 라벨 (sql/40) — 관찰 전용(candidate rule 표본). 화면은 '미검증' 톤으로 노출한다.
+    # 재료 지속성 라벨 (sql/40, 축·합성 v2 = sql/52) — 관찰 전용(candidate rule 표본).
+    # 화면은 '미검증' 톤으로 노출한다. 등급을 만든 축을 함께 실어야 육안 감사가 된다 —
+    # v2 에서 등급을 가르는 축이 amount_locked → milestone_horizon 으로 바뀌었으므로
+    # 시점·규모를 빼면 화면이 '더 이상 등급에 쓰이지 않는 축'만 보여주게 된다.
     news_next_milestone: Optional[bool] = None
+    news_milestone_horizon: Optional[str] = None
     news_amount_locked: Optional[bool] = None
+    news_material_size_ratio: Optional[float] = None
     news_driver_scope: Optional[str] = None
     news_stage: Optional[str] = None
     news_durability: Optional[str] = None
+    news_durability_v: Optional[int] = None
     news_label_reason: Optional[str] = None
     news_followup_days: Optional[int] = None
     news_headlines: List[str] = []

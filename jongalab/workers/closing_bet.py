@@ -8,7 +8,7 @@
 
 import time
 import logging
-from datetime import datetime
+from datetime import date, datetime
 
 from core.kiwoom_client import KiwoomRestClient
 from core.trading_engine import (
@@ -20,8 +20,9 @@ from core.trading_engine import (
 from core.config import EDGE_SELECTION_MODE
 from core.edge_features import (
     afternoon_ret, days_since_frgn_surge, dist_prior_high_pct, financials, is_bio,
-    ma5_reclaim, op_earnings_yield, order_book_features, overhead_vol_ratio, poc_dist_pct,
-    prog_buy_days, prog_cum_net, red_candle, red_candle_streak, round_dist_pct, vol_ratio,
+    ma5_reclaim, material_size_ratio, op_earnings_yield, order_book_features,
+    overhead_vol_ratio, poc_dist_pct, prog_buy_days, prog_cum_net, red_candle,
+    red_candle_streak, round_dist_pct, vol_ratio,
 )
 from core.repository.stock_report import (
     save_stock_reports,
@@ -36,7 +37,6 @@ from core.repository.news import (
     get_today_news_stats_by_stock,
     get_today_news_by_stock,
     get_recent_news_by_stocks,
-    get_news_max_at_by_stocks,
 )
 from core.repository.stock_event import get_events_by_date
 from core.disclosure_events import summarize as summarize_disclosures
@@ -45,6 +45,7 @@ from core.repository.edge_rule import list_rules
 from core.edge_selection import select_signals
 from core.edge_policy import rule_role
 from core.news_material_judge import judge_materials
+from core.news_matcher import mentions_ticker
 from core.config import NEWS_JUDGE_ENABLED, NEWS_JUDGE_LOOKBACK_DAYS
 from core.notifications import send_report_save_alert
 
@@ -685,13 +686,17 @@ class ClosingBetStrategy:
 
     @staticmethod
     def _fill_news_material_labels(reports: list[dict]) -> None:
-        """뉴스 있는 유니버스 **전건**에 LLM 재료 라벨을 붙인다 (OpenAI 벌크, 점수 무영향).
+        """오늘 재료가 있는 유니버스 **전건**에 LLM 재료 라벨을 붙인다 (OpenAI 벌크, 점수 무영향).
 
         예전엔 Ollama 로 하루 최대 5행(요약 후보만) 라벨링해서 4주에 46행/12거래일밖에 안 쌓여
-        `veto_bad_news`(live) 의 근거조차 검증할 수 없었다. 벌크 판정으로 대상을 '뉴스 있는 전건'
-        (실측 ~16행/일)으로 넓힌다 — 커버리지가 이 변경의 목적이다.
-        ⚠️ 그래서 `veto_bad_news`(news_sentiment<=30 & news_unique_count>=2) 의 **실효 커버리지가
-        같이 넓어진다**(rule 의 설계 의도대로지만 표본은 이 날부터 성질이 달라진다).
+        `veto_bad_news`(live) 의 근거조차 검증할 수 없었다. 벌크 판정으로 대상을 넓혔고,
+        2026-08-05 에 **대상 선별 기준을 news_count(텔레그램 카운트)에서 텍스트 코퍼스로 바꿨다**
+        — 텔레그램 종목 커버리지가 44% 라서 라벨이 유니버스의 30% 에만 붙고 있었다(네이버 94%).
+        커버리지가 이 변경의 목적이다.
+        ⚠️ 그래서 `veto_bad_news`(news_sentiment<=30 & news_unique_count>=2) 의 sentiment 판정
+        근거가 넓어진다. **발동 조건인 news_unique_count 는 카운트 게이트(텔레그램)에 남으므로
+        발동 범위 자체는 그대로**다. 시세보도가 sentiment 를 끌어내리는 오탐 경로는 코퍼스 선별
+        (news_material_judge.select_headlines)에서 막는다.
 
         30분 재실행 대비: 새 헤드라인이 없으면(저장된 news_judge_max_at ≥ 오늘 마지막 언급 시각)
         재호출하지 않고, 기존 라벨을 메모리 dict 로 캐리포워드한다 — rule 평가가 메모리 행을
@@ -699,18 +704,16 @@ class ClosingBetStrategy:
         실패는 전부 '라벨 없음'(NULL)으로 흘린다 — predicate 는 NULL 을 매칭 실패로 보므로
         LLM·DB 장애가 선정을 흔들지 않는다.
         """
-        targets = [r for r in reports if int(r.get("news_count") or 0) > 0]
-        if not targets:
-            return
-        codes = [r["stock_code"] for r in targets]
+        codes = [r["stock_code"] for r in reports]
 
-        # ① 오늘 이미 있는 라벨 캐리포워드 (판정 스킵 실행에서도 rule 이 같은 값을 본다)
+        # ① 오늘 이미 있는 라벨 캐리포워드 (판정 스킵 실행에서도 rule 이 같은 값을 본다).
+        # 유니버스 전건에 적용한다 — 판정 대상 선별(②)이 실패해도 이미 만든 라벨은 살아야 한다.
         try:
             existing = get_today_news_labels(codes)
         except Exception as e:
             logger.warning(f"뉴스 라벨 기존 값 조회 실패(재판정으로 진행): {e}")
             existing = {}
-        for r in targets:
+        for r in reports:
             for col, val in (existing.get(r["stock_code"]) or {}).items():
                 if val is not None:
                     r[col] = val
@@ -719,21 +722,34 @@ class ClosingBetStrategy:
             logger.info("뉴스 재료 지속성 판정 비활성(NEWS_JUDGE_ENABLED=0) — 라벨 스킵")
             return
 
-        # ② 새 헤드라인이 있는 종목만 판정 대상. 룩백은 재료 stage(첫 발표/후속) 판정 근거다.
+        # ② 판정 코퍼스 조립. 룩백은 재료 stage(첫 발표/후속) 판정 근거다.
+        # **대상 선별이 news_count(카운트 게이트=텔레그램)가 아니라 텍스트 코퍼스 기준이다** —
+        # 예전엔 텔레그램 언급이 있는 종목만 판정해서 라벨 커버리지가 유니버스의 30% 였다.
         try:
-            max_at = get_news_max_at_by_stocks(codes)
             bundles = get_recent_news_by_stocks(codes, NEWS_JUDGE_LOOKBACK_DAYS)
         except Exception as e:
             logger.warning(f"뉴스 헤드라인 룩백 조회 실패(재료 라벨 스킵): {e}")
             return
 
+        today = date.today()
         stale: list[dict] = []
-        for r in targets:
+        targets: list[dict] = []
+        raw_total = kept_total = 0
+        for r in reports:
             code = r["stock_code"]
-            items = bundles.get(code)
-            if not items:
-                continue
-            latest = max_at.get(code) or items[-1].get("created_at")
+            raw = bundles.get(code) or []
+            raw_total += len(raw)
+            # 귀속 확인 — 네이버 종목별 뉴스는 종목이 **스쳐 언급된** 기사까지 준다
+            # (실측 한화오션 56건 중 3건만 실제 한화오션 기사). 걸러내지 않으면 LLM 이 재료를
+            # 특정하지 못해 전부 '판단 보류'가 된다. 원자료는 그대로 두고 코퍼스만 좁힌다.
+            items = [it for it in raw if mentions_ticker(it.get("headline") or "", code)]
+            kept_total += len(items)
+            if not any(it.get("d") == today for it in items):
+                continue     # 오늘 재료가 없으면 판정 대상이 아니다(룩백만 있는 건 과거 재료)
+            targets.append(r)
+            # 캐시 기준 시각은 **판정에 실제로 쓰는 코퍼스**의 마지막 시각이다(items 는 ASC).
+            # 걸러낸 노이즈 기사로 시각이 밀리면 새 재료가 없는데도 매 회차 재호출한다.
+            latest = items[-1].get("created_at")
             judged_at = r.get("news_judge_max_at")
             if judged_at and latest and judged_at >= latest:
                 continue  # 새 헤드라인 없음 — LLM 재호출 불필요
@@ -741,6 +757,10 @@ class ClosingBetStrategy:
                 "ticker": code, "name": r["stock_name"], "items": items, "latest": latest,
             })
 
+        logger.info(
+            f"재료 판정 코퍼스: {len(targets)}/{len(reports)}종목 "
+            f"(귀속 확인 후 {kept_total}/{raw_total}건 유지)"
+        )
         if not stale:
             logger.info(f"뉴스 재료 라벨: 신규 헤드라인 없음 — 판정 스킵({len(targets)}종목 캐시)")
             return
@@ -757,17 +777,26 @@ class ClosingBetStrategy:
             r["news_sentiment"] = lb.get("sentiment")
             r["news_catalyst"] = lb.get("catalyst")
             r["news_next_milestone"] = lb.get("next_milestone")
+            r["news_milestone_horizon"] = lb.get("milestone_horizon")
             r["news_amount_locked"] = lb.get("amount_locked")
+            # 재료 금액(LLM 이 텍스트에서 추출) ÷ 시총 — 절대 금액은 저장하지 않는다(sql/52).
+            r["news_material_size_ratio"] = material_size_ratio(
+                lb.get("material_size_eok"), r.get("market_cap")
+            )
             r["news_driver_scope"] = lb.get("driver_scope")
             r["news_stage"] = lb.get("stage")
             r["news_durability"] = lb.get("durability")
+            r["news_durability_v"] = lb.get("durability_v")
             r["news_label_reason"] = lb.get("reason")
             r["news_judge_max_at"] = latest_by_code.get(code)
             filled += 1
+            size_ratio = r["news_material_size_ratio"]
             logger.info(
                 f"[{r['stock_name']}] 재료 {lb.get('durability') or '미판정'} "
                 f"(유형 {lb.get('catalyst')}·방향 {lb.get('sentiment')}·"
-                f"다음사건 {lb.get('next_milestone')}·수치확정 {lb.get('amount_locked')}·"
+                f"다음사건 {lb.get('next_milestone')}/{lb.get('milestone_horizon')}·"
+                f"수치확정 {lb.get('amount_locked')}·"
+                f"규모 {f'시총의 {size_ratio:.1%}' if size_ratio else '미확인'}·"
                 f"{lb.get('driver_scope')}·{lb.get('stage')}) {lb.get('reason') or ''}"
             )
         logger.info(

@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS news_mention (
     channel_name VARCHAR(100),                -- 뉴스 채널명
     published_at TIMESTAMP NULL DEFAULT NULL, -- 메시지 발행 시각(참고용)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- 수집 시각(오늘 카운트 기준)
+    body_preview VARCHAR(500) DEFAULT NULL,   -- 기사 리드문 발췌(네이버 종목별 경로만, sql/51)
     UNIQUE KEY uq_url_ticker (source_url, ticker),   -- 동일 기사·종목 중복 방지
     INDEX idx_ticker_created (ticker, created_at),
     INDEX idx_created (created_at)
@@ -135,16 +136,23 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     news_summary TEXT DEFAULT NULL,         -- 후보 소수만 배치 LLM 재료 요약
     news_sentiment TINYINT DEFAULT NULL,    -- LLM 재료 방향 0~100(요약 후보만)
     news_catalyst VARCHAR(20) DEFAULT NULL, -- LLM 재료 유형(실적/수주계약/임상승인/M&A/정책테마/증자감자/지분변동/기타)
-    -- 재료 지속성 라벨 (sql/40) — 뉴스 있는 유니버스 전건을 OpenAI 벌크 판정(news_material_judge).
-    -- 사실 4축을 LLM 이 내고 등급(news_durability)은 코드가 합성한다(derive_durability).
+    -- 재료 지속성 라벨 (sql/40, 축·합성 v2 = sql/52) — 뉴스 있는 유니버스 전건을 OpenAI 벌크
+    -- 판정(news_material_judge). 사실 축은 LLM 이 내고 등급(news_durability)은 코드가 합성한다
+    -- (derive_durability). 여기서 '지속성'은 언급의 지속이 아니라 **주가를 이어서 올려주는 성질**.
     news_next_milestone TINYINT(1) DEFAULT NULL, -- 남은 다음 예정 사건 있는가(NULL=미판정)
-    news_amount_locked TINYINT(1) DEFAULT NULL,  -- 재료 수치가 이미 확정·소진됐는가
+    news_milestone_horizon VARCHAR(10) DEFAULT NULL, -- 그 사건 시점: 1주내/1개월내/그이후/불명
+    news_amount_locked TINYINT(1) DEFAULT NULL,  -- 재료 수치가 이미 확정·소진됐는가(실측 무차별 → 합성 제외)
+    news_material_size_ratio DECIMAL(10,4) DEFAULT NULL, -- 재료 금액 ÷ 시가총액(LLM 추출 금액의 코드 파생)
     news_driver_scope VARCHAR(12) DEFAULT NULL,  -- 종목단독/산업사이클/불명
     news_stage VARCHAR(12) DEFAULT NULL,         -- 첫발표/진행/마무리/불명
     news_durability VARCHAR(6) DEFAULT NULL,     -- 파생 등급: 연속/중립/소진
+    news_durability_v TINYINT DEFAULT NULL,      -- 합성 규칙 버전(현재 2) — v1/v2 표본 분리용
     news_label_reason VARCHAR(255) DEFAULT NULL, -- 지속성 판정 근거(육안 감사용)
     news_judge_max_at DATETIME DEFAULT NULL,     -- 판정 반영 마지막 언급 시각(30분 재실행 캐시 기준)
-    news_followup_days TINYINT DEFAULT NULL,     -- 채점: +1~+N일 중 시세보도 제외 언급 있던 날짜 수
+    news_followup_days TINYINT DEFAULT NULL,     -- 채점(참고값): +1~+N일 중 시세보도 제외 언급 날짜 수
+    -- 재료 지속성 **가격 채점** (sql/53) — 라벨이 맞았는지 판정하는 주 정답지. 연구 전용.
+    mat_run_ret_3d DECIMAL(8,3) DEFAULT NULL,    -- 익일 시가 → D+3 종가 등락률(%)
+    mat_up_days TINYINT DEFAULT NULL,            -- D+1~D+3 중 상승 마감 일수(0~3)
     news_headlines JSON DEFAULT NULL,       -- 최근 헤드라인 목록(표시용)
     -- DART 공시 사건 라벨 (sql/36) — disclosure_collector 가 적재한 stock_event 를 선정 시점 집계.
     disc_count SMALLINT DEFAULT NULL,       -- 당일 공시 건수(정정 포함) — 관측·연구용

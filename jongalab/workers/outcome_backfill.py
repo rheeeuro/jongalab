@@ -26,11 +26,16 @@
     exec_leg_ret 은 비우고 nxt_open_ret 은 되돌린다(daily_ohlc.is_price_scale_shifted).
     일봉 라벨 4종은 양 끝이 모두 조정 스케일이라 정상이므로 손대지 않는다.
 
-[후속 재료 실현 채점 — news_followup_days]
-  뉴스 재료 지속성 라벨(news_durability, sql/40)이 **맞았는지** 채점하는 유일한 사후 값이다.
-  리포트일 +1 ~ +NEWS_FOLLOWUP_WINDOW_DAYS 일 사이에 그 종목의 **시세보도가 아닌** 언급이 있던
-  날짜 수를 센다(DB·순수 로직만, API 콜 0). 창이 열려 있는 동안 매 실행 재계산(멱등)하고
-  창이 닫히면 값이 확정된다. 시세보도 제외와 '일수' 채점의 이유는 sql/40 주석 참조.
+[재료 지속성 채점 — 두 축]
+  · mat_run_ret_3d / mat_up_days (sql/53, **주 채점**): 익일 시가 → D+3 종가 등락률과 D+1~D+3
+    상승 마감 일수. 이 프로젝트가 쓰는 '지속성'은 **주가를 이어서 올려주는 성질**이므로 정답지도
+    가격이어야 한다. 앵커가 익일 시가인 이유는 그 시점이 종가베팅의 청산점이라 이후 상승만이
+    순수한 측정이기 때문이다(리포트일 종가 기준이면 오버나이트 갭이 섞인다).
+    라벨(news_durability) 있는 행만 대상 — 일봉 캐시를 결과 라벨 패스와 공유한다.
+  · news_followup_days (sql/40, **참고값으로 강등**): 리포트일 +1 ~
+    +NEWS_FOLLOWUP_WINDOW_DAYS 일 사이의 시세보도 아닌 언급 날짜 수(API 콜 0). 실측에서
+    단조성이 없어(fu=4 +0.69%p / fu=1 -1.23%p) 라벨 적중 판정의 자로는 쓰지 않는다 —
+    '언급이 이어졌나'와 '주가가 올랐나'는 다른 축이고, 전자는 시총 프록시로 기각된 계열이다.
 
 [cron] 매 거래일 09:30 (전 거래일 리포트에 당일 시가가 반영된 뒤). 단발 실행: python workers/outcome_backfill.py [YYYY-MM-DD]
 """
@@ -62,6 +67,8 @@ from core.repository.stock_report import (
     clear_nxt_open_labels,
     get_rows_for_news_followup,
     save_news_followup,
+    get_rows_for_material_run,
+    save_material_run,
 )
 from core.repository.edge_rule import list_rules
 
@@ -254,6 +261,69 @@ def _run_exec_leg(
     return total
 
 
+def _material_run_label(
+    ohlc: dict[str, tuple[int, int, int, int]], report_dt: str, today_dt: str
+) -> dict | None:
+    """재료 지속성 가격 채점 — 익일 시가 앵커로 {mat_run_ret_3d, mat_up_days}. (sql/53)
+
+    앵커가 리포트일 종가가 아니라 **익일 시가**인 이유: 종가베팅은 익일 시가에 청산하므로,
+    그 이후의 상승만이 "재료가 계속 올려줬는가"의 순수한 측정이다(리포트일 종가 기준으로 재면
+    오버나이트 갭 — 이미 next_open_ret 이 측정하는 값 — 이 섞인다).
+    D+3 까지 완결된 거래일이 없으면 None → 다음 실행에서 재시도(NULL 유지).
+    """
+    later = sorted(d for d in ohlc if report_dt < d < today_dt)[:3]
+    if len(later) < 3 or report_dt not in ohlc:
+        return None
+    anchor = ohlc[later[0]][0]          # D+1 시가
+    if anchor <= 0:
+        return None
+    run = ret_pct(anchor, ohlc[later[2]][3])   # → D+3 종가 (±35% 가드는 ret_pct 안)
+    if run is None:
+        return None
+    # 상승 마감 일수 — 각 날의 종가를 **그 전 거래일 종가**와 비교한다(D+1 은 리포트일 종가 기준).
+    prev_close = ohlc[report_dt][3]
+    up_days = 0
+    for d in later:
+        close = ohlc[d][3]
+        if prev_close > 0 and close > prev_close:
+            up_days += 1
+        prev_close = close
+    return {"mat_run_ret_3d": run, "mat_up_days": up_days}
+
+
+def _run_material_run(
+    api: KiwoomRestClient,
+    cache: dict[str, dict[str, tuple[int, int, int, int]]],
+    rows: list[dict],
+) -> int:
+    """재료 지속성 가격 채점 패스 — 라벨 있는 행만(하루 ~20종목).
+
+    일봉 캐시를 `_run_daily_outcome` 과 공유하므로 같은 종목이면 추가 API 콜이 없다.
+    대상 조회는 호출부(run)가 한다 — 백필 대상이 이것뿐일 때도 API 를 띄워야 하므로
+    '할 일이 있는지'를 run 이 먼저 알아야 한다.
+    """
+    if not rows:
+        return 0
+
+    today_dt = datetime.now().strftime("%Y%m%d")
+    results = []
+    for r in rows:
+        code = r["stock_code"].split("_")[0].split(".")[0]
+        if code not in cache:
+            cache[code] = build_ohlc_by_date(api, code)
+        label = _material_run_label(
+            cache[code], r["report_date"].strftime("%Y%m%d"), today_dt
+        )
+        if label is None:
+            continue   # D+3 미완결 또는 아티팩트 — 다음 실행 재시도
+        results.append({
+            "report_date": r["report_date"], "stock_code": r["stock_code"], **label,
+        })
+    n = save_material_run(results)
+    logger.info(f"재료 가격 채점 {n}/{len(rows)}행 (D+3 미완결분은 다음 실행)")
+    return n
+
+
 def _run_news_followup(window_days: int = NEWS_FOLLOWUP_WINDOW_DAYS) -> int:
     """news_followup_days 채점 — DB·순수 로직만(키움 API 콜 0).
 
@@ -304,8 +374,15 @@ def run(min_date: str | None = None):
         # 라벨이 빈 과거 전체가 분봉 백필 대상이 되는 폭주로 이어진다.
         exec_dates = []
         logger.info("exec_leg_ret 활성 rule 없음 — 실집행 레그 백필 건너뜀")
-    if not outcome_dates and not exec_dates:
-        logger.info("일봉·실집행 백필 대상 없음 — 종료")
+    # 재료 가격 채점(sql/53)도 일봉이 필요하다 — 이것만 남아도 API 를 띄워야 하므로
+    # 대상 조회를 여기서 먼저 한다.
+    try:
+        material_rows = get_rows_for_material_run()
+    except Exception as e:
+        logger.warning(f"재료 가격 채점 대상 조회 실패(나머지 백필은 계속): {e}")
+        material_rows = []
+    if not outcome_dates and not exec_dates and not material_rows:
+        logger.info("일봉·실집행·재료 채점 백필 대상 없음 — 종료")
         return
 
     api = KiwoomRestClient()
@@ -314,7 +391,16 @@ def run(min_date: str | None = None):
 
     outcome_total = _run_daily_outcome(api, outcome_dates, cache)
     exec_total = _run_exec_leg(api, exec_dates, cache)
-    logger.info(f"결과 백필 완료 — 일봉 {outcome_total}행 / 실집행 레그 {exec_total}행")
+    # 연구 라벨이므로 실패가 결과 라벨 백필을 되돌리지 않게 따로 감싼다.
+    try:
+        material_total = _run_material_run(api, cache, material_rows)
+    except Exception as e:
+        logger.warning(f"재료 가격 채점 실패(결과 라벨은 저장됨): {e}")
+        material_total = 0
+    logger.info(
+        f"결과 백필 완료 — 일봉 {outcome_total}행 / 실집행 레그 {exec_total}행 / "
+        f"재료 가격 채점 {material_total}행"
+    )
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """뉴스 라우트 — 재료 집계(news_mention) + 재료 지속성 라벨 + 헤드라인 스트림(sec_news).
 
 두 계층이 한 라우터에 있다. `/heat`·`/materials`·`/{ticker}` 는 **집계 계층**(news_mention,
-`NEWS_ACTIVE_SOURCES` 게이트 적용)이고, `/stream` 만 **표시 계층**(sec_news)이다 —
+소스 게이트 `_source_filter(kind)` 적용 — heat 은 건수라 count, 종목별 헤드라인은 text)이고, `/stream` 만 **표시 계층**(sec_news)이다 —
 왜 나눴는지는 sql/49 주석. 새 엔드포인트를 붙일 땐 어느 쪽인지 먼저 정할 것.
 """
 from datetime import datetime

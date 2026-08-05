@@ -145,13 +145,16 @@ export interface StockReport {
   news_summary?: string | null;     // 배치 LLM 재료 요약 (후보 소수만)
   news_sentiment?: number | null;   // LLM 재료 방향 0~100 (요약 후보만)
   news_catalyst?: string | null;    // LLM 재료 유형 (실적/수주계약/임상승인/M&A/정책테마/증자감자/지분변동/기타)
-  // 재료 지속성 라벨 (sql/40) — ⚠️ candidate rule 표본(관찰 전용, 미검증). 화면에서 매수 신호처럼
-  // 보이면 안 된다(색을 손익 방향으로 쓰지 말 것 — MaterialBadge 참조).
+  // 재료 지속성 라벨 (sql/40, 축·합성 v2 = sql/52) — ⚠️ candidate rule 표본(관찰 전용, 미검증).
+  // 화면에서 매수 신호처럼 보이면 안 된다(색을 손익 방향으로 쓰지 말 것 — MaterialBadge 참조).
   news_next_milestone?: boolean | null; // 재료에 남은 다음 예정 사건이 있는가
-  news_amount_locked?: boolean | null;  // 수치가 이미 확정·소진됐는가
+  news_milestone_horizon?: string | null; // 그 사건 시점: 1주내 / 1개월내 / 그이후 / 불명 (v2 등급 결정축)
+  news_amount_locked?: boolean | null;  // 수치가 이미 확정·소진됐는가 (v2 에서 등급 결정에는 미사용)
+  news_material_size_ratio?: number | null; // 재료 금액 ÷ 시가총액 (0.035 = 시총의 3.5%)
   news_driver_scope?: string | null;    // 종목단독 / 산업사이클 / 불명
   news_stage?: string | null;           // 첫발표 / 진행 / 마무리 / 불명
   news_durability?: NewsDurability;     // 파생 등급 (연속/중립/소진), NULL=미판정
+  news_durability_v?: number | null;    // 합성 규칙 버전(2=현행). v1 라벨은 뜻이 달라 섞어 읽지 말 것
   news_label_reason?: string | null;    // 판정 근거 한 문장 (육안 감사용)
   news_followup_days?: number | null;   // 채점: +1~+10일 중 시세보도 제외 언급 있던 날짜 수
   news_headlines?: string[];        // 최근 헤드라인 목록
@@ -224,7 +227,9 @@ export interface NewsMaterialRow {
   news_sentiment?: number | null;
   news_catalyst?: string | null;
   news_next_milestone?: boolean | null;
+  news_milestone_horizon?: string | null;   // v2 등급 결정축 (1주내/1개월내/그이후/불명)
   news_amount_locked?: boolean | null;
+  news_material_size_ratio?: number | null; // 재료 금액 ÷ 시가총액
   news_driver_scope?: string | null;
   news_stage?: string | null;
   news_durability?: NewsDurability;

@@ -18,19 +18,19 @@ const STYLE: Record<
 > = {
   연속: {
     label: "연속",
-    hint: "다음 예정 사건이 남은 재료 (관찰 중 · 미검증)",
+    hint: "다음 예정 사건이 한 달 안에 남았거나 산업 사이클 재료 (관찰 중 · 미검증)",
     cls: "bg-slate-100 text-slate-700 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700",
     Icon: ArrowUpRight,
   },
   소진: {
     label: "소진",
-    hint: "수치가 확정되고 다음 일정이 없는 재료 (관찰 중 · 미검증)",
+    hint: "다음 예정 사건이 없거나 마무리 국면인 재료 (관찰 중 · 미검증)",
     cls: "bg-slate-100 text-slate-600 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700",
     Icon: ArrowDownRight,
   },
   중립: {
     label: "중립",
-    hint: "지속성이 한쪽으로 갈리지 않는 재료 (관찰 중 · 미검증)",
+    hint: "다음 사건은 남았지만 시점이 멀거나 불명인 재료 (관찰 중 · 미검증)",
     cls: "bg-slate-50 text-slate-500 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:ring-slate-700",
     Icon: Minus,
   },
@@ -67,20 +67,31 @@ export function MaterialBadge({
   );
 }
 
-/** 사실 4축을 사람 말로 — 등급만 보면 왜 그렇게 판정됐는지 알 수 없어 감사가 안 된다. */
+/** 사실 축을 사람 말로 — 등급만 보면 왜 그렇게 판정됐는지 알 수 없어 감사가 안 된다.
+ *
+ * 순서가 **등급을 가르는 순서**와 같다(다음 일정 → 그 시점 → 사이클 → 국면). v2 부터
+ * 등급을 실제로 가르는 축은 '시점'이고 '수치 확정'은 합성에서 빠졌으므로, 수치는 참고 축으로
+ * 뒤에 둔다 — 화면이 등급에 안 쓰이는 축을 앞세우면 감사가 엉뚱한 곳을 본다. */
 export function materialAxisLabels(r: {
   news_next_milestone?: boolean | null;
+  news_milestone_horizon?: string | null;
   news_amount_locked?: boolean | null;
+  news_material_size_ratio?: number | null;
   news_driver_scope?: string | null;
   news_stage?: string | null;
 }): string[] {
   const out: string[] = [];
   if (r.news_next_milestone != null)
     out.push(r.news_next_milestone ? "다음 일정 남음" : "다음 일정 없음");
-  if (r.news_amount_locked != null)
-    out.push(r.news_amount_locked ? "수치 확정" : "수치 미확정");
+  if (r.news_milestone_horizon && r.news_milestone_horizon !== "불명")
+    out.push(`일정 ${r.news_milestone_horizon}`);
   if (r.news_driver_scope && r.news_driver_scope !== "불명")
     out.push(r.news_driver_scope === "산업사이클" ? "산업 사이클" : "종목 단독");
   if (r.news_stage && r.news_stage !== "불명") out.push(r.news_stage);
+  if (r.news_amount_locked != null)
+    out.push(r.news_amount_locked ? "수치 확정" : "수치 미확정");
+  // 재료 규모는 시총 대비 비율이라야 뜻이 있다(같은 1,200억이 시총 3천억과 400조에 다르다).
+  if (r.news_material_size_ratio != null && r.news_material_size_ratio > 0)
+    out.push(`규모 시총의 ${(r.news_material_size_ratio * 100).toFixed(1)}%`);
   return out;
 }

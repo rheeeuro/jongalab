@@ -4,18 +4,23 @@
 종목별 뉴스(종목코드 조회, 매칭 없음). content_analysis 와 분리해 '재료 감지 신호'로만
 쓰며, 오늘 언급 건수/헤드라인을 closing_bet Phase 2 가 조회한다.
 
-⚠️ **조회 함수는 전부 `_source_filter()` 를 통과한다.** 소스를 늘리면 news_count·
-news_prior_avg·surprise 배수가 도입일에 계단식으로 튀고(실측 네이버 562행 vs 텔레그램
-273행, 헤드라인 중복 2%뿐이라 상쇄 없이 순증), news_unique_count 를 쓰는 rule 3종 중
-`veto_bad_news` 는 live = 자금 경로다. 그래서 적재는 무조건 하고 **소비만**
-config.NEWS_ACTIVE_SOURCES(기본 telegram)로 막아 관측 기간을 둔다. 승격은 .env 한 줄.
-새 조회 함수를 추가할 때도 이 필터를 빠뜨리지 말 것 — 빠뜨리면 게이트가 조용히 뚫린다.
+⚠️ **조회 함수는 전부 `_source_filter(kind)` 를 통과한다.** 적재는 무조건 하고 **소비만**
+막는다. 게이트는 **용도별로 둘**이다(2026-08-05, config 주석 참조):
+  · `kind="count"` → NEWS_COUNT_SOURCES(기본 telegram). news_count·unique_count·pm_count·
+    first_today·prior_avg·heat·followup 채점. 소스를 늘리면 이 값들이 도입일에 계단식으로
+    튀고(네이버 2,800행/일 vs 텔레그램 500행/일, 헤드라인 중복 2%뿐이라 순증) 그 표본을
+    `veto_bad_news`(live=자금 경로)가 쓴다 → 동결.
+  · `kind="text"`  → NEWS_TEXT_SOURCES(기본 telegram,naver). 재료 지속성 판정·뉴스 베토 판정·
+    화면 헤드라인. 지속성은 카운트가 아니라 **텍스트 속성**이라 위 위험이 적용되지 않는데
+    같은 게이트에 묶여 라벨 커버리지가 유니버스의 30%에 머물렀다(네이버는 95% 커버).
+새 조회 함수를 추가할 때 kind 를 빠뜨리지 말 것 — 기본값이 없다(빠뜨리면 TypeError 로 즉시
+드러난다). "카운트를 세면 count, 텍스트를 읽으면 text" 가 판정 기준이다.
 """
 import json
 import re
 from datetime import datetime
 
-from core.config import NEWS_ACTIVE_SOURCES
+from core.config import NEWS_COUNT_SOURCES, NEWS_TEXT_SOURCES
 from core.db import get_db
 
 # 헤드라인 dedup 정규화: 발행처 대괄호 제거 후 한글/영숫자만 남긴다.
@@ -38,21 +43,27 @@ def _normalize_headline(headline: str) -> str:
 _FIRST_TODAY_LOOKBACK_DAYS = 14
 
 
-def _source_filter() -> tuple[str, tuple]:
+def _source_filter(kind: str) -> tuple[str, tuple]:
     """소비 대상 소스 필터 — (SQL 조각, 바인딩 파라미터).
 
+    kind: "count"(집계 라벨·히트·후속 채점) | "text"(재료·베토 판정, 화면 헤드라인).
     조각은 항상 앞에 AND 가 붙는 형태로 돌려주므로 WHERE 절 뒤에 그대로 이어 붙인다.
     """
-    placeholders = ", ".join(["%s"] * len(NEWS_ACTIVE_SOURCES))
-    return f" AND source IN ({placeholders})", tuple(NEWS_ACTIVE_SOURCES)
+    if kind not in ("count", "text"):
+        raise ValueError(f"알 수 없는 소스 게이트 종류: {kind!r} (count|text)")
+    sources = NEWS_COUNT_SOURCES if kind == "count" else NEWS_TEXT_SOURCES
+    placeholders = ", ".join(["%s"] * len(sources))
+    return f" AND source IN ({placeholders})", tuple(sources)
 
 
 def save_news_mentions(rows: list[dict]) -> int:
     """뉴스 언급을 일괄 저장 (중복 URL·종목 조합은 무시).
 
     rows 항목: {ticker, company_name, headline, source_url, channel_name, published_at}
-      + 선택 {source, created_at}
+      + 선택 {source, created_at, body_preview}
       - source     : 미지정이면 'telegram'(기존 호출부 무변경)
+      - body_preview : 기사 리드문 발췌(네이버 종목별 경로만 제공, 텔레그램은 NULL).
+        재료 지속성 판정에서 헤드라인만으로는 판정 불가한 축(촉매 시점·재료 규모)의 근거다.
       - created_at : 미지정이면 지금 시각. **네이버 경로는 기사 발행시각을 넣는다** —
         created_at 은 news_pm_count(12시 이후)·get_news_heat(NOW() 기준 창)·news_guard 의
         오버나잇 창 기준이라, 30분 주기 수집기가 '수집 시각'을 넣으면 저녁 사이클 분이
@@ -71,15 +82,17 @@ def save_news_mentions(rows: list[dict]) -> int:
         "published_at": r.get("published_at"),
         "source": r.get("source") or "telegram",
         "created_at": r.get("created_at") or now,
+        "body_preview": r.get("body_preview"),
     } for r in rows]
     with get_db() as (conn, cursor):
         cursor.executemany(
             """
             INSERT IGNORE INTO news_mention
                 (ticker, company_name, headline, source_url, channel_name,
-                 published_at, source, created_at)
+                 published_at, source, created_at, body_preview)
             VALUES (%(ticker)s, %(company_name)s, %(headline)s, %(source_url)s,
-                    %(channel_name)s, %(published_at)s, %(source)s, %(created_at)s)
+                    %(channel_name)s, %(published_at)s, %(source)s, %(created_at)s,
+                    %(body_preview)s)
             """,
             payload,
         )
@@ -91,7 +104,7 @@ def save_news_mentions(rows: list[dict]) -> int:
 def get_today_news_count_by_stock(stock_code: str) -> int:
     """오늘 수집된 특정 종목의 뉴스 언급 건수 (created_at = 오늘)."""
     code = stock_code.split(".")[0].split("_")[0]
-    src_sql, src_params = _source_filter()
+    src_sql, src_params = _source_filter("count")
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""
@@ -114,7 +127,7 @@ def get_today_news_stats_by_stock(stock_code: str) -> dict:
       - prior_avg    : 직전 7일 일평균 언급 수 (서프라이즈 배수의 분모). 오늘 언급 없으면 None
     """
     code = stock_code.split(".")[0].split("_")[0]
-    src_sql, src_params = _source_filter()
+    src_sql, src_params = _source_filter("count")
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""
@@ -160,7 +173,7 @@ def get_today_news_stats_by_stock(stock_code: str) -> dict:
 def get_today_news_by_stock(stock_code: str, limit: int = 15) -> list[dict]:
     """오늘 수집된 특정 종목의 뉴스 헤드라인 목록 (최신순, 표시·요약용)."""
     code = stock_code.split(".")[0].split("_")[0]
-    src_sql, src_params = _source_filter()
+    src_sql, src_params = _source_filter("text")
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""
@@ -187,7 +200,7 @@ def get_news_since(stock_code: str, since_dt: datetime, limit: int = 30) -> list
     (호출부 news_guard 가 news_max_at 비교에 사용).
     """
     code = stock_code.split(".")[0].split("_")[0]
-    src_sql, src_params = _source_filter()
+    src_sql, src_params = _source_filter("text")
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""
@@ -211,18 +224,19 @@ def get_recent_news_by_stocks(
     후속 보도인지)를 알 수 없어 다일 룩백이 필요하다. 종목마다 따로 조회하면 유니버스
     전건 판정 시 쿼리가 종목 수만큼 늘어나므로 벌크로 받는다.
 
-    반환: {code: [{"d": date, "headline": str, "created_at": datetime}, ...]}
+    반환: {code: [{"d": date, "headline": str, "body_preview": str|None,
+                   "created_at": datetime}, ...]}
           (종목별 created_at 오름차순 — 프롬프트 블록이 시간순이어야 stage 판정이 된다)
     """
     codes = [c.split(".")[0].split("_")[0] for c in stock_codes if c]
     if not codes:
         return {}
     placeholders = ", ".join(["%s"] * len(codes))
-    src_sql, src_params = _source_filter()
+    src_sql, src_params = _source_filter("text")
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""
-            SELECT ticker, DATE(created_at) AS d, headline, created_at
+            SELECT ticker, DATE(created_at) AS d, headline, body_preview, created_at
             FROM news_mention
             WHERE ticker IN ({placeholders})
               AND created_at >= CURDATE() - INTERVAL %s DAY{src_sql}
@@ -235,6 +249,7 @@ def get_recent_news_by_stocks(
             out.setdefault(row["ticker"], []).append({
                 "d": row["d"],
                 "headline": row["headline"],
+                "body_preview": row["body_preview"],
                 "created_at": row["created_at"],
             })
         return out
@@ -250,7 +265,7 @@ def get_news_max_at_by_stocks(stock_codes: list[str]) -> dict[str, datetime]:
     if not codes:
         return {}
     placeholders = ", ".join(["%s"] * len(codes))
-    src_sql, src_params = _source_filter()
+    src_sql, src_params = _source_filter("text")
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""SELECT ticker, MAX(created_at) AS max_at FROM news_mention
@@ -275,7 +290,7 @@ def get_news_days_by_stocks(
     if not codes:
         return {}
     placeholders = ", ".join(["%s"] * len(codes))
-    src_sql, src_params = _source_filter()
+    src_sql, src_params = _source_filter("count")
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""SELECT ticker, DATE(created_at) AS d, headline FROM news_mention
@@ -311,7 +326,7 @@ def get_news_heat(hours: int = 24, limit: int = 20, date: str | None = None) -> 
     유니버스에 든 종목이면 재료 지속성 라벨(durability/catalyst/summary)을 함께 실어
     카드가 '무슨 재료인지'까지 보여줄 수 있게 한다(유니버스 밖 종목은 NULL).
     """
-    src_sql, src_params = _source_filter()
+    src_sql, src_params = _source_filter("count")
     # 서브쿼리(기저)와 본 쿼리에 각각 별칭이 다른 같은 필터를 붙인다.
     prior_src = src_sql.replace(" AND source IN", " AND p.source IN")
     main_src = src_sql.replace(" AND source IN", " AND n.source IN")
