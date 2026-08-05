@@ -823,6 +823,10 @@ class ClosingBetStrategy:
         rule_names 매핑을 반환한다. live rule 로드 실패 시 **모드 자체를 legacy 로 폴백**한다
         — rules 모드를 빈 rule 목록으로 진행하면 매칭 0=그날 무거래가 되어 '폴백'이 아니게 된다.
 
+        hybrid 우선순위는 2026-08-05 부터 **표 수(매칭 rule 수 + legacy top-N 1표) → 성적 → 점수**다
+        (core/edge_selection 모듈 docstring 에 근거·한계). 여기서는 'legacy 표'의 성적으로 쓸
+        대조군 mean_net 만 넘긴다.
+
         등락률 부호 조건은 없다(2026-08-03 제거) — 유니버스 전체가 점수·rule 로 경쟁한다.
 
         점수·rank_no·저장은 이 함수가 건드리지 않는다(대조군 평가·프론트 표시 불변).
@@ -832,9 +836,15 @@ class ClosingBetStrategy:
         """
         mode = EDGE_SELECTION_MODE
         live_rules, veto_rules = [], []
+        legacy_mean_net = None
         try:
             live = list_rules(status="live")
             veto_rules = [r for r in live if rule_role(r) == "veto"]
+            # hybrid 는 legacy 점수 top-N 도 rule 1개로 세고(2026-08-05), 동표일 때 성적으로
+            # 가른다 → 'legacy 표'의 성적으로 대조군 benchmark 의 실측 mean_net 을 넘긴다.
+            # 없으면 None(성적 미상) — edge_selection 이 성적 있는 rule 뒤로 민다.
+            control = next((r for r in live if r["name"] == "control_legacy_top10"), None)
+            legacy_mean_net = ((control or {}).get("stats") or {}).get("mean_net")
             # benchmark(control·측정 밴드)는 선정에 쓰지 않는다 — selector 로 넣으면 광역
             # predicate(selected==1 등)가 늘 top-N 을 매칭해 rules 모드의 '무거래' 의미가 깨진다.
             live_rules = [r for r in live if rule_role(r) == "selector"]
@@ -857,6 +867,7 @@ class ClosingBetStrategy:
 
         selected_codes, rule_names_by_code, veto_log = select_signals(
             mode, selection_reports, live_rules, veto_rules, TRADED_TOP_N, market=None,
+            legacy_mean_net=legacy_mean_net,
         )
         sel_set = set(selected_codes)
         for r in reports:
