@@ -6,7 +6,11 @@
 여기서는 news_mention 헤드라인만 근거로 severe 여부를 판정한다 — workers/news_guard.py 가
 news_veto_verdict 에 기록하면 trading monitor 가 severe=1 종목을 개장 즉시 전량 매도한다.
 
-돈이 걸린 판정이라 로컬 Ollama 가 아닌 OpenAI(complete_json)를 temperature=0 으로 쓴다.
+돈이 걸린 판정이라 로컬 Ollama 가 아닌 OpenAI(complete_json)를 쓴다 — 모델은 OPENAI_MODEL 을
+따르고, 현행 기본(gpt-5.6-luna)은 추론 모델이라 아래 temperature=0 은 무시된다(그래도 넘겨
+두는 이유는 ai_service._is_reasoning_model 참고: 모델 교체를 .env 한 줄로 끝내기 위해서다).
+2026-08-05 교체 시 이 경로만 별도 A/B 를 돌렸다 — FDA 반려·횡령구속·수주호재·단순하락·실적부진
+5케이스에서 severe/category/발동 여부가 nano 와 전건 동일했고 confidence 만 더 높았다.
 프롬프트는 가드 파일(core/prompts.py)이 아니라 여기 둔다 — 뉴스 판정 프롬프트는 쓰는 모듈에
 같이 두는 것이 이 프로젝트 관례다(core/news_material_judge.py 도 동일).
 오탐 완충: severe 발동은 confidence >= NEWS_GUARD_MIN_CONFIDENCE 일 때만(is_actionable) —

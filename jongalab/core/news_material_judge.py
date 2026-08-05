@@ -57,6 +57,10 @@ NEWS_JUDGE_LOOKBACK_DAYS 일치를 날짜와 함께 묶어 넣는다.
 (news_summary/news_sentiment/news_catalyst)을 채우므로 두 경로를 남기면 어느 쪽이 라벨을
 만들었는지 알 수 없어 그 파일은 삭제했다.
 프롬프트는 가드 파일(core/prompts.py)이 아니라 여기 둔다(news_veto_judge 선례).
+모델은 OPENAI_MODEL 단일 출처를 따른다 — 2026-08-05 gpt-5.4-nano → gpt-5.6-luna(비용 동일,
+축 커버리지 개선: 실측 52종목 stage='불명' 15→5건). **모델을 바꾸면 등급 정의를 바꾼 것과 같이
+표본을 분리한다**(라벨 분포가 바뀐다 — 미판정 15→5·연속 9→18·소진 17→13, sentiment 평균 +11):
+지속성·재료 rule 의 registered_at 을 교체일로 리셋한다(sql/54 선례, 교체분은 sql/58).
 
 **점수 무영향**: 라벨은 daily_stock_report 에만 적재되고 score_candidate 는 보지 않는다.
 '지속성=호재'는 통설이므로 rule 은 candidate 로만 등록해 발견/확인창 규율로 판정한다.

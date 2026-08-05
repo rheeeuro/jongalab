@@ -10,7 +10,7 @@ news_veto_verdict(severe=1) 에 기록한다 — trading monitor(08:01~09:30 폴
   1. trading.position 보유 종목 조회(읽기 전용) — 보유 없으면 종료
   2. 종목별 news_mention 을 전거래일 15:00 이후로 조회(telegram_listener 가 상시 적재)
   3. 이미 severe 확정이거나 신규 헤드라인이 없으면 스킵(LLM 절약 — 아침당 0~10회 호출)
-  4. OpenAI 판정(core/news_veto_judge, temperature=0) → news_veto_verdict upsert
+  4. OpenAI 판정(core/news_veto_judge, 모델 OPENAI_MODEL) → news_veto_verdict upsert
      (severe 는 confidence >= NEWS_GUARD_MIN_CONFIDENCE 일 때만)
   5. severe 신규 확정 시 관리자 텔레그램 경보
 

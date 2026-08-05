@@ -42,7 +42,17 @@ OLLAMA_TIMEOUT = int(os.getenv('OLLAMA_TIMEOUT', '480'))
 
 # OpenAI 설정 (일간 리포트용)
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5.4-nano')
+# 기본 모델 = gpt-5.6-luna (2026-08-05 gpt-5.4-nano 에서 교체). 같은 입력 단가($0.20/1M)에
+# 출력이 더 싸고($1.20 vs $1.25) 세대가 새롭다 — 실측 동일 프롬프트 1배치 비용 nano $0.00620 →
+# luna(effort=none) $0.00588. 라벨 품질도 올라간다: nano 는 stage/milestone_horizon 을 '불명'
+# 으로 흘려 news_durability 가 미판정(NULL)으로 남는 비율이 높았는데(실측 12종목 중 5건),
+# luna 는 같은 코퍼스에서 전건 판정하고 sentiment 도 42~79 로 퍼진다(nano 는 50~58 에 뭉친다).
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5.6-luna')
+# gpt-5.6 계열은 추론 모델이라 temperature/top_p 를 받지 않고(400) reasoning_effort 로 조절한다.
+# 기본 'none'(추론 토큰 0) — 'low' 는 nano 와 같은 비용($0.00616)이지만 같은 프롬프트 2회
+# 재현성이 더 낮았다(durability 일치 7/12 vs none 8/12, stage 9/12 vs 12/12). 이 라벨들은
+# 소급 재계산·감사 대상이라 재현성을 비용보다 우선한다. 'low'/'medium'/'high' 로 올릴 수 있다.
+OPENAI_REASONING_EFFORT = os.getenv('OPENAI_REASONING_EFFORT', 'none')
 
 # ── 뉴스 베토 감시 (workers/news_guard.py) ──
 # 보유 종목의 밤사이 중대 악재를 OpenAI 로 판정해 news_veto_verdict 에 기록 →

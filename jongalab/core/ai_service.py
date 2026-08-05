@@ -7,7 +7,10 @@ from dataclasses import dataclass, field
 import httpx
 from ollama import Client
 
-from core.config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_TIMEOUT, OPENAI_API_KEY, OPENAI_MODEL
+from core.config import (
+    OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_TIMEOUT,
+    OPENAI_API_KEY, OPENAI_MODEL, OPENAI_REASONING_EFFORT,
+)
 from core.ai_utils import parse_ai_json
 
 
@@ -198,18 +201,39 @@ def _get_openai_client():
     return _openai_client
 
 
-def complete_json(prompt: str, *, model: str | None = None, temperature: float = 0.1) -> dict | None:
+def _is_reasoning_model(model: str) -> bool:
+    """temperature/top_p 를 받지 않는 추론 모델인가 (gpt-5.6 계열).
+
+    보내면 400(`temperature does not support 0 with this model`)으로 호출 자체가 죽는다 —
+    호출부는 temperature 를 계속 넘기고 여기서 모델에 맞게 걸러낸다(모델 교체가 .env 한 줄로
+    끝나도록. 호출부마다 파라미터를 분기하면 모델을 바꿀 때마다 4곳을 고쳐야 한다).
+    """
+    return model.startswith("gpt-5.6")
+
+
+def complete_json(prompt: str, *, model: str | None = None, temperature: float = 0.1,
+                  reasoning_effort: str | None = None) -> dict | None:
     """OpenAI(GPT)에 프롬프트를 보내 JSON 응답을 파싱해 dict 로 반환 (실패 시 None).
 
     일일 다이제스트와 동일하게 OpenAI 를 쓰되, 워커가 SDK 를 직접 부르지 않도록 이 추상화를 경유한다.
     구조화된 의사결정(예: 주간 가중치 튜닝 제안)에 사용.
+
+    `temperature` 는 **지원하는 모델에만** 전달된다. gpt-5.6 계열(현행 기본 `gpt-5.6-luna`)은
+    추론 모델이라 temperature 가 1 로 고정이고, 대신 `reasoning_effort`
+    (기본 `OPENAI_REASONING_EFFORT`='none')로 추론량을 정한다. 즉 **temperature=0 을 넘겨도
+    응답이 완전히 결정론적이지는 않다** — 같은 프롬프트 2회 실측 일치율은 nano(temperature=0)
+    10/12, luna(effort=none) 8/12 로 nano 도 애초에 결정론이 아니었다. 라벨 소급 재계산은
+    '같은 값이 다시 나온다'가 아니라 저장된 라벨(daily_stock_report/news_sector_label)을 근거로 한다.
     """
+    name = model or OPENAI_MODEL
+    tuning: dict = ({"reasoning_effort": reasoning_effort or OPENAI_REASONING_EFFORT}
+                    if _is_reasoning_model(name) else {"temperature": temperature})
     try:
         client = _get_openai_client()
         response = client.chat.completions.create(
-            model=model or OPENAI_MODEL,
+            model=name,
             messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
+            **tuning,
         )
         raw_content = response.choices[0].message.content
         logging.info(f"GPT 원본 응답:\n{raw_content}")
