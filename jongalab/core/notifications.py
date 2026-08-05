@@ -195,10 +195,11 @@ def build_gap_check_message(
 ) -> tuple[str, int, int]:
     """갭 체크 최종 메시지 본문 생성. 반환: (message, wins, losses)
 
-    rows: [{rank, name, score, venue, base_price, now_price, pct, approx?, error?}]
+    rows: [{rank, name, score, venue, base_price, now_price, pct, approx?, ex_rights_ratio?, error?}]
       venue "NXT": 전일 19:50 NXT → 당일 08:03 NXT
       venue "KRX": 전일 15:20 KRX → 당일 09:03 KRX
       approx=True 는 기준가 미수집 폴백(리포트 시점 가격 대비) — pct 뒤 ≈ 표시.
+      ex_rights_ratio 는 무상증자 권리락 조정 기준가로 측정한 행 — pct 뒤 † 표시(sql/50).
     """
     ups, downs, flats, errors = [], [], [], []
     for r in rows:
@@ -213,7 +214,7 @@ def build_gap_check_message(
             flats.append(r)
 
     def _fmt(r: dict, emoji: str) -> str:
-        mark = "≈" if r.get("approx") else ""
+        mark = ("≈" if r.get("approx") else "") + ("†" if r.get("ex_rights_ratio") else "")
         return (
             f"{emoji} `{r['rank']:>2}`. *{r['name']}* `{r['score']}점`\n"
             f"    `[{r['venue']}]` `{r['pct']:+.2f}%{mark}`  "
@@ -253,6 +254,8 @@ def build_gap_check_message(
     footnotes = ["_NXT: 전일 19:50→08:03 · KRX: 전일 15:20→09:03_"]
     if any(r.get("approx") for r in rows):
         footnotes.append("_≈ 기준가 미수집 → 리포트 시점 가격 대비_")
+    if any(r.get("ex_rights_ratio") for r in rows):
+        footnotes.append("_† 무상증자 권리락 조정 기준가 대비(배정비율 반영)_")
 
     message = (
         f"📊 *[갭 체크] {report_date} Top 10*\n"

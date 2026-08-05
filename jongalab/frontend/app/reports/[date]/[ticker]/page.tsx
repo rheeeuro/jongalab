@@ -271,6 +271,12 @@ export default async function StockReportPage({
             hasNxt && hasKrx && r.gap_nxt_price! > 0
               ? ((r.gap_krx_price! - r.gap_nxt_price!) / r.gap_nxt_price!) * 100
               : null;
+          // 무상증자 권리락일(sql/50): 갭은 배정비율로 낮춰진 **권리락 기준가** 대비로 측정된다.
+          // 리포트가를 그대로 보여주면 등락률과 앞뒤가 안 맞으므로 조정 기준가를 시작가로 쓴다.
+          const exRatio = r.gap_ex_rights_ratio ?? null;
+          const basePrice = exRatio
+            ? Math.round(r.current_price / (1 + exRatio))
+            : r.current_price;
           return (
           <Card className="border-0 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 rounded-3xl shadow-none">
             <CardHeader className="pb-3">
@@ -295,22 +301,37 @@ export default async function StockReportPage({
               <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
                 리포트 시각 가격: <span className="font-bold tabular-nums">{r.current_price.toLocaleString("ko-KR")}</span>원
               </p>
+              {exRatio && (
+                <div className="mb-3 rounded-2xl bg-amber-100/70 dark:bg-amber-900/30 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+                  <span className="font-bold">무상증자 권리락일</span> — 1주당 신주{" "}
+                  {exRatio}주 배정으로 기준가가{" "}
+                  <span className="font-bold tabular-nums">{basePrice.toLocaleString("ko-KR")}</span>
+                  원으로 조정됐습니다. 아래 등락률은 <span className="font-bold">조정 기준가 대비</span>{" "}
+                  실제 움직임입니다.
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {hasNxt && (
                   <GapResultBox
                     label="장 시작 전 (NXT)"
-                    sublabel="리포트가 → NXT"
+                    sublabel={exRatio ? "권리락 기준가 → NXT" : "리포트가 → NXT"}
                     pct={r.gap_nxt_pct!}
-                    fromPrice={r.current_price}
+                    fromPrice={basePrice}
                     toPrice={r.gap_nxt_price!}
                   />
                 )}
                 {hasKrx && (
                   <GapResultBox
                     label="장 시작 후 (KRX)"
-                    sublabel={krxIntraday !== null ? "NXT → KRX (장중)" : "리포트가 → KRX"}
+                    sublabel={
+                      krxIntraday !== null
+                        ? "NXT → KRX (장중)"
+                        : exRatio
+                          ? "권리락 기준가 → KRX"
+                          : "리포트가 → KRX"
+                    }
                     pct={krxIntraday !== null ? krxIntraday : r.gap_krx_pct!}
-                    fromPrice={krxIntraday !== null ? r.gap_nxt_price! : r.current_price}
+                    fromPrice={krxIntraday !== null ? r.gap_nxt_price! : basePrice}
                     toPrice={r.gap_krx_price!}
                   />
                 )}

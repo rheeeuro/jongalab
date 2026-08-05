@@ -294,6 +294,7 @@ def save_gap_check_results(report_date: str, rows: list[dict]):
     rows 항목 형태:
       초기(08:10): {rank, now_price, pct}   → gap_nxt_*
       재조회(09:10): {rank, nxt_price?, nxt_pct?, krx_price?, krx_pct?}
+      공통 옵션: ex_rights_ratio — 그날 권리락 조정을 적용했으면 배정비율(sql/50).
 
     error/pending 행은 가격 값이 없으므로 자연스럽게 건너뜀.
     rank_no는 같은 report_date 안에서 unique 하다고 가정.
@@ -319,22 +320,25 @@ def save_gap_check_results(report_date: str, rows: list[dict]):
             krx_pct = None
         if all(v is None for v in (nxt_price, nxt_pct, krx_price, krx_pct)):
             continue
-        updates.append((nxt_price, nxt_pct, krx_price, krx_pct, report_date, rank))
+        updates.append(
+            (nxt_price, nxt_pct, krx_price, krx_pct, r.get("ex_rights_ratio"), report_date, rank)
+        )
 
     if not updates:
         return
 
     with get_db() as (conn, cursor):
-        for nxt_price, nxt_pct, krx_price, krx_pct, rd, rank in updates:
+        for nxt_price, nxt_pct, krx_price, krx_pct, ex_ratio, rd, rank in updates:
             cursor.execute(
                 """UPDATE daily_stock_report
                    SET gap_nxt_price = COALESCE(%s, gap_nxt_price),
                        gap_nxt_pct   = COALESCE(%s, gap_nxt_pct),
                        gap_krx_price = COALESCE(%s, gap_krx_price),
                        gap_krx_pct   = COALESCE(%s, gap_krx_pct),
+                       gap_ex_rights_ratio = COALESCE(%s, gap_ex_rights_ratio),
                        gap_checked_at = CURRENT_TIMESTAMP
                    WHERE report_date = %s AND rank_no = %s""",
-                (nxt_price, nxt_pct, krx_price, krx_pct, rd, rank),
+                (nxt_price, nxt_pct, krx_price, krx_pct, ex_ratio, rd, rank),
             )
         conn.commit()
 

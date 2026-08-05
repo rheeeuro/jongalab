@@ -87,6 +87,8 @@ class StockReport(BaseModel):
     gap_krx_price: Optional[int] = None
     gap_krx_pct: Optional[float] = None
     gap_checked_at: Optional[str] = None
+    # 무상증자 권리락 조정 배정비율(sql/50) — 값이 있으면 gap_*_pct 는 조정 기준가 대비다.
+    gap_ex_rights_ratio: Optional[float] = None
     exec_leg_ret: Optional[float] = None
     exec_leg_venue: Optional[str] = None
     created_at: Optional[str] = None

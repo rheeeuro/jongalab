@@ -167,6 +167,9 @@ export interface StockReport {
   gap_krx_price?: number | null;
   gap_krx_pct?: number | null;
   gap_checked_at?: string | null;
+  // 무상증자 권리락 배정비율(sql/50). 값이 있으면 gap_*_pct 는 **권리락 조정 기준가 대비**다
+  // (조정 기준가 = 리포트가 / (1 + 비율)) — 화면은 조정 기준가와 배지를 함께 보여준다.
+  gap_ex_rights_ratio?: number | null;
   exec_leg_ret?: number | null;
   exec_leg_venue?: 'NXT' | 'KRX' | null;
   created_at?: string;

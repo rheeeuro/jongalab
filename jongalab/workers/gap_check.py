@@ -19,6 +19,8 @@
 
 기준가가 없으면(기준가 워커 미실행·마감 후 순위 진입 종목) 리포트 시점 가격으로
 폴백하고 알림에 * 로 표시한다. 이때 NXT/KRX 분류는 08:03 NXT 조회 성공 여부로 대신한다.
+
+권리락(무상증자)일 종목은 기준가를 배정비율로 조정해 측정한다 — 아래 _ex_rights_ratio 주석.
 """
 import json
 import logging
@@ -39,6 +41,7 @@ from core.repository.stock_report import (
     save_nxt_open_labels,
 )
 from core.repository.market_snapshot import save_market_snapshot
+from core.repository.ex_rights import get_tickers_on
 from core.market_data import fetch_edge_market_snapshot
 from core.notifications import send_gap_check_alert
 
@@ -118,7 +121,49 @@ def _row_meta(r: dict) -> dict:
     }
 
 
-def _gap_row(r: dict, venue: str, base_price: int, now_price: int, approx: bool) -> dict:
+# ── 권리락 조정 ──
+# 무상증자 권리락일 아침 시세는 배정비율만큼 낮춰진 **권리락 기준가** 위에서 형성되는데, 갭 체크의
+# 기준가는 전일 실거래가(19:50 NXT / 15:20 KRX)다. 그대로 재면 배정비율이 그대로 갭하락으로 찍힌다.
+#   2026-08-05 알테오젠 실측: 346,500 → 08:03 NXT 286,000 = -17.46%. 실제로는 권리락 기준가
+#   266,538(=346,500/1.3) 대비 +7.30% 상승한 날이다.
+# 그래서 기준가를 `전일가 / (1 + 1주당 신주 배정 주수)` 로 되돌린다(sql/50).
+# 배정비율은 ex_rights_schedule(sql/48) — source='dart' 행이면 DART 확정값이다.
+# 비율을 모르는 추정 행(source='inferred', ratio NULL)은 **손대지 않는다**: 그 행은 권리락일 자체가
+# 불확실해 공시일 +1·+2영업일을 둘 다 등록한 것이라, 잘못 조정하면 정상 종목의 갭을 망친다.
+
+
+def _ex_rights_today() -> dict[str, dict]:
+    """오늘(=갭 확정일) 권리락 종목 맵. 조회 실패는 {} — 무조정으로 진행(종전 동작)."""
+    try:
+        return get_tickers_on(datetime.now().date().isoformat())
+    except Exception as e:
+        logger.warning(f"권리락 캘린더 조회 실패 — 무조정 진행: {e}")
+        return {}
+
+
+def _ex_rights_ratio(ex: dict | None) -> float | None:
+    """조정에 쓸 배정비율. 권리락 아님·비율 미확정이면 None."""
+    if not ex:
+        return None
+    ratio = float(ex.get("ratio") or 0)
+    return ratio if ratio > 0 else None
+
+
+def _gap_row(
+    r: dict, venue: str, base_price: int, now_price: int, approx: bool,
+    ex: dict | None = None,
+) -> dict:
+    ratio = _ex_rights_ratio(ex)
+    if ratio:
+        adj = round(base_price / (1 + ratio))
+        logger.info(
+            f"[{r['stock_name']}] 권리락 조정(배정비율 {ratio}) — 기준가 {base_price:,} → {adj:,}"
+        )
+        base_price = adj
+    elif ex:
+        logger.warning(
+            f"[{r['stock_name']}] 권리락일이나 배정비율 미확정(추정 행) — 갭 무조정"
+        )
     pct = (now_price - base_price) / base_price * 100
     return {
         **_row_meta(r),
@@ -127,6 +172,7 @@ def _gap_row(r: dict, venue: str, base_price: int, now_price: int, approx: bool)
         "now_price": now_price,
         "pct": pct,
         "approx": approx,
+        "ex_rights_ratio": ratio,
     }
 
 
@@ -146,6 +192,7 @@ def _db_rows(rows: list[dict]) -> list[dict]:
             "rank": x["rank"],
             f"{key}_price": x["now_price"],
             f"{key}_pct": x["pct"],
+            "ex_rights_ratio": x.get("ex_rights_ratio"),
         })
     return out
 
@@ -273,6 +320,7 @@ def run_check_nxt():
     api = KiwoomRestClient()
     api.ensure_token()
 
+    ex_map = _ex_rights_today()
     rows = []
     for r in reports:
         code = r["stock_code"].split(".")[0]
@@ -294,7 +342,9 @@ def run_check_nxt():
         if base_price <= 0:
             rows.append({**_row_meta(r), "venue": "NXT", "error": True})
             continue
-        rows.append(_gap_row(r, "NXT", base_price, now_price, approx=not nxt_base))
+        rows.append(
+            _gap_row(r, "NXT", base_price, now_price, approx=not nxt_base, ex=ex_map.get(code))
+        )
 
     try:
         save_gap_check_results(report_date, _db_rows(rows))
@@ -332,6 +382,7 @@ def run_check_krx():
     api = KiwoomRestClient()
     api.ensure_token()
 
+    ex_map = _ex_rights_today()
     final = []
     for r in reports:
         code = r["stock_code"].split(".")[0]
@@ -348,7 +399,10 @@ def run_check_krx():
             nxt_base = base.get(code, {}).get("nxt_price") or 0
             base_price = nxt_base or _fallback_base(r)
             if now_price > 0 and base_price > 0:
-                final.append(_gap_row(r, "NXT", base_price, now_price, approx=not nxt_base))
+                final.append(
+                    _gap_row(r, "NXT", base_price, now_price,
+                             approx=not nxt_base, ex=ex_map.get(code))
+                )
             else:
                 final.append({**_row_meta(r), "venue": "NXT", "error": True})
             continue
@@ -360,7 +414,9 @@ def run_check_krx():
         if now_price <= 0 or base_price <= 0:
             final.append({**_row_meta(r), "venue": "KRX", "error": True})
             continue
-        final.append(_gap_row(r, "KRX", base_price, now_price, approx=not krx_base))
+        final.append(
+            _gap_row(r, "KRX", base_price, now_price, approx=not krx_base, ex=ex_map.get(code))
+        )
 
     try:
         save_gap_check_results(report_date, _db_rows(final))

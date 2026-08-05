@@ -181,6 +181,16 @@ export function StockReportCard({
                   : "bg-slate-50 dark:bg-slate-800/60"
           }`}
         >
+          {/* 무상증자 권리락일(sql/50) — 아래 등락률이 조정 기준가 대비임을 밝힌다.
+              (없으면 배정비율만큼 낮아진 기준가 때문에 오른 종목이 하락으로 읽힌다) */}
+          {r.gap_ex_rights_ratio != null && (
+            <span
+              title="무상증자 권리락일입니다 — 배정비율만큼 낮아진 권리락 기준가 대비 등락률입니다"
+              className="shrink-0 rounded-full bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900 dark:bg-amber-900/50 dark:text-amber-200"
+            >
+              권리락
+            </span>
+          )}
           {gapLines.map((g) => (
             <span
               key={g.label}
