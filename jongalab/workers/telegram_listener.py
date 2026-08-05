@@ -16,7 +16,7 @@ import logging
 import sys
 import time
 
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, utils
 from telethon.tl.types import MessageMediaWebPage, WebPage
 
 from core.logging_setup import setup_logging
@@ -69,6 +69,36 @@ QUEUE_WARN_DEPTH = 10       # 대기가 이 이상이면 경고 로그(적체 �
 _llm_lock = asyncio.Lock()   # Ollama 는 CPU 직렬 — 동시 1건
 _pending_analysis = 0
 _seen_texts: dict[str, float] = {}
+# 전달 중복 필터 기준표. **경로별로 따로 둔다** — 각 경로는 자기 경로의 소스만 본다.
+# 일반 채널이 뉴스 채널 글을 전달한 건 버리면 안 되고(뉴스 경로는 LLM 분석을 안 하므로
+# 그 재료의 분석이 사라진다), 뉴스 채널이 일반 채널 글을 전달한 건 버리면 안 된다
+# (일반 경로는 news_mention 을 적재하지 않으므로 언급 1건이 사라진다).
+_source_peer_ids: set[int] = set()   # 감시 중인 일반 채널(platform=telegram) peer id
+_news_peer_ids: set[int] = set()     # 감시 중인 뉴스 채널(platform=news) peer id
+
+
+def _forward_origin_id(message) -> int | None:
+    """전달(forward) 메시지의 **원본 채널** peer id(-100… 형식). 전달이 아니거나 원본이
+    숨겨진 경우(from_name 만 있는 익명 전달) None."""
+    fwd = getattr(message, 'fwd_from', None)
+    if not fwd or not fwd.from_id:
+        return None
+    try:
+        return utils.get_peer_id(fwd.from_id)
+    except Exception:
+        return None
+
+
+async def _resolve_peer_ids(client, chats) -> set[int]:
+    """sources 의 식별자(@username / 숫자 ID)를 전부 peer id 로 정규화한다.
+    fwd_from 은 항상 숫자 ID 로 오므로 비교하려면 username 소스도 해석해야 한다."""
+    ids: set[int] = set()
+    for chat in chats:
+        try:
+            ids.add(await client.get_peer_id(chat))
+        except Exception as e:
+            logging.warning(f"[전달 중복 필터] 소스 ID 해석 실패({chat}): {e}")
+    return ids
 
 
 def _is_duplicate_text(text: str) -> bool:
@@ -226,6 +256,15 @@ while True:
 
             logging.info(f"[{channel_name}] 새 메시지 도착 (분석 대기 {_pending_analysis}건)")
 
+            # 이미 감시 중인 일반 채널의 글을 전달한 것이면 원본 경로로도 들어오므로 여기서 버린다
+            # (본문 dedup 은 전달 시 코멘트가 붙으면 지문이 달라져 못 잡는다. 이 필터는 그보다
+            #  앞서고 값싸며, 출처도 원본 채널로 정확히 남는다)
+            origin_id = _forward_origin_id(event.message)
+            if origin_id is not None and origin_id in _source_peer_ids:
+                logging.info(f"[{channel_name}] 감시 중인 채널({origin_id})의 전달 메시지 — 스킵")
+                mark_content_skipped(msg_link, 'telegram', channel_name, None, 'forwarded')
+                return
+
             if len(text) < MIN_TEXT_LENGTH:
                 logging.info(f"[스킵] 메시지가 너무 짧음 ({len(text)}자 < {MIN_TEXT_LENGTH}자)")
                 return
@@ -271,6 +310,14 @@ while True:
 
             headline = text.replace("\n", " ").strip()[:500]
 
+            # 뉴스 채널끼리의 전달 — 원본 채널에서 이미 적재되므로 같은 속보가 두 번 세어진다
+            # (news_mention 은 언급 '건수' 집계라 중복이 그대로 신호를 부풀린다). 원본 경로만 남긴다.
+            origin_id = _forward_origin_id(event.message)
+            if origin_id is not None and origin_id in _news_peer_ids:
+                logging.info(f"[뉴스][{channel_name}] 감시 중인 뉴스 채널({origin_id})의 전달 메시지 — 스킵")
+                mark_content_skipped(msg_link, 'news', channel_name, headline, 'forwarded')
+                return
+
             matches = match_companies(text)
             if not matches:
                 # 분모 계측 — 사명이 없어 떨어진 메시지를 흔적 없이 버리면 '수집률'을 알 수 없다
@@ -306,6 +353,18 @@ while True:
 
         client.start()
         logging.info("텔레그램 서버 연결 성공! 메시지 감시를 시작합니다.")
+
+        # 전달 중복 필터 기준표 (경로별로 분리 — 위 _source_peer_ids 주석 참고)
+        _source_peer_ids = client.loop.run_until_complete(
+            _resolve_peer_ids(client, telegram_chats)
+        )
+        _news_peer_ids = client.loop.run_until_complete(
+            _resolve_peer_ids(client, news_chats)
+        )
+        logging.info(
+            f"전달 중복 필터 기준 채널 해석 완료 — 일반 {len(_source_peer_ids)}개 / 뉴스 {len(_news_peer_ids)}개"
+        )
+
         client.run_until_disconnected()
 
     except Exception as e:

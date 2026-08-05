@@ -435,7 +435,8 @@ CREATE TABLE IF NOT EXISTS content_skip (
     source_name VARCHAR(100) DEFAULT NULL,          -- 채널명
     title       VARCHAR(255) DEFAULT NULL,
     reason      VARCHAR(30) NOT NULL,               -- irrelevant | no_companies | hallucination | no_ticker | analysis_timeout
-                                                    -- | duplicate(채널 간 동일 본문) | backlog(LLM 대기 상한 초과 폐기) ← telegram_listener
+                                                    -- | duplicate(채널 간 동일 본문) | backlog(LLM 대기 상한 초과 폐기)
+                                                    -- | forwarded(감시 중인 채널의 전달 메시지 — 원본 경로로 들어옴, 일반·뉴스 양쪽) ← telegram_listener
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

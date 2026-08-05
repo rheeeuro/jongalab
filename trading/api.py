@@ -319,6 +319,10 @@ def buy_preview(date: str | None = None):
     가용현금(100stk_ord_alow_amt)을 거래소 점수비례로 분할해 seed_allocator 로 종목별 예상
     수량을 계산한다. signal_executor 와 동일 로직이지만 **읽기 전용** — DB/주문은 건드리지 않는다.
     가격·현금·NXT 여부는 호출 시점의 실시간 값이라 실제 집행 결과와 다를 수 있다(미리보기).
+
+    데드라인이 지난 거래소는 `closed=True` 로 표시하고 수량 0 으로 둔다 — 그 윈도우는 오늘 다시
+    열리지 않으므로 '매수 예정'이 아니다(2026-08-05 GS건설: KRX 전용 종목이 16:00 회차에 후보로
+    새로 올라와 15:20 데드라인을 이미 넘겼는데 계속 매수 예정으로 표시됐다).
     """
     trade_date = date or datetime.now().strftime("%Y%m%d")
     signals = signal_repo.get_pending_signals(trade_date)
@@ -386,7 +390,12 @@ def buy_preview(date: str | None = None):
     #    executor 와 동일하게 게이트를 반영한다: regime 은 총 시드 축소, futures(NXT)는 배분 뒤 섹터별 수량 감액.
     #    가격·현금·야간선물은 호출 시점 실시간값이라 실제 집행과 다를 수 있다(미리보기).
     venues = []
-    for exchange, want_nxt, window in (("KRX", False, "15:00~15:20"), ("NXT", True, "19:30~19:50")):
+    now = datetime.now()
+    for exchange, want_nxt, window, deadline in (("KRX", False, "15:00~15:20", (15, 20)),
+                                                 ("NXT", True, "19:30~19:50", (19, 50))):
+        # 데드라인이 지난 거래소는 오늘 집행되지 않는다 — 배분·게이트 조회를 건너뛰고 '집행 불가'로 표시.
+        closed = now > datetime.strptime(trade_date, "%Y%m%d").replace(hour=deadline[0],
+                                                                       minute=deadline[1])
         items = [c for c in classified if c["is_nxt"] == want_nxt]
         venue_score = sum(c["score"] for c in items)
         seed_base = int(cash * venue_score / total_score) if total_score > 0 else 0
@@ -395,22 +404,26 @@ def buy_preview(date: str | None = None):
         seed = int(seed_base * regime_mult) if regime_mult < 1.0 else seed_base
         cands = [{"stk_cd": c["sig"]["stk_cd"], "score": c["score"], "price": c["price"],
                   "conviction": c["conviction"]} for c in items]
-        allocate(seed, cands)
-
-        # 선물 섹터 게이트 — 배분 뒤 섹터별 keep 으로 수량 감액(집행과 동일). 코스피 축은 거래소별
-        #   (KRX=주간선물 / NXT=야간선물). 지표 취득 전(예: 야간선물 개장 전)이면 미개입.
-        factors, futures_diag = sector_keep_factors(exchange.lower(), [c["sig"]["stk_cd"] for c in items])
+        factors, futures_diag = {}, None
+        if not closed:
+            allocate(seed, cands)
+            # 선물 섹터 게이트 — 배분 뒤 섹터별 keep 으로 수량 감액(집행과 동일). 코스피 축은 거래소별
+            #   (KRX=주간선물 / NXT=야간선물). 지표 취득 전(예: 야간선물 개장 전)이면 미개입.
+            factors, futures_diag = sector_keep_factors(exchange.lower(),
+                                                        [c["sig"]["stk_cd"] for c in items])
 
         stocks = []
         for c, a in zip(items, cands):
             sig = c["sig"]
             shares, cost = a.get("shares", 0), a.get("cost", 0)
             # 선물(섹터별) × 거시(공통) 곱에 레짐 결합 하한 반영 (executor 와 동일)
-            keep = effective_keep(factors.get(sig["stk_cd"], 1.0) * m_keep, regime_mult)
+            keep = 1.0 if closed else effective_keep(factors.get(sig["stk_cd"], 1.0) * m_keep,
+                                                     regime_mult)
             if keep < 1.0:
                 shares = gated_shares(shares, keep)  # 반올림 감액(mild 컷이 1주를 0으로 안 만듦)
                 cost = shares * c["price"]
-            note = ("현재가 없음" if c["price"] <= 0
+            note = ("윈도우 종료" if closed
+                    else "현재가 없음" if c["price"] <= 0
                     else "게이트 감액" if keep < 1.0 and shares < 1
                     else "배분 0주(시드 부족)" if shares < 1
                     else None)
@@ -432,8 +445,10 @@ def buy_preview(date: str | None = None):
         venues.append({
             "exchange": exchange,
             "window": window,
-            "seed_base": seed_base,
-            "seed": seed,
+            # 이 거래소 데드라인이 지났다 = 오늘 집행 없음(수량 0). 남은 pending 은 다음 회차에 정리된다.
+            "closed": closed,
+            "seed_base": 0 if closed else seed_base,
+            "seed": 0 if closed else seed,
             "invested": sum(s["cost"] for s in stocks),
             "count": sum(1 for s in stocks if s["shares"] >= 1),
             "futures": futures_diag,

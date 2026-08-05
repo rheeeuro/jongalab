@@ -149,7 +149,7 @@ export interface BuyPreviewStock {
   conviction: number; // 선정 근거 수(표) — 1이면 등가중, 2 이상이면 그만큼 비중 증액
   rule_names: string | null; // 선정 근거 rule name 콤마 목록 (점수순 선정은 null)
   keep: number | null; // 선물 섹터 게이트 keep-factor(<1이면 감액됨), 감액 없으면 null
-  note: string | null; // "배분 0주(시드 부족)" / "현재가 없음" / "선물 게이트 감액" / null(매수 예정)
+  note: string | null; // "배분 0주(시드 부족)" / "현재가 없음" / "선물 게이트 감액" / "윈도우 종료" / null(매수 예정)
 }
 
 // 선물 섹터 게이트 진단 (buy-preview·audit 공유 shape)
@@ -179,6 +179,7 @@ export interface RegimeGateDiag {
 export interface BuyPreviewVenue {
   exchange: "KRX" | "NXT";
   window: string; // 매수 윈도우 (예: "15:00~15:20")
+  closed: boolean; // 데드라인 경과 = 오늘 집행 없음 (수량·시드 0, 남은 종목은 매수 대상 아님)
   seed_base: number; // 게이트 전 시드 (가용현금 × 점수비율)
   seed: number; // 레짐 게이트 반영 후 시드
   invested: number; // 예상 매수금액 합계 (선물 게이트 반영 후)

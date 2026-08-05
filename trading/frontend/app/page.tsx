@@ -102,7 +102,9 @@ export default async function TodayPage() {
       )}
 
       {/* 오늘 매수 예정 — pending 시그널을 거래소별로 시드 배분한 예상 수량(실시간 미리보기).
-          매수 윈도우대(15~20시)에 아직 집행 대기 종목이 있을 때만 노출. */}
+          매수 윈도우대(15~20시)에 아직 집행 대기 종목이 있을 때만 노출.
+          데드라인이 지난 거래소(v.closed)는 수량 0 · '윈도우 종료'로 표시한다 — 장 마감 후 회차에
+          새로 뜬 KRX 전용 종목이 매수 예정처럼 보이던 문제(2026-08-05 GS건설). */}
       {showPreview && (
         <Card title="오늘 매수 예정" count={previewCount} total={previewTotal}>
           <div className="space-y-4">
@@ -147,7 +149,7 @@ export default async function TodayPage() {
                     <span className="text-xs text-slate-400 tabular-nums">{v.window}</span>
                   </div>
                   <span className="min-w-0 truncate text-right text-xs text-slate-400 tabular-nums">
-                    시드 {wonExact(v.seed)}
+                    {v.closed ? "윈도우 종료 — 오늘 집행 안 됨" : `시드 ${wonExact(v.seed)}`}
                   </span>
                 </div>
                 <ul className="divide-y divide-slate-100 dark:divide-slate-800">
