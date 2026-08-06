@@ -13,6 +13,8 @@
 
 배분: 종가랩 시드배분기 로직(등가중 + 잔여 그리디 재투입)으로, 해당 거래소 대상 후보
 전체에 가용현금(시드)을 윈도우 시작 시점에 한 번에 배분한다(수량은 이후 고정).
+  · 예외로 **시드 배율(risk_config SEED_INIT_MULT)만 데드라인 직전에 한 번 더 읽어**,
+    윈도우 중간에 사람이 줄였으면 확정 수량을 그 비율로 축소한다(축소 전용, `_rescale_by_seed_mult`).
 멱등성 키로 중복 방지(워커 재기동 안전), 윈도우 가드로 오실행 방지, blocklist 제외.
 """
 import sys
@@ -289,6 +291,53 @@ def _nxt_gap_pct(nxt_price: int, krx_close: int) -> float | None:
     return (nxt_price - krx_close) / krx_close * 100
 
 
+def _rescale_by_seed_mult(cands: list[dict], applied_mult: float, venue: str) -> None:
+    """데드라인 직전 `SEED_INIT_MULT` 재조회 → 낮아졌으면 미집행 수량을 그 비율만큼 축소.
+
+    수량은 윈도우 시작(15:00/19:30)에 확정되므로, 그 뒤 대시보드에서 시드를 줄여도 당일
+    매수엔 반영되지 않는다. 사람이 장중에 노출을 줄이는 유일한 수동 레버라 데드라인 직전에
+    한 번 더 읽어 **비율(현재/적용시점)** 만큼 깎는다.
+
+    **축소 전용**: 값이 그대로거나 올라갔으면 무개입이다 — 수량은 윈도우 시작 시점 현금으로
+    잡은 것이라 증액은 주문가능금액을 넘겨 거부를 부르고, 사람이 올린 값이 곧 '더 사라'는
+    지시도 아니다(게이트 감액과 같은 reduce-only 규약).
+    감액은 게이트와 같은 `gated_shares()` 반올림이라 mild 한 축소가 1주를 0주로 없애지 않는다.
+    조회 실패는 fail-open — 확정 수량 그대로 집행한다.
+    """
+    if applied_mult <= 0:
+        return
+    try:
+        now_mult = float(risk_config_repo.get_risk_config().get("SEED_INIT_MULT", 1.0))
+    except Exception as e:
+        logger.warning("데드라인 시드 배율 재조회 실패 — 확정 수량 유지: %s", e)
+        return
+    if now_mult >= applied_mult:
+        return
+
+    ratio = now_mult / applied_mult
+    changed: dict[str, dict] = {}
+    for c in cands:
+        if c["bought"] or c["shares"] < 1:
+            continue
+        before = c["shares"]
+        c["shares"] = gated_shares(before, ratio)
+        c["cost"] = c["shares"] * c["price"]
+        if c["shares"] != before:
+            changed[c["stk_cd"]] = {"before": before, "after": c["shares"]}
+        if c["shares"] < 1:
+            logger.info("시드 축소로 0주 [%s] — 매수 스킵 (%d주 → 0주)", c["stk_cd"], before)
+            signal_repo.update_status(c["sig"]["id"], "skipped", note="시드 축소 0주")
+            audit_log.append("buy_skip", c["stk_cd"], {
+                "reason": "시드 축소 0주", "shares_before": before,
+                "applied_mult": applied_mult, "deadline_mult": now_mult})
+            c["bought"] = True
+    logger.info("데드라인 시드 배율 축소 적용: %.3f → %.3f (비율 %.3f) — %d종목 수량 조정",
+                applied_mult, now_mult, ratio, len(changed))
+    audit_log.append("seed_init_rescale", None, {
+        "venue": venue, "applied_mult": applied_mult, "deadline_mult": now_mult,
+        "ratio": round(ratio, 3), "stocks": changed})
+
+
 def _buy_candidate(engine: ExecutionEngine, trade_date: str, c: dict,
                    exchange: str, reason: str, deadline_hm: tuple[int, int]) -> None:
     """배분 수량으로 1종목 매수 집행 + 시그널 상태 갱신. 한 종목당 1회만 호출한다."""
@@ -562,6 +611,10 @@ def main() -> int:
         _beat({"venue": args.venue, "phase": "poll",
                "pending": sum(1 for c in cands if not c["bought"])})
         time.sleep(POLL_SEC)
+
+    # 4-2) 데드라인 직전 시드 배율 재조회 — 윈도우 중간에 대시보드에서 시드를 줄였으면
+    #      확정 수량을 그 비율만큼 축소한다(축소 전용, 조회 실패는 fail-open).
+    _rescale_by_seed_mult(cands, seed_init_mult, args.venue)
 
     # 5) 데드라인 — 잔여 후보 전량 종가(KRX 동시호가 / NXT IOC) 매수
     #    NXT 는 부분체결 확인에 체결통보를 쓰므로 집행 직전에 구독을 열고, 끝나면 반드시 닫는다.
