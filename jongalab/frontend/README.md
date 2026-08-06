@@ -47,10 +47,6 @@ frontend/
 - 데이터: `/api/news/materials` · `/api/news/heat?date=` · `/api/news/stream`(로컬 프록시 경유) ·
   `/api/stock-report/dates`(날짜 이동은 영업일 목록 위를 걷는다).
 
-### 홈
-- `today/NewsHeat` — '오늘 새로 뜬 재료'. **자기 기저 대비 배수** 정렬이고 근거(건수·평소 N건/일)를
-  함께 보여줘 값을 검증할 수 있게 한다.
-
 ### 리포트 상세 / 종목 상세
 - **뉴스 재료 섹션** — 등급 칩 + 사실 4축 + **판정 근거 문장**(`news_label_reason`) + 후속 재료 실현 일수.
   등급만 보여주면 화면에서 오탐 감사가 안 되므로 근거 문장을 반드시 노출한다.
@@ -61,7 +57,7 @@ frontend/
   무관하게** 뽑은 종목이므로 배지 + `점수 N위` 를 함께 낸다. 룰로 가는 링크는 **리포트 상세에만**
   둔다(카드는 전체가 이미 `Link`).
 - `components/MaterialBadge.tsx` — 연속/중립/소진/미판정 공통 칩 + `materialAxisLabels`(사실 축을
-  사람 말로). 홈 카드·`/news`·리포트 상세가 공유한다.
+  사람 말로). `/news`·리포트 상세가 공유한다.
 
 ### `/lab` — 전략 실험실 (읽기 전용 공개)
 서버 컴포넌트가 `getEdgeRules()` + rule 별 일별 시계열(+최신 매칭 1일치)을 실어 `EdgeBoard`(클라)로 내린다.

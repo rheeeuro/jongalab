@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ContentAnalysis, StockReport, MentionStats, MarketIndex, PaginatedResponse, SectorReport, NewsHeatItem, MacroEvent, MacroEventsResponse } from "@/types";
+import { ContentAnalysis, StockReport, MentionStats, MarketIndex, PaginatedResponse, SectorReport, MacroEvent, MacroEventsResponse } from "@/types";
 import { apiFetch } from "@/lib/api";
 
 export const metadata: Metadata = {
@@ -9,7 +9,6 @@ import { TodayHero } from "@/components/today/TodayHero";
 import { TopPicks } from "@/components/today/TopPicks";
 import { LeadingSectorsStrip } from "@/components/today/LeadingSectorsStrip";
 import { MentionPulse } from "@/components/today/MentionPulse";
-import { NewsHeat } from "@/components/today/NewsHeat";
 import { ContentTeaser } from "@/components/today/ContentTeaser";
 import { IndicesStrip, IndicesStripSkeleton } from "@/components/today/IndicesStrip";
 import { MacroEventNotice } from "@/components/today/MacroEventNotice";
@@ -42,14 +41,6 @@ async function getMentionStats(): Promise<MentionStats | null> {
   return res?.success ? res.data : null;
 }
 
-async function getNewsHeat(): Promise<NewsHeatItem[]> {
-  const res = await apiFetch<{ success: boolean; data: NewsHeatItem[] } | null>(
-    `/api/news/heat?hours=24&limit=10`,
-    null,
-  );
-  return res?.success ? res.data : [];
-}
-
 async function getLatestSectorReport(): Promise<SectorReport[]> {
   const dates = await apiFetch<string[]>(`/api/stock-report/dates?limit=1`, []);
   if (!dates.length) return [];
@@ -80,13 +71,12 @@ async function IndicesSection() {
 }
 
 export default async function HomePage() {
-  const [contents, topPick, mentionStats, sectorReport, newsHeat, macroEvents] =
+  const [contents, topPick, mentionStats, sectorReport, macroEvents] =
     await Promise.all([
       getContents(),
       getLatestTopPick(),
       getMentionStats(),
       getLatestSectorReport(),
-      getNewsHeat(),
       getMacroEvents(),
     ]);
 
@@ -101,7 +91,6 @@ export default async function HomePage() {
         </Suspense>
         <LeadingSectorsStrip sectors={sectorReport} />
         <MentionPulse stats={mentionStats} />
-        <NewsHeat items={newsHeat} />
         <ContentTeaser items={contents.data || []} />
       </div>
     </main>
