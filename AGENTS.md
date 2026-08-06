@@ -12,7 +12,8 @@
 > 각 주요 디렉터리(`jongalab/`·`trading/`·`kiwoom/`)에는 그 도메인의 주요 로직·코드 구조를 설명하는
 > `README.md`가 있다. 이 절은 개요이고, **상세는 각 README 가 소스 오브 트루스**다(변경 시 함께 갱신).
 
-루트는 **`jongalab/`(메인 앱)** 과 **`kiwoom/`(키움 데이터 전용 서버)** 로 분리된다.
+루트는 **`jongalab/`(메인 앱)** · **`trading/`(자동매매 집행 서버)** · **`kiwoom/`(키움 데이터 전용 서버)** 로
+분리된다. 판정·변경 이력은 **`docs/history/`** 에 축별로 모은다(위 "문서 두 계층" 참고).
 공통 인프라는 각자 최소 복제하고, **같은 MariaDB 서버에 DB(스키마)를 분리**해 쓴다 —
 jongalab 은 `jongalab` DB(분석/리포트/소스 등), kiwoom 은 전용 `kiwoom` DB(`kiwoom_token`).
 DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(`DB_HOST`/`DB_USER`/`DB_PASSWORD`/`DB_PORT` 는 공유).
@@ -21,25 +22,34 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
 - `core/` — 비즈니스 로직. `ai_service.py`(LLM 추상화), `trading_engine.py`(종가베팅 전략),
   `db.py`, `config.py`, `kiwoom_client.py`(키움 데이터 서버 HTTP 클라이언트), `repository/`(DB 접근 계층, 패턴 준수 필수)
 - `routers/` — FastAPI 라우트 핸들러 (`api.py`의 `app`에 등록)
-- `workers/` — 백그라운드 잡. 저위험 cron 잡 7개는 `workers/scheduler.py`(통합 스케줄러,
-  PM2 상시 앱 `jongalab-scheduler`)가 spawn 하고 실행 이력을 `job_run` 에 남긴다(2026-07-13 1단계 이관).
+- `workers/` — 백그라운드 잡. 저위험 cron 잡은 `workers/scheduler.py`(통합 스케줄러,
+  PM2 상시 앱 `jongalab-scheduler`)가 spawn 하고 실행 이력을 `job_run` 에 남긴다.
   나머지(telegram_listener, gap_check, closing_bet 등 창 민감/자금 인접 잡)는 PM2 cron 유지.
-  상세는 `jongalab/README.md` workers 절
+  잡 목록·스케줄의 소스 오브 트루스는 `scheduler.py` 의 `JOBS`, 설명은 `jongalab/README.md` workers 절
 - `frontend/` — Next.js 16 App Router + Tailwind 4 + recharts. `app/`(페이지), `components/`,
   `lib/api.ts`(fetch 래퍼, API_BASE=:8000), `types/index.ts`
 - `sql/` — `jongalab` DB 스키마 (`1. create_database.sql` + `2. create_table.sql`)
 
+### `trading/` — 자동매매 집행 서버 (FastAPI, :8002 + 자체 프론트 :3001)
+- jongalab 이 만든 `trade_signal` 을 읽어 **집행·포지션·리스크**를 담당한다. **주문 권한은 이 도메인만** 갖는다.
+- `core/` — `risk_engine.py`·`execution_engine.py`(⚠️민감/가드), `seed_allocator.py`,
+  감액 게이트 3종(`regime_gate`·`futures_gate`·`macro_gate`), `realtime_feed.py`, `repository/`
+- `workers/` — `signal_executor`(매수) · `settle`(시초가 청산) · `monitor`(손절·트레일링) ·
+  `fills_sync` · `reconcile` · `watchdog`. 전부 PM2 cron
+- `tests/` — 자금 경로 단위 테스트(DB/네트워크 없이). 상세는 `trading/README.md`
+
 ### `kiwoom/` — 키움 데이터 전용 서버 (FastAPI, :8001)
-- `core/kiwoom_api.py`(키움 REST 클라이언트), `core/repository/kiwoom_token.py`(토큰 저장),
+- `core/kiwoom_api/`(키움 REST 클라이언트, TR별 Mixin), `core/repository/kiwoom_token.py`(토큰 저장),
   `core/{config,db,logging_setup}.py`(DB 키만 가진 최소 복제)
-- `api.py` — 데이터 조회 엔드포인트(소비자가 쓰는 11종) + `/health`
+- `api.py` — 데이터 조회 엔드포인트(POST 23종) + `/`, `/health`
 - `workers/kiwoom_token_refresh.py` — 매일 07:00 토큰 갱신 (cron)
 - `sql/` — `kiwoom` DB 스키마 (`1. create_database.sql` + `2. create_table.sql`, `kiwoom_token`)
 - **데이터 조회 전용**: 주문/계좌는 노출하지 않는다. jongalab 은 `core.kiwoom_client.KiwoomRestClient`
   로 `http://127.0.0.1:8001` 호출(`KIWOOM_BASE_URL`).
 
 ### 루트
-- `ecosystem.config.js`, `.env`(단일, 양쪽이 절대경로로 로드), `.claude/`
+- `ecosystem.config.js`, `.env`(단일, 세 앱이 절대경로로 로드), `.claude/`, `.agent-config/`
+- `docs/history/` — 판정·변경 이력(축별 6개). `docs/plan/` — 설계 문서
 
 ## 명령어
 > 파이썬 명령은 해당 서브프로젝트 디렉터리(`jongalab/` 또는 `kiwoom/`)에서 실행한다.
@@ -69,12 +79,26 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
 4. **사용자가 가장 덜 헷갈리는 흐름은 무엇인가?** — UI/API 흐름은 최소 놀람 원칙을 따른다.
 5. **어떤 방식이 더 유지보수하기 쉬운가?** — 영리함보다 다음 사람이 읽기 쉬운 쪽을 택한다.
 
-## README 동기화 (주요 로직의 소스 오브 트루스)
+## 문서 두 계층 — README(현재 상태) / docs/history(이력)
+**이 경계를 지키는 것이 문서 규칙의 핵심이다.**
+
+### `README.md` = 현재 구조와 상태
 각 주요 디렉터리(`jongalab/`, `trading/`, `kiwoom/`)의 `README.md`는 그 도메인의 **주요 로직·코드 구조 설명서**다.
 - **변경 전**: 손대려는 도메인의 `README.md`를 먼저 읽어 구조·흐름·안전장치를 파악한다.
-- **변경 후**: `core/`·`routers/`·`workers/`의 주요 로직(책임·흐름·엔드포인트·안전장치)을 바꿨으면
-  같은 PR/턴에서 해당 `README.md`도 함께 갱신한다. 코드와 문서가 어긋난 채로 완료 보고하지 않는다.
+- **변경 후**: `core/`·`routers/`·`workers/`의 주요 로직(책임·흐름·엔드포인트·안전장치·파라미터 현재값)을
+  바꿨으면 같은 PR/턴에서 해당 `README.md`도 함께 갱신한다. 코드와 문서가 어긋난 채로 완료 보고하지 않는다.
 - 사소한 변경(오타·리네임·내부 헬퍼)은 갱신 불필요. 표/흐름도에 적힌 내용이 바뀌면 갱신 대상이다.
+- **README 에 이력을 쓰지 않는다** — 날짜·백테스트 수치·기각 근거·사고 경위는 아래로 보낸다.
+  현재 값의 이유 한 줄(예: "TRAIL_PCT=0.75 는 15초 주기로 튜닝된 값")은 상태의 일부라 README 에 둔다.
+
+### `docs/history/` = 판정·변경 이력
+축별 파일 6개(`selection-scoring` · `edge-ledger` · `news-pipeline` · `execution-exit` · `gates-sizing` ·
+`infra-incidents`) + 인덱스 `README.md`. 쓰는 형식은 [`docs/history/README.md`](docs/history/README.md) 참고.
+- **로직·파라미터를 바꾸거나 축을 검증했으면** 그 근거(표본·수치·t값·기각 사유·재현 방법)를 해당 축 파일에
+  **날짜 항목으로 추가**한다. append-only 성격이라 틀린 항목도 지우지 않고 새 항목을 아래에 쌓는다.
+- **새 축을 제안·설계하기 전에 그 축 파일을 먼저 읽는다.** 이미 백테스트로 기각된 방향이 많아,
+  안 읽고 제안하면 같은 분석을 반복한다.
+- 무변경으로 종결된 검증도 기록한다(그게 다음 사람이 재논의를 피하는 근거다).
 
 ## 프론트엔드 규칙
 - **모바일 우선(mobile-first)**. 이 대시보드는 모바일에서 자주 쓰인다. 모든 UI는 작은 화면을

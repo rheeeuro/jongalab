@@ -7,8 +7,9 @@
 > **불변식: 데이터 조회 전용.** 주문(`ordr`)·계좌(`acnt`) TR/엔드포인트는 **절대 노출하지 않는다.**
 > 주문 권한은 `trading/` 도메인의 `kiwoom_order_client` 만 보유한다.
 >
-> 이 README 는 주요 로직·코드 구조의 소스 오브 트루스다. 엔드포인트나 클라이언트 로직을 바꾸면
-> **이 파일도 함께 갱신**한다. 작업 규칙은 루트 [`AGENTS.md`](../AGENTS.md) 를 따른다.
+> 이 README 는 **현재 구조와 상태**의 소스 오브 트루스다. 엔드포인트나 클라이언트 로직을 바꾸면
+> **이 파일도 함께 갱신**한다. 판정 이력·수치는 [`docs/history/`](../docs/history/) 에 남긴다.
+> 작업 규칙은 루트 [`AGENTS.md`](../AGENTS.md) 를 따른다.
 
 ---
 
@@ -16,7 +17,7 @@
 
 ```
 kiwoom/
-├── api.py                       # FastAPI — 데이터 조회 엔드포인트 22종 + /, /health
+├── api.py                       # FastAPI — 데이터 조회 엔드포인트 POST 23종 + /, /health
 ├── core/
 │   ├── config.py                # .env 로딩, kiwoom DB 설정 (DB키만 최소 복제)
 │   ├── db.py                    # 컨텍스트 매니저 get_db()
