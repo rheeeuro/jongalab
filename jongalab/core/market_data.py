@@ -602,6 +602,32 @@ def fetch_edge_market_snapshot() -> dict:
         "skhy_ret": skhy.get("change_percent"),
         "k200f_day_ret": _kospi200_day_future().get("change_percent"),
         "k200f_night_ret": _kospi200_night_future().get("change_percent"),
+        **_news_tone_today(),
+    }
+
+
+def _news_tone_today() -> dict:
+    """당일 뉴스 톤(거시·섹터) 집계 — news_sector_label 에서 **지금까지 라벨된 것만**.
+
+    이 함수는 gap_check --base-nxt(19:50 = NXT 매수 시점) 경로에서만 호출되므로 결과는
+    '매수 시점에 알 수 있었던 톤'이 된다. 20:30 백로그 소화로 라벨이 더 붙어도 소급하지
+    않는 게 의도다 — 사후 라벨로 채우면 게이트 축 검정이 성립하지 않는다(sql/60 주석).
+
+    조회 실패는 전 필드 None(그 날 표본 없음으로 남고 나머지 스냅샷 수집은 계속된다).
+    ⚠️ 라벨은 관측 전용이다 — 이 값을 시드·점수·veto 가 읽지 않는다.
+    """
+    try:
+        from core.repository import news_sector as news_sector_repo
+        today = datetime.now().strftime("%Y-%m-%d")
+        macro = news_sector_repo.get_daily_tone("거시", today)
+        sector = news_sector_repo.get_daily_tone("섹터", today)
+    except Exception as e:
+        logger.warning(f"뉴스 톤 집계 실패(스냅샷 나머지는 계속): {e}")
+        return {"news_macro_tone": None, "news_macro_cnt": None,
+                "news_sector_tone": None, "news_sector_cnt": None}
+    return {
+        "news_macro_tone": macro["avg_sentiment"], "news_macro_cnt": macro["cnt"],
+        "news_sector_tone": sector["avg_sentiment"], "news_sector_cnt": sector["cnt"],
     }
 
 

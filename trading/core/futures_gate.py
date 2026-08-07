@@ -12,17 +12,21 @@
   · 코스피200 선물(코스피 축):
       - KRX(15:20): 주간선물(K200DF) — 그 시각 정규장 열려 실시간. market-indices 에서 취득.
       - NXT(19:50): 야간선물(K200NF) — 야간세션(18:00~) 실시간. DB kis_night_future 직접(신선도 체크).
-  각 등락률이 -FUTURES_FLAT_BAND %p 미만이면 '하락'으로 본다(±band 이내 보합·상승은 하락 아님).
+  각 등락률이 **그 축의 σ 로 정규화**해 -FUTURES_FLAT_Z σ 미만이면 '하락'으로 본다
+  (밴드 이내 보합·상승은 하락 아님). 절대 %p 밴드를 쓰지 않는 이유는 [감액] 절 참고.
   · US 장 마감 후 최근 등락(NXT 전용) — jongalab /api/us-extended. NXT(19:50)는 미국 프리마켓이
       열려 '정규장 종가 대비 프리마켓 최근 등락'이 순방향 신호(일일 등락은 지난밤이라 이미 국장 종가에
       반영=후행). 반도체 min(SOXX,SKHY)는 tech 만, 한국 min(EWY,KORU/3)은 idx 민감도로 전 섹터에.
       KRX(15:20)는 매수 시점 미국장 완전 폐장(다크)이라 stale → 이 축 미개입(선물 축만).
 
 [감액] 종목 섹터(키움 업종명, jongalab ticker_dictionary)를 클래스로 매핑하고, 클래스별 축당 민감도 ×
-  하락 강도(폭 비례: -FLAT_BAND=0 ~ -FULL_CUT_PCT=1)로:
+  하락 강도로:
     keep = ∏_axis (1 − MAX_CUT_axis × sensitivity × intensity_axis),  하한 MIN_KEEP.
-  → 작은 하락(NQ -0.5%)은 살짝, 급락(-2%+)은 최대컷. seed_allocator 등가중 배분 뒤 종목 수량에 keep 을
-  곱해 감액한다(총 노출↓, 배분 로직 자체는 불변).
+  하락 강도는 **축의 σ 로 정규화한 z**(=|등락|/σ)에 비례한다: z=FLAT_Z 에서 0, z=FULL_Z 에서 1.
+  같은 -2%p 가 축마다 전혀 다른 사건이기 때문이다 — 실측 σ 는 주간선물 6.3 / 야간선물 1.6 / NQ 0.9 %p 로
+  7배 차이라, 절대 %p 눈금(구 FULL_CUT_PCT=2.0) 하나를 공유하면 주간선물 축은 하락일에 거의 항상
+  최대컷(-2%와 -6%를 구분 못함)이고 NQ 축은 최대컷에 도달하지 못했다.
+  seed_allocator 배분 뒤 종목 수량에 keep 을 곱해 감액한다(총 노출↓, 배분 로직 자체는 불변).
 
 [안전] 두 지표 중 하나라도 취득 실패(NXT 야간선물은 신선도 FUTURES_STALE_SEC 초과 포함)면 미개입(감액 없음).
   regime_gate 와 동일하게 '불확실하면 축소하지 않는다'.
@@ -40,8 +44,12 @@ from core.config import (
     FUTURES_GATE_ENABLED,
     FUTURES_SECTOR_GATE_ENABLED,
     FUTURES_GATE_VENUES,
-    FUTURES_FLAT_BAND,
-    FUTURES_FULL_CUT_PCT,
+    FUTURES_FLAT_Z,
+    FUTURES_FULL_Z,
+    FUTURES_SD_NQ,
+    FUTURES_SD_K200_DAY,
+    FUTURES_SD_K200_NIGHT,
+    FUTURES_SD_US_EXT,
     FUTURES_NQ_MAX_CUT,
     FUTURES_IDX_MAX_CUT,
     FUTURES_SECTOR_MIN_KEEP,
@@ -160,49 +168,62 @@ def _us_ext_signals() -> dict:
             "market_state": ms, "note": "ok"}
 
 
-def _kospi_future_pct(venue: str) -> tuple[float | None, str, str]:
-    """코스피 축 선물 — 거래소별로 그 시각 살아있는 선물. 반환 (pct, note, label).
+def _kospi_future_pct(venue: str) -> tuple[float | None, str, str, float]:
+    """코스피 축 선물 — 거래소별로 그 시각 살아있는 선물. 반환 (pct, note, label, σ).
 
     KRX(15:20): 주간선물(K200DF, market-indices 실시간) / NXT(그 외): 야간선물(DB, 신선도 체크).
+    두 세션은 변동폭이 4배 차이(σ 6.3 vs 1.6)라 강도 눈금용 σ 도 함께 돌려준다.
     """
     if venue == "krx":
         pct, note = _market_futures_pct(_K200_DAY_SYMBOL, "day")
-        return pct, note, "주간선물"
+        return pct, note, "주간선물", FUTURES_SD_K200_DAY
     pct, note = _night_future_pct()
-    return pct, note, "야간선물"
+    return pct, note, "야간선물", FUTURES_SD_K200_NIGHT
 
 
 def _futures_state(venue: str) -> dict:
-    """매수 시점 선물 상태 — {ok, nq_pct, kospi_pct, kospi_label, nq_note, kospi_note}."""
+    """매수 시점 선물 상태 — {ok, nq_pct, kospi_pct, kospi_label, kospi_sd, nq_note, kospi_note}."""
     nq, nq_note = _nq_pct()
-    kospi, kospi_note, kospi_label = _kospi_future_pct(venue)
+    kospi, kospi_note, kospi_label, kospi_sd = _kospi_future_pct(venue)
     return {
         "ok": nq is not None and kospi is not None,
-        "nq_pct": nq, "kospi_pct": kospi, "kospi_label": kospi_label,
+        "nq_pct": nq, "kospi_pct": kospi, "kospi_label": kospi_label, "kospi_sd": kospi_sd,
         "nq_note": nq_note, "kospi_note": kospi_note,
     }
 
 
-def _bearish(pct: float | None) -> bool:
-    """등락률이 보합밴드(-FUTURES_FLAT_BAND) 아래면 하락으로 센다(감액 발생 여부)."""
-    return pct is not None and pct < -FUTURES_FLAT_BAND
+def _bearish(pct: float | None, sd: float) -> bool:
+    """등락률이 보합밴드(-FLAT_Z×σ) 아래면 하락으로 센다(감액 발생 여부).
+
+    밴드가 축의 σ 에 비례하므로, 일상 변동폭이 큰 축(주간선물 σ 6.3)에서 -0.5%p 같은
+    노이즈가 '하락'으로 세지 않는다 — 절대 %p 밴드(구 0.1)에선 거의 모든 음수가 하락이었다.
+    """
+    return pct is not None and pct < -FUTURES_FLAT_Z * sd
 
 
-def _cut_intensity(pct: float | None) -> float:
-    """하락 강도 0~1 — 보합밴드(-FLAT_BAND)에서 0, -FULL_CUT_PCT 이상 급락에서 1(선형).
-    상승·보합이면 0. NQ -0.5% 같은 작은 하락은 약하게, -2%+ 급락은 최대로 반응한다."""
-    if not _bearish(pct):
+def _cut_intensity(pct: float | None, sd: float) -> float:
+    """하락 강도 0~1 — 축의 σ 로 정규화한 z=|등락|/σ 기준(FLAT_Z 에서 0, FULL_Z 에서 1, 선형).
+
+    같은 -2%p 가 축마다 다른 사건이라 절대 %p 로 재면 눈금이 어긋난다(실측 σ: 주간선물 6.3 /
+    야간선물 1.6 / NQ 0.9 → 구 FULL_CUT 2.0 은 각각 0.32σ·1.27σ·2.17σ 로 7배 차이였고,
+    주간선물 축은 하락일이면 사실상 항상 최대컷이라 -2%와 -6%를 구분하지 못했다).
+    sd<=0 이면 정규화가 불가하므로 미개입(강도 0) — '불확실하면 축소하지 않는다'.
+    """
+    if sd <= 0 or not _bearish(pct, sd):
         return 0.0
-    span = FUTURES_FULL_CUT_PCT - FUTURES_FLAT_BAND
+    span = FUTURES_FULL_Z - FUTURES_FLAT_Z
     if span <= 0:
         return 1.0
-    return min(1.0, (-pct - FUTURES_FLAT_BAND) / span)
+    return min(1.0, ((-pct / sd) - FUTURES_FLAT_Z) / span)
 
 
 def _sector_keep(sector: str | None, nq_pct: float | None, kospi_pct: float | None,
-                 us_ext: dict | None = None) -> float:
+                 kospi_sd: float, us_ext: dict | None = None) -> float:
     """섹터 클래스 민감도 × 하락 강도로 keep-factor(≤1.0, 하한 MIN_KEEP) 계산.
-    축별 감액 = MAX_CUT × 섹터민감도 × 하락강도(폭 비례). 상승/보합 축은 감액 0.
+    축별 감액 = MAX_CUT × 섹터민감도 × 하락강도(σ 정규화). 상승/보합 축은 감액 0.
+
+    kospi_sd 는 그 시각 쓰는 코스피 선물의 σ(KRX=주간 / NXT=야간) — 두 세션의 변동폭이
+    4배 차이라 같은 눈금을 쓸 수 없다.
 
     us_ext(NXT 전용, 신선할 때만 전달)가 있으면 US 장 마감 후 최근 등락 두 축을 추가로 곱한다:
       · 반도체(semis_pct): tech 클래스만(반도체 ADR/ETF 는 국내 반도체 직결) — 민감도 1.0
@@ -211,12 +232,14 @@ def _sector_keep(sector: str | None, nq_pct: float | None, kospi_pct: float | No
     cls = _class_of(sector)
     nq_s, idx_s = _SECTOR_SENSITIVITY[cls]
     keep = 1.0
-    keep *= (1.0 - FUTURES_NQ_MAX_CUT * nq_s * _cut_intensity(nq_pct))
-    keep *= (1.0 - FUTURES_IDX_MAX_CUT * idx_s * _cut_intensity(kospi_pct))
+    keep *= (1.0 - FUTURES_NQ_MAX_CUT * nq_s * _cut_intensity(nq_pct, FUTURES_SD_NQ))
+    keep *= (1.0 - FUTURES_IDX_MAX_CUT * idx_s * _cut_intensity(kospi_pct, kospi_sd))
     if us_ext:
         semis_s = 1.0 if cls == "tech" else 0.0
-        keep *= (1.0 - FUTURES_US_EXT_MAX_CUT * semis_s * _cut_intensity(us_ext.get("semis_pct")))
-        keep *= (1.0 - FUTURES_US_EXT_MAX_CUT * idx_s * _cut_intensity(us_ext.get("korea_pct")))
+        keep *= (1.0 - FUTURES_US_EXT_MAX_CUT * semis_s
+                 * _cut_intensity(us_ext.get("semis_pct"), FUTURES_SD_US_EXT))
+        keep *= (1.0 - FUTURES_US_EXT_MAX_CUT * idx_s
+                 * _cut_intensity(us_ext.get("korea_pct"), FUTURES_SD_US_EXT))
     return round(max(keep, FUTURES_SECTOR_MIN_KEEP), 3)
 
 
@@ -294,21 +317,40 @@ def sector_keep_factors(venue: str, stk_cds: list[str]) -> tuple[dict[str, float
             us_diag["applied"] = True
 
     sectors = _sectors_for(stk_cds)
-    nq, kospi = st["nq_pct"], st["kospi_pct"]
+    nq, kospi, kospi_sd = st["nq_pct"], st["kospi_pct"], st["kospi_sd"]
     factors: dict[str, float] = {}
     detail: dict[str, dict] = {}
     for code in stk_cds:
         sec = sectors.get(code)
-        keep = _sector_keep(sec, nq, kospi, us_ext)
+        keep = _sector_keep(sec, nq, kospi, kospi_sd, us_ext)
         factors[code] = keep
         detail[code] = {"sector": sec, "class": _class_of(sec), "keep": keep}
+
+    # 축별 σ·강도를 스냅샷에 남긴다 — σ 재측정으로 눈금을 다시 튜닝할 때 그날 어떤 눈금이
+    # 적용됐는지가 있어야 소급 재계산이 된다(구 payload 의 flat_band 를 대체).
+    axes = {
+        "nq": {"pct": round(nq, 3), "sd": FUTURES_SD_NQ,
+               "intensity": round(_cut_intensity(nq, FUTURES_SD_NQ), 3)},
+        "kospi": {"pct": round(kospi, 3), "sd": kospi_sd,
+                  "intensity": round(_cut_intensity(kospi, kospi_sd), 3)},
+    }
+    if us_ext:
+        axes["us_semis"] = {"pct": us_ext.get("semis_pct"), "sd": FUTURES_SD_US_EXT,
+                            "intensity": round(_cut_intensity(us_ext.get("semis_pct"),
+                                                              FUTURES_SD_US_EXT), 3)}
+        axes["us_korea"] = {"pct": us_ext.get("korea_pct"), "sd": FUTURES_SD_US_EXT,
+                            "intensity": round(_cut_intensity(us_ext.get("korea_pct"),
+                                                              FUTURES_SD_US_EXT), 3)}
 
     diag = {
         "gated": True, "venue": venue, "kospi_label": st["kospi_label"],
         "nq_pct": round(nq, 3), "kospi_pct": round(kospi, 3),
-        "nq_down": _bearish(nq), "kospi_down": _bearish(kospi),
-        "flat_band": FUTURES_FLAT_BAND, "us_ext": us_diag, "detail": detail,
+        "nq_down": _bearish(nq, FUTURES_SD_NQ), "kospi_down": _bearish(kospi, kospi_sd),
+        "flat_z": FUTURES_FLAT_Z, "full_z": FUTURES_FULL_Z, "axes": axes,
+        "us_ext": us_diag, "detail": detail,
     }
-    logger.info("선물 섹터 게이트[%s]: NQ %+.2f%%(하락=%s) / %s %+.2f%%(하락=%s) → %d종목 keep 계산",
-                venue, nq, _bearish(nq), st["kospi_label"], kospi, _bearish(kospi), len(factors))
+    logger.info("선물 섹터 게이트[%s]: NQ %+.2f%%(강도 %.2f) / %s %+.2f%%(강도 %.2f, σ %.1f)"
+                " → %d종목 keep 계산",
+                venue, nq, axes["nq"]["intensity"], st["kospi_label"], kospi,
+                axes["kospi"]["intensity"], kospi_sd, len(factors))
     return factors, diag

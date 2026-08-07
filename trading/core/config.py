@@ -125,13 +125,25 @@ FUTURES_SECTOR_GATE_ENABLED = os.getenv('FUTURES_SECTOR_GATE_ENABLED', '1') == '
 # 적용 거래소(콤마 구분). 기본 krx,nxt — 코스피 축은 그 시각 살아있는 선물을 쓴다:
 #   KRX(15:20)=주간선물(K200DF) / NXT(19:50)=야간선물(K200NF). NQ 축은 양쪽 공통.
 FUTURES_GATE_VENUES = {v.strip() for v in os.getenv('FUTURES_GATE_VENUES', 'krx,nxt').split(',') if v.strip()}
-FUTURES_FLAT_BAND = float(os.getenv('FUTURES_FLAT_BAND', '0.1'))   # ±%p 이내 등락은 보합(하락 아님)으로 취급
-# 감액을 하락 '폭'에 비례시킨다: 등락률이 -FLAT_BAND 에서 0, -FULL_CUT_PCT 이상에서 최대컷(강도 1.0).
-# 그 사이 선형. NQ -0.5% 같은 작은 하락은 살짝, -2%+ 급락은 최대컷. (이하이면 사실상 노이즈로 덜 반응)
-FUTURES_FULL_CUT_PCT = float(os.getenv('FUTURES_FULL_CUT_PCT', '2.0'))
+# ── 하락 강도 눈금: 축의 **변동성(σ) 기준**으로 잰다 ──
+# 감액은 하락 '폭'에 비례하는데, 그 폭을 %p 절대값으로 재면 축마다 다른 강도가 나온다. 축의 일상적인
+# 변동폭이 다르기 때문이다(실측 σ: 주간선물 6.3 / 야간선물 1.6 / NQ 0.9 %p — 7배 차이).
+# 그래서 강도는 z=|등락|/σ 로 재고, 모든 축이 같은 z 눈금(FLAT_Z~FULL_Z)을 공유한다.
+#   z <= FLAT_Z → 강도 0(보합·노이즈) / z >= FULL_Z → 강도 1(최대컷) / 사이는 선형.
+# σ 재측정: market_snapshot 의 k200f_day_ret·k200f_night_ret·nq_fut_ret 표준편차(US 확장 축은
+#   audit_log('futures_gate').us_ext 의 semis_pct/korea_pct). 분포가 달라졌으면 여기 값을 갱신한다.
+FUTURES_FLAT_Z = float(os.getenv('FUTURES_FLAT_Z', '0.25'))   # 이 이하 z 는 보합(하락으로 세지 않음)
+FUTURES_FULL_Z = float(os.getenv('FUTURES_FULL_Z', '2.0'))    # 이 이상 z 는 최대컷
+FUTURES_SD_NQ = float(os.getenv('FUTURES_SD_NQ', '0.9'))              # NQ 선물 일간 σ(%p)
+FUTURES_SD_K200_DAY = float(os.getenv('FUTURES_SD_K200_DAY', '6.3'))  # 코스피200 주간선물 σ(KRX 축)
+FUTURES_SD_K200_NIGHT = float(os.getenv('FUTURES_SD_K200_NIGHT', '1.6'))  # 야간선물 σ(NXT 축)
+FUTURES_SD_US_EXT = float(os.getenv('FUTURES_SD_US_EXT', '3.0'))      # US 프리마켓 확장 등락 σ
 # 축(axis)당 최대 감액률 — 해당 축이 하락이고 섹터 민감도=1.0 일 때 깎는 비율. keep = ∏(1 − MAX_CUT×민감도).
-FUTURES_NQ_MAX_CUT = float(os.getenv('FUTURES_NQ_MAX_CUT', '0.5'))    # NQ 축
-FUTURES_IDX_MAX_CUT = float(os.getenv('FUTURES_IDX_MAX_CUT', '0.5'))  # 코스피200 야간선물 축
+# NQ 축이 코스피 축보다 낮은 이유: 매수 시점 NQ '레벨'은 익일 성적 예측력이 실측되지 않았다
+#   (21거래일 t=-0.13). 예측력이 있던 건 보유 밤 NQ '실변동'(t=+3.69)인데 매수 시점엔 알 수 없다.
+#   축 자체는 갭 경로로 맞아 관찰·감액을 유지하되, 권한을 US 확장 축과 같은 수준으로 낮춰 둔다.
+FUTURES_NQ_MAX_CUT = float(os.getenv('FUTURES_NQ_MAX_CUT', '0.3'))    # NQ 축
+FUTURES_IDX_MAX_CUT = float(os.getenv('FUTURES_IDX_MAX_CUT', '0.5'))  # 코스피200 선물 축
 FUTURES_SECTOR_MIN_KEEP = float(os.getenv('FUTURES_SECTOR_MIN_KEEP', '0.25'))  # 종목당 keep 하한(과도 감액 방지)
 # 결합 하한 — 레짐(총시드)×선물(종목별 keep)이 곱해져 과도 축소되는 걸 막는다. 한 종목의 최종 배수가
 # base 등가중의 이 값 밑으로는 안 내려가게 종목 keep 을 클램프(effective_keep). 보장이 성립하려면
@@ -156,6 +168,10 @@ FUTURES_US_EXT_MAX_CUT = float(os.getenv('FUTURES_US_EXT_MAX_CUT', '0.3'))  # US
 # 읽어, 급락 밤이었으면 그날 아침 하드손절 폭을 '더 좁게'(보수적으로) 조인다. 축소 전용(절대 넓히지 않음).
 # 강도: US 오버나잇(반도체 min(SOXX,SKHY) + 한국 min(EWY,KORU/3))이 -FLAT_BAND~-FULL_CUT_PCT 하락일 때
 # 0~US_STOP_TIGHTEN_MAX %p 만큼 HARD_STOP_LOSS_PCT 를 줄이되, US_STOP_MIN_PCT 밑으로는 안 내린다.
+# 이 두 눈금은 **monitor 의 US 정규장 축 전용**이다 — futures_gate 는 축별 σ 기준(FUTURES_FLAT_Z/FULL_Z)
+# 으로 옮겼고(2026-08-07), 여기는 손절 폭을 다루는 별개 축이라 %p 절대 눈금을 그대로 쓴다.
+FUTURES_FLAT_BAND = float(os.getenv('FUTURES_FLAT_BAND', '0.1'))      # ±%p 이내는 보합(하락 아님)
+FUTURES_FULL_CUT_PCT = float(os.getenv('FUTURES_FULL_CUT_PCT', '2.0'))  # 이 이상 하락이면 강도 1.0
 US_STOP_TIGHTEN_ENABLED = os.getenv('US_STOP_TIGHTEN_ENABLED', '1') == '1'
 US_STOP_TIGHTEN_MAX = float(os.getenv('US_STOP_TIGHTEN_MAX', '1.0'))  # 최대로 좁힐 손절 폭(%p)
 US_STOP_MIN_PCT = float(os.getenv('US_STOP_MIN_PCT', '1.0'))          # 강화 후 하드손절 하한(너무 타이트 방지)

@@ -201,8 +201,8 @@ export interface MacroGateDiag {
 export interface MacroEvent {
   date: string; // YYYYMMDD (발표/결정일)
   time: string; // HH:MM (KST)
-  name: string; // "FOMC 금리결정" / "미 CPI" …
-  category: string; // rate | inflation | employment | other
+  name: string; // "FOMC 금리결정" / "미 CPI" / "엔비디아 실적" …
+  category: string; // rate | inflation | employment | earnings | tariff | other
   severity: number; // 3=중대(시드 감액 대상) / 2=주의(관찰)
 }
 

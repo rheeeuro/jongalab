@@ -258,7 +258,13 @@ CREATE TABLE IF NOT EXISTS market_snapshot (
     koru_ret        FLOAT DEFAULT NULL,   -- Direxion Korea 3x Bull(KORU) 등락률(%) — 미국 세션 한국 레버리지 프록시(2026-07-24 추가)
     skhy_ret        FLOAT DEFAULT NULL,   -- SK하이닉스 ADR(SKHY) 등락률(%) — 미국 세션 반도체 프록시(2026-07-24 추가)
     k200f_day_ret   FLOAT DEFAULT NULL,   -- 코스피200 주간선물 등락률(장 마감 기준)
-    k200f_night_ret FLOAT DEFAULT NULL    -- 야간선물 등락률(19:50 시점, kis_night_future)
+    k200f_night_ret FLOAT DEFAULT NULL,   -- 야간선물 등락률(19:50 시점, kis_night_future)
+    -- 뉴스 기반 시황 톤 — news_sector_label(관측 전용 라벨)의 당일 집계(2026-08-07 추가, sql/60).
+    -- **매수 시점(19:50)까지 라벨된 것만** 집계한다(사후 라벨로 덮지 않음 — 게이트 축 검정 전제).
+    news_macro_tone  FLOAT DEFAULT NULL,  -- 당일 거시 기사 sentiment 평균(0~100, 50=중립)
+    news_macro_cnt   INT   DEFAULT NULL,  -- 위 평균의 표본 기사 수(0이면 tone NULL)
+    news_sector_tone FLOAT DEFAULT NULL,  -- 당일 섹터 기사 sentiment 평균(0~100)
+    news_sector_cnt  INT   DEFAULT NULL   -- 위 평균의 표본 기사 수
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 전략 설정 (단일 행, JSON으로 관리)

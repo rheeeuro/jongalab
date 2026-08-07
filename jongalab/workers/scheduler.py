@@ -109,11 +109,24 @@ JOBS = [
     # 월요일 08:20 거시 이벤트 캘린더 고갈 체크(3주 내 바닥나면 exit 1 → 경보). 유예 6h.
     Job("macro_event_check", UV_RUN + ["workers/macro_event_check.py"],
         timeout=120, grace=21600, minute="20", hour="8", day_of_week="mon"),
-    # 매일 20:30 미매칭 뉴스 섹터·거시 라벨(관측 전용 표본 축적, LLM 벌크).
+    # 매일 20:30 미매칭 뉴스 섹터·거시 라벨(관측 전용 표본 축적, LLM 벌크) — **백로그 소화**.
     # **매일**인 이유: 코퍼스는 주말에도 쌓이고(실측 토·일 각 800건) 밀리면 상한에 걸린다.
     # 하루 안이면 언제 돌아도 무방(라벨은 news_at 기준이라 실행 시각과 무관) → 유예 6h.
     Job("sector_news_labeler", UV_RUN + ["workers/sector_news_labeler.py"],
         timeout=1800, grace=21600, minute="30", hour="20"),
+    # 평일 매수 직전 같은 라벨러를 **최신부터** 한 번 더 — KRX(15:20)·NXT(19:50) 판단 시점에
+    # 그날 거시·섹터 기사가 라벨을 갖고 있게 한다. 20:30 실행만 있으면 라벨이 항상 매수 뒤에
+    # 생겨 뉴스 축을 검정조차 할 수 없다. 라벨은 여전히 관측 전용(시드·점수·veto 무영향).
+    # 상한이 작은 이유: 그날 분량만 훑으면 되고 백로그 소화는 20:30 실행 몫이다.
+    # 유예 20분 — 매수 창을 넘겨 지각 실행하는 건 이 잡의 목적이 아니라 스킵이 맞다.
+    # 두 잡으로 나눈 이유: cron 필드는 교차곱이라 hour="14,19"+minute="30,0" 이면 14:00·19:30
+    # 까지 4번 돈다. 또 잡 이름이 APScheduler id 라 이름을 겹칠 수 없다.
+    Job("sector_news_labeler_pre_krx",
+        UV_RUN + ["workers/sector_news_labeler.py", "--newest-first", "--limit", "300"],
+        timeout=900, grace=1200, minute="30", hour="14", day_of_week="mon-fri"),
+    Job("sector_news_labeler_pre_nxt",
+        UV_RUN + ["workers/sector_news_labeler.py", "--newest-first", "--limit", "300"],
+        timeout=900, grace=1200, minute="0", hour="19", day_of_week="mon-fri"),
 ]
 
 

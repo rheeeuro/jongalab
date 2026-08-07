@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS macro_event (
     id INT AUTO_INCREMENT PRIMARY KEY,
     event_time DATETIME NOT NULL COMMENT '발표/결정 시각(KST)',
     name VARCHAR(100) NOT NULL,
-    category VARCHAR(20) NOT NULL COMMENT 'rate | inflation | employment | other',
+    category VARCHAR(20) NOT NULL COMMENT 'rate | inflation | employment | earnings | tariff | other',
     severity TINYINT NOT NULL COMMENT '1 참고 / 2 주의(관찰) / 3 중대(live 감액)',
     source VARCHAR(20) NOT NULL DEFAULT 'manual',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

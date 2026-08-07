@@ -8,10 +8,18 @@ from datetime import datetime
 from core.db import get_db
 
 
-def last_event_time() -> datetime | None:
-    """가장 늦은 이벤트 시각 — 캘린더가 언제까지 시드돼 있는지(고갈 임박 판정용)."""
+def last_event_time(min_severity: int = 3) -> datetime | None:
+    """가장 늦은 이벤트 시각 — 캘린더가 언제까지 시드돼 있는지(고갈 임박 판정용).
+
+    기본이 severity>=3 인 이유: 실제로 시드를 감액하는 건 sev3 뿐이라(macro_gate) 고갈 감시
+    대상도 그 계열이어야 한다. 전체를 보면 관찰 전용 sev2(PPI·해외 실적 등)가 더 멀리 시드돼
+    있을 때 sev3 고갈을 가려버린다.
+    """
     with get_db() as (conn, cursor):
-        cursor.execute("SELECT MAX(event_time) AS last_ev FROM macro_event")
+        cursor.execute(
+            "SELECT MAX(event_time) AS last_ev FROM macro_event WHERE severity >= %s",
+            (int(min_severity),),
+        )
         row = cursor.fetchone()
         return row["last_ev"] if row else None
 

@@ -5,8 +5,15 @@ reason='no_match')` 에 쌓인다(2026-07-30~). 이 워커가 그 코퍼스를 �
 `news_sector_label` 에 **섹터 + 방향** 라벨을 적재한다. 목적은 오직 검정 표본 축적이다 —
 왜 지금 소비하지 않는지(사전검정에서 섹터 뉴스 '건수' 축이 t=+0.16 무신호)는 sql/45 주석.
 
-흐름 (하루 1회, 평일 20:30):
-  1. 라벨 없는 미매칭 헤드라인을 **오래된 것부터** NEWS_SECTOR_MAX_ROWS 건 조회
+실행은 목적이 다른 두 종류다(판정·적재 경로는 하나 — 라벨 정의가 갈라지지 않게):
+  · **백로그 소화**(매일 20:30, 상한 NEWS_SECTOR_MAX_ROWS) — 오래된 것부터. 표본의 연속성이 목적.
+  · **매수 전 최신화**(평일 14:30·19:00, `--newest-first`) — 최신부터. KRX 15:20 / NXT 19:50 매수
+    판단 시점에 **그날 나온 거시·섹터 기사가 라벨을 갖고 있게** 하는 것이 목적이다. 20:30 실행만
+    있으면 라벨은 언제나 매수 뒤에 생겨, 뉴스 축은 검정조차 할 수 없다(사후에만 존재하는 데이터).
+    ⚠️ 라벨은 여전히 **관측 전용**이다 — 이 실행이 추가돼도 시드·점수·veto 는 읽지 않는다.
+
+흐름:
+  1. 라벨 없는 미매칭 헤드라인을 순서(오래된 것/최신)대로 NEWS_SECTOR_MAX_ROWS 건 조회
   2. 발행처 말머리·URL 제거 → 산업·정책·거시 어휘 프리필터(core/sector_news.is_topical)
   3. 프리필터 탈락분은 **LLM 없이 scope='무관' 으로 즉시 적재** — 안 적재하면 다음 실행에
      같은 행이 또 조회돼 백로그가 영원히 안 줄고, 프리필터 통과율도 못 잰다
@@ -19,6 +26,7 @@ reason='no_match')` 에 쌓인다(2026-07-30~). 이 워커가 그 코퍼스를 �
 수동 실행:
   uv run workers/sector_news_labeler.py --dry-run        # 프리필터 통과율만 확인(LLM 미호출)
   uv run workers/sector_news_labeler.py --limit 3000     # 백로그 일괄 소화
+  uv run workers/sector_news_labeler.py --newest-first   # 최신 기사부터(매수 전 최신화)
 """
 import argparse
 import logging
@@ -53,12 +61,18 @@ def _row(src: dict, headline: str, labels: dict | None, model: str | None) -> di
     }
 
 
-def run(limit: int, batch_size: int, dry_run: bool = False) -> int:
-    """1회 실행. 반환: 적재한 라벨 행 수(dry-run 은 0)."""
-    rows = news_sector_repo.get_unlabeled_headlines(limit)
+def run(limit: int, batch_size: int, dry_run: bool = False,
+        newest_first: bool = False) -> int:
+    """1회 실행. 반환: 적재한 라벨 행 수(dry-run 은 0).
+
+    newest_first: 최신 기사부터 라벨한다(매수 전 실행용). 기본 False = 오래된 것부터(백로그 소화).
+    """
+    rows = news_sector_repo.get_unlabeled_headlines(limit, newest_first=newest_first)
     if not rows:
         logger.info("라벨 대상 미매칭 뉴스 없음 — 종료")
         return 0
+    logger.info("조회 순서: %s (%s ~ %s)", "최신부터" if newest_first else "오래된 것부터",
+                rows[0]["created_at"], rows[-1]["created_at"])
 
     topical: list[dict] = []      # LLM 판정 대상 {idx, headline, src}
     skipped: list[dict] = []      # 프리필터 탈락 저장 행
@@ -110,13 +124,15 @@ def main() -> int:
                         help=f"LLM 1회 호출 헤드라인 수 (기본 {NEWS_SECTOR_BATCH_SIZE})")
     parser.add_argument("--dry-run", action="store_true",
                         help="프리필터 통과율만 확인(LLM 미호출·미적재)")
+    parser.add_argument("--newest-first", action="store_true",
+                        help="최신 기사부터 라벨(매수 전 실행용). 기본은 오래된 것부터(백로그 소화)")
     args = parser.parse_args()
 
     if not NEWS_SECTOR_ENABLED:
         logger.info("NEWS_SECTOR_ENABLED=0 — 비활성")
         return 0
 
-    run(args.limit, args.batch_size, args.dry_run)
+    run(args.limit, args.batch_size, args.dry_run, args.newest_first)
     return 0
 
 

@@ -39,7 +39,7 @@ jongalab/
 | `prompts.py` | 콘텐츠 분석 프롬프트 ⚠️민감/가드 | 구조화 출력(sentiment_score·tldr·tags·summary·stocks·strategy·related_companies) |
 | `kiwoom_client.py` | 키움 데이터 서버(`:8001`) HTTP 클라이언트 | 기본/상세/수급/차트/주도주/분봉 |
 | `kis_client.py` | 한국투자증권 Open API | 코스피200 선물 시세·WS 키. 원본은 `inquire_futures_daily_ohlc`(일봉)·`inquire_futures_minute_ohlc`(**당일** 1분봉, ~120봉/페이지라 되짚어 페이지네이션하고 당일 시초를 넘으면 멈춘다) |
-| `market_data.py` | 통합 시세 조회 | 국내→키움, 선물→KIS, 지수/원자재/환율→yfinance. `fetch_index_ohlc()` 분봉 OHLCV(프리·애프터 포함, 전 심볼 KST 변환) · `/api/market-index-history/{symbol}?range=` 는 `1d`→(1d,1m)·`5d`→(5d,5m)·`1mo`→(1mo,30m). **코스피200 선물(K200NF·K200DF)은 yfinance 에 없어** `_kospi200_futures_candles()` 로 조립하고 두 카드가 **하나의 연속 시계열**을 공유한다(`1d`=야간세션 DB + 오늘 주간세션 KIS 분봉, 그 외=KIS 일봉). 30s TTL 캐시(빈 결과는 캐시 안 함). `fetch_edge_market_snapshot()` 시장 스냅샷 1행 · `fetch_us_extended()`(→`/api/us-extended`) US 프록시 정규장+프리/애프터(60s 캐시) |
+| `market_data.py` | 통합 시세 조회 | 국내→키움, 선물→KIS, 지수/원자재/환율→yfinance. `fetch_index_ohlc()` 분봉 OHLCV(프리·애프터 포함, 전 심볼 KST 변환) · `/api/market-index-history/{symbol}?range=` 는 `1d`→(1d,1m)·`5d`→(5d,5m)·`1mo`→(1mo,30m). **코스피200 선물(K200NF·K200DF)은 yfinance 에 없어** `_kospi200_futures_candles()` 로 조립하고 두 카드가 **하나의 연속 시계열**을 공유한다(`1d`=야간세션 DB + 오늘 주간세션 KIS 분봉, 그 외=KIS 일봉). 30s TTL 캐시(빈 결과는 캐시 안 함). `fetch_edge_market_snapshot()` 시장 스냅샷 1행(지수·선물·프록시 + `_news_tone_today()` 로 당일 거시·섹터 뉴스 톤 — 19:50 호출이라 **매수 시점에 알 수 있었던 값**이고 사후 라벨로 덮지 않는다) · `fetch_us_extended()`(→`/api/us-extended`) US 프록시 정규장+프리/애프터(60s 캐시) |
 | `sector_resolver.py` | 티커→섹터 해석 | ticker_dictionary 캐시, TTL 1년 |
 | `ticker.py` | 콘텐츠 분석 기업명 → 종목코드 해석(`get_tickers`) | **`ticker_dictionary` ACTIVE 행만 근거**로 삼는 인메모리 인덱스(TTL 1시간). 매칭은 공백·기호·대소문자를 무시하는 정규화 비교까지만(`한미 반도체`→`한미반도체`) — 웹 검색·부분일치 추측 없음. 사전에 없는 이름(해외기업·비상장·제품명·업종어)은 **국장 코드가 없으므로 제외**하고 로그만 남긴다(그 이름뿐인 콘텐츠는 `should_save_content(allow_no_ticker=False)` 에서 스킵). 별칭(`LG엔솔`·`네이버`)은 관리자가 사전에서 **ACTIVE 로 승인**해야 잡힌다 — `PENDING` 은 해석에 쓰지 않는다. 반환 `name` 은 입력 이름 그대로(`save_content_analysis` 가 `stocks[].name` 에 티커를 붙이는 키) |
 | `news_matcher.py` | 뉴스 헤드라인 → 종목 **사전매칭**(LLM 없음) | ticker_dictionary(ACTIVE) 인메모리 매처. 경계 룩어라운드 + `[]`·`【】`·`()` 제거로 오탐 억제. **적재는 텔레그램 경로 전용**(네이버는 종목코드 조회). `mentions_ticker(text, ticker)` 는 반대 방향 — 종목이 정해진 기사의 **제목 귀속 확인**용(재료 판정 코퍼스 선별) |
@@ -133,8 +133,8 @@ jongalab/
 | ⏰ `after_hours_labels` | 평일 17:50 | 유니버스 전체에 **시간외 반응 + 리스크 라벨** UPDATE(관측 컬럼, 점수·매매 무영향). ① `ah_price`·`ah_flu_rt`·`ah_volume`(세션 16~18시 **중**에만 값이 살아 있어 스냅샷·과거 백필 불가) + 파생 `ah_react` ② 리스크(전부 **T-1 확정치** = 누수 없음): `credit_remn_rt`·`short_wght`/`_5d`·`lend_remn`/`lend_irds_5d` ③ `exec_str`/`_5d` ④ `market_snapshot.ah_up3_cnt`/`ah_dn3_cnt` |
 | ⏰ `rule_evaluator` | 평일 09:40 | **Edge Ledger 일별 채점(2-pass)**. pass1: **retired 포함 전 rule** 을 유니버스+`market_snapshot` 에 적용 → `exit_label` 결과 → `mean_net = 평균 − EDGE_COST_PCT` → `edge_rule_daily` upsert(catch-up: 라벨 미도래는 재시도, 14일 초과 시 n=0 sentinel 종결) + `registered_at` 이후 표본만으로 stats 재계산(`n_days`·`mean_net_days`(일 등가중, 쏠림 진단)·`t_days`·초과 계열·화면용 `promo_eligible`/`promo_blockers`/`promo_policy`/`decision_stage`). 조건 판정은 **서버만** 하고 화면은 렌더링만 한다. pass2: stats 가 신선해진 뒤 `edge_policy` 게이트 → 텔레그램 알림 3종(승격 후보·집행 설계 필요는 **판정일에만**, **강등 검토는 매 평일** 반복). 강등 알림엔 두 가중을 병기하고 부호가 갈리면 ⚠️쏠림 표시. 전이는 관리자 API 수동 |
 | ⏰ `weight_tuner` | 토 08:00 | 지난주 실현손익(`SCORE_LOGIC_MIN_DATE`=2026-07-07 이전 주는 스킵) → GPT 가중치 제안 → backtest 검증: IMPROVES=pending(승인 대상) / 그 외=archived(비적용·표시용) + [건강지표] 로깅(스프레드·점수↔손익 상관 — **양수 전환 시 튜닝 재개 신호**) |
-| ⏰ `macro_event_check` | 월 08:20 | `macro_event` 캘린더 고갈 감시 — 마지막 이벤트가 3주 내면 exit 1 + 경보(시드를 잊으면 게이트가 '이벤트 없음'으로 조용히 무력화된다). 연말마다 다음 해 일정 수동 시드 |
-| ⏰ `sector_news_labeler` | 매일 20:30 | 미매칭 뉴스(`content_skip` no_match) → `news_sector_label`. **관측 전용.** 오래된 것부터 읽어 프리필터 → 통과분만 벌크 판정. **프리필터 탈락분도 `scope='무관'` 으로 적재**(안 남기면 같은 행이 계속 조회돼 백로그가 안 줄고 통과율도 못 잰다). LLM 실패 배치는 적재하지 않고 다음 실행 재시도. 매일인 이유는 코퍼스가 주말에도 쌓이기 때문. `--limit`/`--batch-size`/`--dry-run` |
+| ⏰ `macro_event_check` | 월 08:20 | `macro_event` 캘린더 고갈 감시 — **severity≥3**(실제로 감액하는 계열) 마지막 이벤트가 3주 내면 exit 1 + 경보(시드를 잊으면 게이트가 '이벤트 없음'으로 조용히 무력화된다). sev2 는 감액에 안 쓰여 감시 대상이 아니다(전체를 보면 더 멀리 시드된 sev2 가 sev3 고갈을 가린다). 연말마다 다음 해 일정 수동 시드 |
+| ⏰ `sector_news_labeler` | 매일 20:30(백로그) + 평일 14:30·19:00(`--newest-first`) | 미매칭 뉴스(`content_skip` no_match) → `news_sector_label`. **관측 전용.** 프리필터 → 통과분만 벌크 판정. **프리필터 탈락분도 `scope='무관'` 으로 적재**(안 남기면 같은 행이 계속 조회돼 백로그가 안 줄고 통과율도 못 잰다). LLM 실패 배치는 적재하지 않고 다음 실행 재시도. **실행 두 종류**: 20:30 은 **오래된 것부터**(백로그 소화 — 표본의 연속성이 목적, 매일인 이유는 코퍼스가 주말에도 쌓이기 때문) / 14:30·19:00 은 **최신부터**(`sector_news_labeler_pre_krx`·`_pre_nxt`, limit 300) — KRX 15:20·NXT 19:50 매수 판단 시점에 그날 거시·섹터 기사가 라벨을 갖고 있게 한다. 20:30 만 있으면 라벨이 언제나 매수 뒤에 생겨 뉴스 축을 검정조차 할 수 없다. `--limit`/`--batch-size`/`--dry-run`/`--newest-first` |
 | `kis_night_futures_ws` | 평일 18:00~새벽 | KIS WS 야간선물 체결 → ① `kis_night_future` 단일행 현재가(2초, trading futures_gate 소비) ② `kis_night_future_bar` **1분봉 이력**(전 체결 집계 — 샘플링하면 고저가 깎인다). 체결 없는 분은 봉을 만들지 않는다. 세션 종료·끊김 시 진행 중 봉 flush, 분봉 저장 실패는 스트림을 죽이지 않는다 |
 | (토큰) `kis_token_refresh` | 매일 07:00 | 키움+KIS 토큰 갱신 |
 
@@ -168,10 +168,13 @@ closing_bet (평일 08:30~20시, 30분)
   ├─► daily_stock_report  (유니버스 전체 = 연구 표본. 기본 조회는 selected=1, 연구는 include_unselected)
   └─► trade_signal (pending, selected 만) ─► trading 도메인이 집행
 
+14:30 sector_news_labeler(최신) ─► KRX 매수 전 그날 거시·섹터 라벨 최신화(관측 전용)
 15:20 gap_check --base-krx     ─► KRX 기준가(state)
 17:50 after_hours_labels       ─► 시간외·리스크 라벨 + market_snapshot breadth
+19:00 sector_news_labeler(최신) ─► NXT 매수 전 라벨 최신화
 19:50 gap_check --base-nxt     ─► NXT 기준가 + 유니버스 NXT 스냅샷 + market_snapshot 1행
-20:30 sector_news_labeler      ─► 미매칭 뉴스 섹터·거시 라벨(관측 전용)
+                                 (뉴스 톤 `news_macro_tone`/`news_sector_tone` 도 이때 = 매수 시점 값)
+20:30 sector_news_labeler      ─► 미매칭 뉴스 섹터·거시 라벨 백로그 소화(관측 전용)
 익일 08:03/09:03 --check-*     ─► gap_* 확정 (NXT: 19:50→08:03 / KRX: 15:20→09:03)
 익일 08:06 --label-nxt         ─► nxt_open_price·nxt_open_ret (연구 라벨, 실매매 경로와 분리)
 익일 09:30 outcome_backfill    ─► 일봉 라벨 4종 + exec_leg_ret/venue + 재료 가격 채점

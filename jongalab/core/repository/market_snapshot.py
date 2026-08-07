@@ -11,6 +11,8 @@ _FIELDS = (
     "kospi_ret", "kosdaq_ret", "nq_fut_ret", "spx_ret", "sox_ret",
     "vix", "usdkrw_ret", "wti_ret", "ewy_ret", "koru_ret", "skhy_ret",
     "k200f_day_ret", "k200f_night_ret",
+    # 뉴스 기반 시황 톤(연구용) — 값의 시점 의미는 sql/60 주석 참고.
+    "news_macro_tone", "news_macro_cnt", "news_sector_tone", "news_sector_cnt",
 )
 
 
