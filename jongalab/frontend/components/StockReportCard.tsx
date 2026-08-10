@@ -100,6 +100,24 @@ export function StockReportCard({
         ? "rounded-2xl bg-rose-50/60 shadow-sm ring-1 ring-rose-200/60 dark:bg-rose-950/20 dark:shadow-none dark:ring-rose-900/40"
         : "rounded-2xl bg-blue-50/60 shadow-sm ring-1 ring-blue-200/60 dark:bg-blue-950/20 dark:shadow-none dark:ring-blue-900/40";
 
+  /** 1등 카드의 **데스크탑 전용** 글자 확대.
+   *
+   * `HERO_ROW_H`(224px) 하한 때문에 lg 이상에서 카드가 자연 높이(≈164px)보다 커지고 아래가
+   * 비었다 → 같은 내용의 글자를 키워 그 높이를 쓴다. 데이터를 더 넣지 않는 이유는 수급 표·
+   * 스파크라인 두 안이 이미 기각됐기 때문이다(docs/history/frontend-ui.md 2026-08-10 8차-b).
+   * ⚠️ 확대 후에도 **자연 높이가 하한 안**(계산 ≈190px)이어야 성적 카드와의 상단 정렬이 유지된다.
+   * 모바일은 하한이 없어(`lg:` 한정) 여백이 안 생기므로 원래 크기 그대로다. */
+  const big = {
+    name: featured ? "text-lg lg:text-2xl" : "",
+    sub: featured ? "lg:text-sm" : "",
+    price: featured ? "lg:text-xl" : "",
+    unit: featured ? "lg:text-xs" : "",
+    change: featured ? "lg:text-sm" : "",
+    reason: featured ? "lg:text-sm" : "",
+    score: featured ? "lg:text-lg" : "",
+    pill: featured ? "lg:text-xs" : "",
+  };
+
   // 근거는 한 줄에 최대 2개까지만 — 나머지는 '외 N' 으로 접어 카드 높이를 고정한다.
   const shownRules = ruleTitles.slice(0, 2);
   const hiddenRuleCount = ruleTitles.length - shownRules.length;
@@ -116,7 +134,7 @@ export function StockReportCard({
       href={`/reports/${date}/${r.stock_code}`}
       className={`group relative flex flex-col overflow-hidden p-4 pl-5 ${gapTone} ${CARD_HOVER} ${
         featured
-          ? `ring-2 ring-indigo-300 col-span-full ${HERO_ROW_H} dark:ring-indigo-500/40`
+          ? `ring-2 ring-indigo-300 col-span-full lg:justify-between ${HERO_ROW_H} dark:ring-indigo-500/40`
           : ""
       }`}
     >
@@ -126,8 +144,8 @@ export function StockReportCard({
       />
 
       {featured && (
-        <p className="mb-2 inline-flex w-fit items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-extrabold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
-          <FlaskConical className="h-3 w-3" />
+        <p className="mb-2 inline-flex w-fit items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-extrabold text-indigo-700 lg:text-xs dark:bg-indigo-950/50 dark:text-indigo-300">
+          <FlaskConical className="h-3 w-3 lg:h-3.5 lg:w-3.5" />
           규칙 {ruleTitles.length}개가 겹쳐 고른 종목
         </p>
       )}
@@ -137,9 +155,7 @@ export function StockReportCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span
-              className={`min-w-0 truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400 ${
-                featured ? "text-lg" : ""
-              }`}
+              className={`min-w-0 truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400 ${big.name}`}
             >
               {r.stock_name}
             </span>
@@ -152,7 +168,9 @@ export function StockReportCard({
               </span>
             )}
           </div>
-          <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+          <p
+            className={`mt-1 truncate text-xs text-slate-500 dark:text-slate-400 ${big.sub}`}
+          >
             {r.sector || "기타"} ·{" "}
             {(r.trading_value / 1e8).toLocaleString("ko-KR", {
               maximumFractionDigits: 0,
@@ -161,15 +179,19 @@ export function StockReportCard({
           </p>
         </div>
         <div className="shrink-0 text-right tabular-nums">
-          <div className="text-sm font-extrabold text-slate-900 dark:text-slate-100">
+          <div
+            className={`text-sm font-extrabold text-slate-900 dark:text-slate-100 ${big.price}`}
+          >
             {r.current_price.toLocaleString("ko-KR")}
-            <span className="ml-0.5 text-[10px] font-bold text-slate-400">
+            <span
+              className={`ml-0.5 text-[10px] font-bold text-slate-400 ${big.unit}`}
+            >
               원
             </span>
           </div>
           {/* 당일 등락률 — 카드마다 값이 다른 유일한 큰 색면이라 카드 구분의 1차 단서다 */}
           <div
-            className={`mt-1 inline-block rounded-md px-1.5 py-0.5 text-xs font-extrabold ${
+            className={`mt-1 inline-block rounded-md px-1.5 py-0.5 text-xs font-extrabold ${big.change} ${
               isUp
                 ? "bg-rose-100/80 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300"
                 : isDown
@@ -187,34 +209,46 @@ export function StockReportCard({
           홈에서 카드 10장이 세로로 쌓이면 그만큼 시장 지표가 화면 밖으로 밀렸다.
           플라스크 아이콘이 '선정 근거'를 대신 표시하고, 전체 규칙은 title 에 남긴다. */}
       <div className="mt-2.5 flex items-center gap-1.5">
-        <FlaskConical className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
+        <FlaskConical
+          className={`h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500 ${
+            featured ? "lg:h-4 lg:w-4" : ""
+          }`}
+        />
         <p
           title={ruleTitles.length > 0 ? ruleTitles.join(", ") : undefined}
-          className="min-w-0 flex-1 truncate text-xs font-bold text-slate-700 dark:text-slate-200"
+          className={`min-w-0 flex-1 truncate text-xs font-bold text-slate-700 dark:text-slate-200 ${big.reason}`}
         >
           {reasonText}
         </p>
         <span className="shrink-0 rounded-lg bg-indigo-50 px-1.5 py-0.5 tabular-nums dark:bg-indigo-950/50">
-          <span className="text-sm font-extrabold text-indigo-700 dark:text-indigo-300">
+          <span
+            className={`text-sm font-extrabold text-indigo-700 dark:text-indigo-300 ${big.score}`}
+          >
             {r.score.toFixed(0)}
           </span>
-          <span className="text-[10px] font-bold text-indigo-400 dark:text-indigo-400/70">
+          <span
+            className={`text-[10px] font-bold text-indigo-400 dark:text-indigo-400/70 ${big.unit}`}
+          >
             점
           </span>
         </span>
       </div>
 
       {/* 배지 + 다음날 아침 갭 결과(NXT·KRX·최종) — 한 줄에 묶는다 */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-bold">
+      <div
+        className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-bold ${big.pill}`}
+      >
         <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${big.pill} ${
             GRADE_TONE[r.supply_grade] || GRADE_TONE.D
           }`}
         >
           수급 {r.supply_grade}
         </span>
         {(r.news_count ?? 0) > 0 && (
-          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+          <span
+            className={`shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 ${big.pill}`}
+          >
             뉴스 {r.news_count}
           </span>
         )}
@@ -223,7 +257,7 @@ export function StockReportCard({
         {r.gap_ex_rights_ratio != null && (
           <span
             title="무상증자 권리락일입니다 — 배정비율만큼 낮아진 권리락 기준가 대비 등락률입니다"
-            className="shrink-0 rounded-full bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900 dark:bg-amber-900/50 dark:text-amber-200"
+            className={`shrink-0 rounded-full bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900 dark:bg-amber-900/50 dark:text-amber-200 ${big.pill}`}
           >
             권리락
           </span>
