@@ -1,7 +1,9 @@
 """seed_allocator.allocate 골든 테스트 — 시드 배분(자금 분배)의 핵심 불변식 고정.
 
 불변식(확신도 등가중):
-  - 점수 상위 TOP_N(=10) 개만 배분 대상 (그 밖은 0주) — 선정 컷은 점수순
+  - 상위 TOP_N(=10) 개만 배분 대상 (그 밖은 0주) — 선정 컷은 **표 수 내림차순 → 점수 내림차순**.
+    사이징이 표 비례라 컷도 같은 자를 쓴다(표 많은 종목을 컷에서 떨어뜨리면 두 단계가 상충).
+    `conviction` 이 없거나 CONVICTION_MAX_MULT=1.0 이면 전원 1표 → 종전의 점수순 컷과 동일
   - 등가중 단위는 '종목'이 아니라 **선정 근거 1표**(`conviction`) — 표 비례 목표금액
     (seed×w/Σw) → 정수 주 내림(1차). `conviction` 없으면 전원 1표 = 종전 등가중과 동일.
     점수 '크기' 는 여전히 사이징에 무관(익일 손익 예측 실패 → 점수비례 집중 제거)
@@ -61,12 +63,37 @@ def test_equal_weight_ignores_score():
 
 
 def test_allocates_only_top_10_by_score():
-    # 11개 후보 → 점수 최하위 1개는 시드가 충분해도 0주(상위 10개만 배분). 선정 컷은 점수순 유지.
+    # 11개 후보 → 점수 최하위 1개는 시드가 충분해도 0주(상위 10개만 배분).
+    # conviction 이 없으면 전원 1표라 컷은 점수순으로 떨어진다.
     cands = [{"stk_cd": f"S{i}", "score": 100 - i, "price": 1000} for i in range(11)]
     allocate(10_000_000, cands)
     ranked = sorted(cands, key=lambda c: c["score"], reverse=True)
     assert all(c["shares"] > 0 for c in ranked[:10])
     assert ranked[10]["shares"] == 0 and ranked[10]["cost"] == 0
+
+
+def test_cut_prefers_conviction_over_score():
+    # 점수 꼴찌라도 표가 많으면 컷에 남고, 표 1개짜리 중 점수 최하위가 대신 떨어진다.
+    cands = [{"stk_cd": f"S{i}", "score": 100 - i, "price": 1000, "conviction": 1}
+             for i in range(11)]
+    cands[10]["conviction"] = 3            # 점수 최하위(90) + 표 3개
+    allocate(10_000_000, cands)
+    by_code = {c["stk_cd"]: c for c in cands}
+    assert by_code["S10"]["shares"] > 0    # 표가 많아 컷 통과
+    assert by_code["S9"]["shares"] == 0    # 표 1개 중 점수 최하위가 밀려남
+    assert by_code["S9"]["cost"] == 0
+
+
+def test_cut_falls_back_to_score_when_conviction_off(monkeypatch):
+    # CONVICTION_MAX_MULT=1.0(확신도 off) 이면 전원 1표 → 컷도 종전 점수순으로 되돌아간다.
+    monkeypatch.setattr(seed_allocator, "CONVICTION_MAX_MULT", 1.0)
+    cands = [{"stk_cd": f"S{i}", "score": 100 - i, "price": 1000, "conviction": 1}
+             for i in range(11)]
+    cands[10]["conviction"] = 3
+    allocate(10_000_000, cands)
+    by_code = {c["stk_cd"]: c for c in cands}
+    assert by_code["S10"]["shares"] == 0   # 표를 무시하므로 점수 최하위가 떨어진다
+    assert by_code["S9"]["shares"] > 0
 
 
 def test_leftover_greedy_reinvest_maximizes_utilization():

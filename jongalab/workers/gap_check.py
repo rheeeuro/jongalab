@@ -118,6 +118,8 @@ def _row_meta(r: dict) -> dict:
         "name": r["stock_name"],
         "code": r["stock_code"].split(".")[0],
         "score": int(r.get("score") or 0),
+        # 알림 정렬 1차 기준(화면 목록과 같은 순서). 표시는 하지 않는다.
+        "rules": len([x for x in (r.get("rule_names") or "").split(",") if x]),
     }
 
 

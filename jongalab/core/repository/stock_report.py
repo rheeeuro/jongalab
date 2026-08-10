@@ -5,6 +5,14 @@ from decimal import Decimal
 
 from core.db import get_db
 
+# 선정 근거(rule_names, 콤마 목록)에 걸린 **규칙 수**를 세는 SQL 식. 값이 없으면 0.
+# 추천 목록의 1차 정렬 기준이다 — 최근 60일 실측에서 그날 규칙 최다 그룹이 같은 날 나머지보다
+# 나았다(평균 갭 +1.85% vs +1.49%, 승률 73.1% vs 61.1%). 근거는 docs/history/frontend-ui.md.
+RULE_COUNT_SQL = (
+    "(CASE WHEN rule_names IS NULL OR rule_names = '' THEN 0 "
+    "ELSE LENGTH(rule_names) - LENGTH(REPLACE(rule_names, ',', '')) + 1 END)"
+)
+
 
 # 시간 창에서만 수집되는 스냅샷 캡처 컬럼의 upsert 정책 (2026-07-19, 프로그램 오전/오후 분해):
 #  · prog_am_net — 정오 창(12:00~12:45) 실행의 첫 캡처를 보존(first-write-wins).
@@ -258,17 +266,23 @@ def get_stock_report_history(stock_code: str, days: int = 3) -> list[dict]:
 
 
 def get_stock_reports_by_date(report_date: str, include_unselected: bool = False) -> list[dict]:
-    """특정 날짜의 종목 리포트 목록 (점수순).
+    """특정 날짜의 종목 리포트 목록.
 
-    기본은 selected=1(실매매 핸드오프된 상위 종목)만 — 기존 소비자(대시보드·gap_check)의
-    동작을 그대로 유지한다. include_unselected=True 면 비선정 후보까지 유니버스 전체(엣지 연구용).
+    기본은 selected=1(실매매 핸드오프된 상위 종목)만 — 정렬은 **규칙 수 내림차순 → rank_no
+    오름차순(=점수순)**이다. 화면·텔레그램이 이 순서를 그대로 쓴다(근거 산출).
+    include_unselected=True 면 비선정 후보까지 유니버스 전체(엣지 연구용)이고, 이때는
+    `rule_names` 가 선정 종목에만 있어 정렬 기준이 되지 못하므로 **rank_no 순을 유지**한다.
+
+    ⚠️ `gap_check` 는 이 결과를 `[:TOP_N]`(10) 으로 자른다. selected 가 10을 넘는 날에는
+    정렬이 곧 라벨 대상이 되는데, 실측상 90일 중 10 초과는 2026-04-09(18종목) 하루뿐이다.
     """
     cond = "" if include_unselected else " AND selected = 1"
+    order = "rank_no ASC" if include_unselected else f"{RULE_COUNT_SQL} DESC, rank_no ASC"
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""SELECT * FROM daily_stock_report
                WHERE report_date = %s{cond}
-               ORDER BY rank_no ASC""",
+               ORDER BY {order}""",
             (report_date,),
         )
         results = cursor.fetchall()
@@ -429,10 +443,17 @@ def get_gap_stats_by_dates(dates: list[str]) -> dict[str, dict]:
 
 
 def get_top_picks_by_dates(dates: list[str]) -> dict[str, dict]:
-    """여러 날짜의 1등 종목(rank_no=1)을 한 번에 조회.
+    """여러 날짜의 **대표 추천 종목**을 한 번에 조회 (아카이브 캘린더용).
+
+    대표 = `selected=1` 중 **규칙 수 내림차순 → rank_no 오름차순** 첫 종목. 화면 목록의
+    맨 앞 카드와 같은 종목이다.
+
+    ⚠️ 예전에는 `WHERE rank_no = 1`(selected 필터 없음)이라 **그날 유니버스 점수 1위**를 줬고,
+    그 종목이 추천에 안 든 날이 최근 30거래일 중 6일(2026-08-06·08-07·08-10 은 3일 연속)이었다.
+    캘린더가 추천하지 않은 종목을 그날 대표로 보여주던 문제라 선정 종목 안에서 고르게 바꿨다.
 
     반환: {date: {stock_code, stock_name, score}}
-      - 해당 날짜 리포트가 없으면 키 없음.
+      - 해당 날짜에 선정 종목이 없으면 키 없음.
     """
     if not dates:
         return {}
@@ -440,10 +461,16 @@ def get_top_picks_by_dates(dates: list[str]) -> dict[str, dict]:
     placeholders = ",".join(["%s"] * len(dates))
     with get_db() as (conn, cursor):
         cursor.execute(
-            f"""SELECT report_date, stock_code, stock_name, score
-                  FROM daily_stock_report
-                 WHERE report_date IN ({placeholders})
-                   AND rank_no = 1""",
+            f"""SELECT report_date, stock_code, stock_name, score FROM (
+                    SELECT report_date, stock_code, stock_name, score,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY report_date
+                               ORDER BY {RULE_COUNT_SQL} DESC, rank_no ASC
+                           ) AS rn
+                      FROM daily_stock_report
+                     WHERE report_date IN ({placeholders})
+                       AND selected = 1
+                ) t WHERE rn = 1""",
             tuple(dates),
         )
         rows = cursor.fetchall()

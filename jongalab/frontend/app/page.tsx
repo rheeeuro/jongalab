@@ -120,8 +120,11 @@ export default async function HomePage() {
 
         {/* 데스크탑(lg+)은 좌 추천 / 우 사이드바 2단. 모바일은 DOM 순서 그대로
             성적 → 추천 → 뉴스 로 쌓인다(사이드바를 통째로 위에 두면 픽이 밀린다).
-            그래서 3개 자식을 명시적 그리드 좌표로 배치한다. */}
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start lg:gap-6">
+            그래서 3개 자식을 명시적 그리드 좌표로 배치한다.
+            `grid-rows-[auto_1fr]` 가 필수다 — 두 행이 다 auto 면 2행을 걸친 추천 목록의
+            높이가 **두 행에 절반씩 나뉘어** 1행이 성적 카드보다 훨씬 커지고, 성적과 뉴스
+            사이에 빈 공간이 생긴다. 2행을 flexible 로 두면 남는 높이를 2행이 흡수한다. */}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-6">
           <div className="lg:col-start-2 lg:row-start-1">
             <RecordStrip summary={record} />
           </div>

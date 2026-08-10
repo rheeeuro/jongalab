@@ -15,12 +15,16 @@ import {
 
 const LS_KEY_SEED = "seedAllocator_seed";
 const PREVIEW_COUNT = 8;
-// 배분 대상 후보 수 상한 — 점수 상위 N개만 매수 (trading/core/seed_allocator.py 와 동일)
+// 아래 상수는 전부 `trading/core/seed_allocator.py` 의 **기본값 미러**다.
+// 프론트는 trading .env 를 못 읽으므로 기본값으로 고정한다 — 실거래가 .env 로 튜닝돼 있으면
+// 그만큼 미리보기와 달라진다(이 미리보기는 '기본 설정에서의 수량'이다).
 const TOP_N = 10;
-// 종목당 최대 투입 비율 — 미리보기용 기본값.
-// 실거래(trading)는 .env(SEED_MAX_NAME_PCT)로 튜닝하며,
-// 이 미리보기는 백엔드 기본값과 동일한 값으로 고정한다(프론트는 trading .env 미접근).
-const MAX_NAME_PCT = 0.5;
+// 종목당 최대 투입 비율(SEED_MAX_NAME_PCT). 2026-07-10 하한가 사건으로 0.5 → 0.25.
+const MAX_NAME_PCT = 0.25;
+// 확신도(선정 근거 표) 가중 상한(SEED_CONVICTION_MAX_MULT). 1.0 이면 순수 등가중.
+const CONVICTION_MAX_MULT = 3;
+// 고가주 첫 1주는 캡을 넘어도 cap×이 배수 이내면 허용(1주가 최소 매매 단위라서).
+const FIRST_SHARE_CAP_MULT = 2;
 
 const QUICK_AMOUNTS = [
   { label: "100만", value: 1_000_000 },
@@ -28,6 +32,25 @@ const QUICK_AMOUNTS = [
   { label: "1,000만", value: 10_000_000 },
   { label: "5,000만", value: 50_000_000 },
 ];
+
+/** 선정 근거 표 수 — `trading/core/seed_allocator.conviction_from_signal` 미러.
+ *  매칭 규칙 수(중복 태그는 1표) + 점수 top-N 에도 들었으면 1표, 최소 1.
+ *  `scoreTopN` 은 그날 선정 종목 수(백엔드 `get_selected_count` 와 같은 값). */
+function votes(r: StockReport, scoreTopN: number): number {
+  const tags = new Set(
+    (r.rule_names ?? "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean),
+  );
+  const n = tags.size + (r.rank_no > 0 && r.rank_no <= scoreTopN ? 1 : 0);
+  return Math.max(1, n);
+}
+
+/** 표 수를 1 ~ CONVICTION_MAX_MULT 로 클램프한 가중치 (`seed_allocator._weight` 미러). */
+function weightOf(r: StockReport, scoreTopN: number): number {
+  return Math.min(votes(r, scoreTopN), Math.max(CONVICTION_MAX_MULT, 1));
+}
 
 type Allocation = {
   report: StockReport;
@@ -56,46 +79,62 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
   const allocations = useMemo<Allocation[]>(() => {
     if (seedNum <= 0 || reports.length === 0) return [];
 
-    // 유효가(>0) 후보를 점수순으로 정렬해 상위 TOP_N 개만 배분 대상으로 삼는다(선정 컷).
+    // 그날 선정 종목 수 = 확신도의 '점수 top-N' 판정 N (백엔드 get_selected_count 와 같은 값).
+    const scoreTopN = reports.length;
+
+    // 유효가(>0) 후보를 **표 수 내림차순 → 점수 내림차순**으로 정렬해 상위 TOP_N 개만
+    // 배분 대상으로 삼는다(선정 컷).
     const ranked = reports
       .filter((r) => r.current_price > 0)
-      .sort((a, b) => Math.max(b.score, 0) - Math.max(a.score, 0))
+      .sort(
+        (a, b) =>
+          weightOf(b, scoreTopN) - weightOf(a, scoreTopN) ||
+          Math.max(b.score, 0) - Math.max(a.score, 0),
+      )
       .slice(0, TOP_N);
 
-    // 등가중: 선정된 종목엔 동일 목표금액. (점수는 선정 컷에만 쓰고 사이징엔 안 씀 —
-    // 실거래상 점수가 익일 청산 손익을 예측 못 해 점수비례 집중을 제거했다. trading/core/seed_allocator.py 와 동일)
+    // 등가중의 단위는 '종목'이 아니라 **선정 근거 1표**다 — 목표금액 = seed × 표/Σ표.
+    // 점수 '크기' tilt 는 쓰지 않는다(익일 손익 예측 실패로 제거됨). 표가 전원 1이면 등가중.
     const items = ranked.map((r) => ({
       report: r,
       price: r.current_price,
+      w: weightOf(r, scoreTopN),
       shares: 0,
       cost: 0,
     }));
     const n = items.length;
     if (n === 0) return [];
+    const wsum = items.reduce((s, it) => s + it.w, 0);
 
     // 종목당 최대 투입금액 — 시드 대비 비율 캡(이 금액을 넘게는 배분하지 않는다).
+    // 확신도가 높아도 이 캡은 그대로다 — 하한가 1방 손실 봉쇄는 캡만이 하는 일이다.
     const cap = seedNum * MAX_NAME_PCT;
+    const firstShareCap = cap * FIRST_SHARE_CAP_MULT;
 
-    // 1차: 등가중 목표금액(캡 적용) → 정수 주식으로 내림 배분
+    // 1차: 표 비례 목표금액(캡 적용) → 정수 주식으로 내림 배분
     for (const it of items) {
-      const target = Math.min(seedNum / n, cap);
+      const target = Math.min((seedNum * it.w) / wsum, cap);
       it.shares = Math.floor(target / it.price);
       it.cost = it.shares * it.price;
     }
 
-    // 2차: 잔여 현금을 그리디로 재투입 — 현재 투입액이 가장 적은 종목부터 한 주씩 추가
-    // 매수해 배분을 균형 있게 채운다(등가중이라 상위 집중이 아니라 최소 투입 우선). 한 주 더
-    // 사면 종목당 캡(cap)을 넘는 종목은 제외하며, 매수 가능 종목이 없을 때까지(잔여 < 최저가
-    // 또는 전원 캡 도달) 채운다.
+    // 2차: 잔여 현금을 그리디로 재투입 — **확신도 대비** 투입액(cost/w)이 가장 적은 종목부터
+    // 한 주씩 추가 매수해 배분을 표 비례로 채운다. 한 주 더 사면 캡을 넘는 종목은 제외하되,
+    // 고가주의 **첫 1주**만 cap×FIRST_SHARE_CAP_MULT 이내면 허용한다.
     let leftover = seedNum - items.reduce((s, it) => s + it.cost, 0);
     for (;;) {
       let best: (typeof items)[number] | null = null;
-      let bestCost = Infinity;
+      let bestNorm = Infinity;
       for (const it of items) {
         if (it.price <= 0 || it.price > leftover) continue;
-        if (it.cost + it.price > cap) continue;
-        if (it.cost < bestCost) {
-          bestCost = it.cost;
+        if (
+          it.cost + it.price > cap &&
+          !(it.shares === 0 && it.price <= firstShareCap)
+        )
+          continue;
+        const norm = it.cost / it.w;
+        if (norm < bestNorm) {
+          bestNorm = norm;
           best = it;
         }
       }
@@ -108,8 +147,8 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
     return items
       .map((it) => ({
         report: it.report,
-        weight: 1 / n,
-        allocAmount: Math.min(seedNum / n, cap),
+        weight: it.w / wsum,
+        allocAmount: Math.min((seedNum * it.w) / wsum, cap),
         shares: it.shares,
         cost: it.cost,
       }))
@@ -156,8 +195,9 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
             시드 배분
           </DialogTitle>
           <DialogDescription>
-            점수 상위 {Math.min(reports.length, TOP_N)}개 종목에 균등(등가중)으로 나눠
-            담았을 때의 수량을 미리 봅니다.
+            선정 근거가 많은 순으로 {Math.min(reports.length, TOP_N)}개 종목에
+            <b> 근거 수에 비례</b>해 나눠 담았을 때의 수량입니다(종목당 시드의{" "}
+            {MAX_NAME_PCT * 100}% 상한).
           </DialogDescription>
         </DialogHeader>
 

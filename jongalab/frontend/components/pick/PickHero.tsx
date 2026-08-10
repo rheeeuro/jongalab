@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CalendarDays, Info } from "lucide-react";
 import { DateStepper, formatReportDate } from "@/components/pick/DateStepper";
+import { CARD } from "@/lib/ui";
 
 /** 홈 히어로 — 첫 화면에서 "언제 기준 / 무엇을 / 몇 개"를 즉시 답한다.
  *
@@ -28,9 +29,13 @@ export function PickHero({
         <DateStepper date={date} dates={dates} />
       ) : (
         <div className="flex items-center gap-2">
-          <span className="text-sm font-extrabold text-slate-900 tabular-nums dark:text-slate-100">
+          {/* 기준일은 pill 로 — 본문 텍스트와 같은 모양이면 첫 화면에서 안 읽힌다 */}
+          <span
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-extrabold text-slate-900 tabular-nums dark:text-slate-100 ${CARD}`}
+          >
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />
             {date ? formatReportDate(date) : "리포트 준비 중"}
-            <span className="ml-1 font-bold text-slate-400 dark:text-slate-500">
+            <span className="font-bold text-slate-400 dark:text-slate-500">
               종가 기준
             </span>
           </span>

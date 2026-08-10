@@ -1,5 +1,6 @@
 import { StockReport } from "@/types";
 import { StockReportCard, finalGapPct } from "@/components/StockReportCard";
+import { CARD } from "@/lib/ui";
 
 function pctColor(pct: number): string {
   if (pct > 0) return "text-rose-600 dark:text-rose-400";
@@ -9,9 +10,7 @@ function pctColor(pct: number): string {
 
 /** 그날 선정 종목의 갭 결과 요약. 갭 체크 전(당일 저녁~익일 아침)이면 null. */
 function dayResult(reports: StockReport[]) {
-  const pcts = reports
-    .map(finalGapPct)
-    .filter((p): p is number => p !== null);
+  const pcts = reports.map(finalGapPct).filter((p): p is number => p !== null);
   if (pcts.length === 0) return null;
   const wins = pcts.filter((p) => p > 0).length;
   const losses = pcts.filter((p) => p < 0).length;
@@ -19,9 +18,19 @@ function dayResult(reports: StockReport[]) {
   return { wins, losses, total: pcts.length, avg };
 }
 
+function ruleCount(r: StockReport): number {
+  return (r.rule_names ?? "").split(",").filter(Boolean).length;
+}
+
 /** 추천 종목 목록 — 이 사이트의 본체.
  *
- * 정렬은 백엔드가 준 순서(점수 내림차순)를 그대로 쓰고 화면에서 다시 매기지 않는다.
+ * **정렬은 백엔드가 준 순서를 그대로 쓴다** — `규칙 수 내림차순 → rank_no 오름차순`이며
+ * 화면에서 다시 정렬하지 않는다(`core/repository/stock_report.RULE_COUNT_SQL`).
+ * 그래도 **표시 순번(1,2,3…)은 매기지 않는다** — 정렬이 점수순이 아니라 순번을 붙이면
+ * '랭킹'처럼 읽히면서 점수 순위와 어긋난다(2026-08-09 오독 사고).
+ *
+ * 맨 앞 한 장은 전체 폭 카드다(3열에서 1 + 9 = 4행). 전체 폭 카드가 중간에 끼면 그 앞줄에
+ * 빈칸이 남으므로 **반드시 첫 장**이어야 한다. 규칙 선정이 하나도 없는 날은 강조하지 않는다.
  * 검색·정렬 컨트롤은 두지 않는다(하루 10종목 규모라 눈으로 훑는 편이 빠르다).
  */
 export function PickList({
@@ -51,10 +60,15 @@ export function PickList({
 
   const result = dayResult(reports);
 
+  // 백엔드가 규칙 수 우선으로 정렬해 주므로 첫 종목이 그날 규칙 최다다.
+  const featured = ruleCount(reports[0]) > 0 ? reports[0] : null;
+
   return (
     <section className="@container">
       {(result || action) && (
-        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl bg-white px-4 py-3 text-xs font-bold dark:bg-slate-900/60">
+        <div
+          className={`mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-xs font-bold ${CARD}`}
+        >
           {result ? (
             <>
               <span className="text-slate-400 dark:text-slate-500">
@@ -91,6 +105,7 @@ export function PickList({
             key={r.stock_code}
             report={r}
             date={date}
+            featured={r === featured}
             ruleTitles={(r.rule_names ?? "")
               .split(",")
               .filter(Boolean)

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Crown, FlaskConical } from "lucide-react";
 import { StockReport } from "@/types";
+import { CARD, CARD_HOVER } from "@/lib/ui";
 
 const GRADE_TONE: Record<string, string> = {
   S: "bg-rose-500 text-white",
@@ -8,6 +9,17 @@ const GRADE_TONE: Record<string, string> = {
   B: "bg-amber-500 text-white",
   C: "bg-slate-400 text-white dark:bg-slate-600",
   D: "bg-slate-300 text-white dark:bg-slate-700",
+};
+
+/** 카드 좌측 세로 띠 — 수급 등급을 배지와 **같은 색**으로 한 번 더 낸다.
+ *  10장이 세로로 쌓일 때 카드끼리 구분되는 유일한 단서였고(전부 흰 카드였다),
+ *  색 단독 표시가 아니라 같은 카드 안의 `수급 A` 배지가 라벨을 겸한다. */
+const GRADE_BAR: Record<string, string> = {
+  S: "bg-rose-500",
+  A: "bg-orange-500",
+  B: "bg-amber-500",
+  C: "bg-slate-300 dark:bg-slate-600",
+  D: "bg-slate-200 dark:bg-slate-700",
 };
 
 type GapLine = { label: "NXT" | "KRX"; pct: number };
@@ -64,24 +76,28 @@ export function StockReportCard({
   report: r,
   date,
   ruleTitles = [],
+  featured = false,
 }: {
   report: StockReport;
   date: string;
   ruleTitles?: string[];
+  /** 그날 규칙이 가장 많이 겹친 종목 — 목록 맨 앞에서 한 줄을 통째로 쓴다.
+   *  배지에는 **기준만** 적는다('유력'·'강력 추천' 같은 예측 문구 금지). */
+  featured?: boolean;
 }) {
   const isUp = r.change_pct > 0;
   const isDown = r.change_pct < 0;
   const isRulePick = Boolean(r.rule_names);
   const gapLines = resolveGapLines(r);
   const totalPct = finalGapPct(r);
+  // 결과가 나온 카드는 배경을 옅게 물들인다. 결과 전(당일 저녁)엔 기본 표면이라
+  // 카드 구분은 좌측 등급 띠와 헤어라인 링이 맡는다.
   const gapTone =
-    totalPct === null
-      ? "bg-white dark:bg-slate-900/60"
+    totalPct === null || totalPct === 0
+      ? CARD
       : totalPct > 0
-        ? "bg-rose-50/30 ring-1 ring-rose-200/40 dark:bg-rose-950/20 dark:ring-rose-900/40"
-        : totalPct < 0
-          ? "bg-blue-50/30 ring-1 ring-blue-200/40 dark:bg-blue-950/20 dark:ring-blue-900/40"
-          : "bg-white dark:bg-slate-900/60";
+        ? "rounded-2xl bg-rose-50/60 shadow-sm ring-1 ring-rose-200/60 dark:bg-rose-950/20 dark:shadow-none dark:ring-rose-900/40"
+        : "rounded-2xl bg-blue-50/60 shadow-sm ring-1 ring-blue-200/60 dark:bg-blue-950/20 dark:shadow-none dark:ring-blue-900/40";
 
   // 근거는 한 줄에 최대 2개까지만 — 나머지는 '외 N' 으로 접어 카드 높이를 고정한다.
   const shownRules = ruleTitles.slice(0, 2);
@@ -97,13 +113,33 @@ export function StockReportCard({
   return (
     <Link
       href={`/reports/${date}/${r.stock_code}`}
-      className={`group flex flex-col rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-md ${gapTone}`}
+      className={`group relative flex flex-col overflow-hidden p-4 pl-5 ${gapTone} ${CARD_HOVER} ${
+        featured
+          ? "ring-2 ring-indigo-300 @4xl:col-span-3 dark:ring-indigo-500/40"
+          : ""
+      }`}
     >
+      <span
+        aria-hidden
+        className={`absolute inset-y-0 left-0 w-1.5 ${GRADE_BAR[r.supply_grade] || GRADE_BAR.D}`}
+      />
+
+      {featured && (
+        <p className="mb-2 inline-flex w-fit items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-extrabold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
+          <FlaskConical className="h-3 w-3" />
+          규칙 {ruleTitles.length}개가 겹쳐 고른 종목
+        </p>
+      )}
+
       {/* 상단: 종목명 + 플래그 / 우측: 현재가 + 등락율 */}
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="min-w-0 truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400">
+            <span
+              className={`min-w-0 truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400 ${
+                featured ? "text-lg" : ""
+              }`}
+            >
               {r.stock_name}
             </span>
             {r.is_leader && (
@@ -130,13 +166,14 @@ export function StockReportCard({
               원
             </span>
           </div>
+          {/* 당일 등락률 — 카드마다 값이 다른 유일한 큰 색면이라 카드 구분의 1차 단서다 */}
           <div
-            className={`text-xs font-extrabold ${
+            className={`mt-1 inline-block rounded-md px-1.5 py-0.5 text-xs font-extrabold ${
               isUp
-                ? "text-rose-600 dark:text-rose-400"
+                ? "bg-rose-100/80 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300"
                 : isDown
-                  ? "text-blue-600 dark:text-blue-400"
-                  : "text-slate-500"
+                  ? "bg-blue-100/80 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300"
+                  : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
             }`}
           >
             {isUp ? "+" : ""}
@@ -156,11 +193,13 @@ export function StockReportCard({
         >
           {reasonText}
         </p>
-        <span className="shrink-0 tabular-nums">
-          <span className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">
+        <span className="shrink-0 rounded-lg bg-indigo-50 px-1.5 py-0.5 tabular-nums dark:bg-indigo-950/50">
+          <span className="text-sm font-extrabold text-indigo-700 dark:text-indigo-300">
             {r.score.toFixed(0)}
           </span>
-          <span className="text-[10px] text-slate-400">점</span>
+          <span className="text-[10px] font-bold text-indigo-400 dark:text-indigo-400/70">
+            점
+          </span>
         </span>
       </div>
 

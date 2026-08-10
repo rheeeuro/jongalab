@@ -224,7 +224,9 @@ def build_gap_check_message(
     def _fmt_simple(r: dict) -> str:
         return f"   `{r['rank']:>2}`. *{r['name']}* `{r['score']}점`"
 
-    by_rank = lambda x: x["rank"]
+    # 화면 목록과 같은 순서 — 규칙 수 내림차순 → rank_no 오름차순.
+    # (`rules` 가 없는 옛 payload 는 0 으로 떨어져 기존 rank 순이 된다)
+    by_rank = lambda x: (-x.get("rules", 0), x["rank"])
     sections = []
     if ups:
         sections.append(
