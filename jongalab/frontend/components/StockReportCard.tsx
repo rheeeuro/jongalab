@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Crown } from "lucide-react";
+import { Crown, FlaskConical } from "lucide-react";
 import { StockReport } from "@/types";
 
 const GRADE_TONE: Record<string, string> = {
@@ -49,23 +49,29 @@ function pctColor(pct: number): string {
   return "text-slate-500";
 }
 
+/** 추천 픽 카드 — 홈(오늘의 추천)과 리포트 상세가 공유한다.
+ *
+ * **표시 순번(1,2,3…)을 매기지 않는다.** hybrid/rules 모드에서 뽑힌 종목은 점수 순위와
+ * 무관해(실측 2026-08-07 rank_no = 2·4·7…53, 1위가 없다) 목록 순번을 매기면 점수로 뽑힌
+ * 것처럼 읽힌다. 순위 대신 **점수 배지 + '왜 뽑혔나'(룰 한글 제목)** 로 선정 근거를 직접 낸다.
+ * 점수 순위(rank_no)가 필요하면 리포트 상세에서 본다.
+ *
+ * @param ruleTitles 부모가 `lib/api.getRuleTitleMap()` 으로 미리 매핑한 한글 제목.
+ *   슬러그(f5_prog_persistent)를 화면에 노출하지 않기 위한 값이며, 비어 있으면 근거 줄을
+ *   '점수 상위 선정'으로 낸다(rule_names 가 NULL = 점수순 선정).
+ */
 export function StockReportCard({
   report: r,
   date,
-  displayRank,
+  ruleTitles = [],
 }: {
   report: StockReport;
   date: string;
-  displayRank?: number;
+  ruleTitles?: string[];
 }) {
   const isUp = r.change_pct > 0;
   const isDown = r.change_pct < 0;
-  // 룰 선정 종목(hybrid 모드)은 점수 순위와 무관하게 목록에 든다 — 표시 순번만 보면 점수로
-  // 뽑힌 것처럼 읽히므로 배지 + 실제 점수 순위를 함께 낸다. (룰 상세 링크는 리포트 상세에서
-  // — 카드 전체가 이미 Link 라 중첩할 수 없다.)
-  const ruleNames = r.rule_names
-    ? r.rule_names.split(",").filter(Boolean)
-    : [];
+  const isRulePick = Boolean(r.rule_names);
   const gapLines = resolveGapLines(r);
   const totalPct = finalGapPct(r);
   const gapTone =
@@ -77,18 +83,19 @@ export function StockReportCard({
           ? "bg-blue-50/30 ring-1 ring-blue-200/40 dark:bg-blue-950/20 dark:ring-blue-900/40"
           : "bg-white dark:bg-slate-900/60";
 
+  // 근거 줄은 최대 2개까지만 — 3개 이상이면 모바일에서 카드 높이가 들쭉날쭉해진다.
+  const shownRules = ruleTitles.slice(0, 2);
+  const hiddenRuleCount = ruleTitles.length - shownRules.length;
+
   return (
     <Link
       href={`/reports/${date}/${r.stock_code}`}
-      className={`group rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-md ${gapTone}`}
+      className={`group flex flex-col rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-md ${gapTone}`}
     >
-      {/* 상단: 순위 + 종목명 + 플래그 / 우측: 현재가 + 등락율 */}
-      <div className="flex items-center gap-2">
+      {/* 상단: 종목명 + 플래그 / 우측: 현재가 + 등락율 */}
+      <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-xs font-black text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
-              {displayRank ?? r.rank_no}
-            </span>
+          <div className="flex items-center gap-1.5">
             <span className="min-w-0 truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400">
               {r.stock_name}
             </span>
@@ -101,16 +108,12 @@ export function StockReportCard({
               </span>
             )}
           </div>
-          <p className="mt-1.5 truncate text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
             {r.sector || "기타"} ·{" "}
             {(r.trading_value / 1e8).toLocaleString("ko-KR", {
               maximumFractionDigits: 0,
             })}
             억
-            {/* 표시 순번과 점수 순위가 갈릴 때만 — 같으면 중복 노이즈 */}
-            {ruleNames.length > 0 &&
-              (displayRank ?? r.rank_no) !== r.rank_no &&
-              ` · 점수 ${r.rank_no}위`}
           </p>
         </div>
         <div className="shrink-0 text-right tabular-nums">
@@ -135,18 +138,37 @@ export function StockReportCard({
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-between">
+      {/* 왜 뽑혔나 — 선정 근거를 카드에서 바로 읽게 한다(예전엔 '룰 선정 3' 숫자만 있었다) */}
+      <div className="mt-3 rounded-xl bg-slate-50/80 px-2.5 py-2 dark:bg-slate-800/40">
+        <p className="flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          <FlaskConical className="h-3 w-3" />
+          왜 뽑혔나
+        </p>
+        {isRulePick && shownRules.length > 0 ? (
+          <ul className="mt-1 space-y-0.5">
+            {shownRules.map((title) => (
+              <li
+                key={title}
+                className="truncate text-xs font-bold text-slate-700 dark:text-slate-200"
+              >
+                {title}
+              </li>
+            ))}
+            {hiddenRuleCount > 0 && (
+              <li className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                외 {hiddenRuleCount}개 규칙
+              </li>
+            )}
+          </ul>
+        ) : (
+          <p className="mt-1 truncate text-xs font-bold text-slate-700 dark:text-slate-200">
+            {isRulePick ? "검증된 규칙 선정" : "종합 점수 상위 선정"}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
-          {ruleNames.length > 0 && (
-            <span
-              // 목록 카드에는 룰 이름을 넣지 않는다 — 코드 슬러그(f5_prog_persistent)를 쓸 수는
-              // 없고 한글 제목은 카드마다 별도 조회가 필요하다. 어떤 규칙인지는 상세에서 본다.
-              title={`실험실에서 검증한 규칙 ${ruleNames.length}개가 고른 종목입니다 (점수 순위와 무관) — 상세에서 어떤 규칙인지 볼 수 있습니다`}
-              className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-extrabold text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-            >
-              룰 선정 {ruleNames.length}
-            </span>
-          )}
           <span
             className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
               GRADE_TONE[r.supply_grade] || GRADE_TONE.D
@@ -160,7 +182,7 @@ export function StockReportCard({
             </span>
           )}
         </div>
-        <div className="text-right tabular-nums">
+        <div className="shrink-0 text-right tabular-nums">
           <span className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">
             {r.score.toFixed(0)}
           </span>

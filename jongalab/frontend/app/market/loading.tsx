@@ -40,18 +40,21 @@ function IndexCardSkeleton() {
 
 export default function DashboardLoading() {
   return (
-    <main className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <div className="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6 sm:py-10">
-        {/* 헤더 */}
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
-            <BarChart3 className="h-6 w-6 text-indigo-500" />
-            시황 대시보드
+    <main className="min-h-screen">
+      <div className="mx-auto max-w-7xl space-y-6 px-4 py-5 sm:px-6 sm:py-8">
+        {/* 헤더 — 실제 화면(page.tsx)과 같은 문구여야 로딩→본문 전환이 튀지 않는다 */}
+        <header>
+          <div className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
+            <BarChart3 className="h-4 w-4 text-indigo-500" />
+            <span>시장 배경</span>
+          </div>
+          <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 sm:text-4xl dark:text-slate-100">
+            시장
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            주요 시장 지표와 주도주 현황을 한눈에 확인하세요.
+          <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
+            추천 종목이 놓인 배경 — 지수와 주도 섹터를 나눠서 봅니다.
           </p>
-        </div>
+        </header>
 
         {/* 미국 시장 지수 */}
         <SectionSkeleton

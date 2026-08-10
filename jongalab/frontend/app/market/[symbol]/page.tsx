@@ -24,7 +24,7 @@ export async function generateMetadata({
   const decoded = decodeURIComponent(symbol);
   const { name } = await getIndexHistory(decoded);
   return {
-    title: `${name} — 시장 차트`,
+    title: `${name} 시장 차트`,
     alternates: { canonical: `/market/${encodeURIComponent(decoded)}` },
   };
 }

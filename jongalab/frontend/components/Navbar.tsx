@@ -3,34 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Sparkles,
-  LineChart,
-  Layers,
-  Newspaper,
-  CandlestickChart,
-  FileText,
-  FlaskConical,
-  Settings,
-  MessagesSquare,
-} from "lucide-react";
+import { Settings } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-
-const NAV_ITEMS = [
-  { href: "/", label: "오늘", icon: Sparkles, match: "exact" as const },
-  { href: "/lab", label: "실험실", icon: FlaskConical },
-  { href: "/market", label: "시장", icon: LineChart },
-  { href: "/stocks", label: "종목", icon: CandlestickChart },
-  { href: "/sectors", label: "섹터", icon: Layers },
-  { href: "/news", label: "뉴스", icon: Newspaper },
-  { href: "/feed", label: "콘텐츠", icon: MessagesSquare },
-  { href: "/reports", label: "리포트", icon: FileText },
-];
-
-function isActiveNav(pathname: string, href: string, match?: "exact") {
-  if (match === "exact") return pathname === href;
-  return pathname.startsWith(href);
-}
+import { NAV_ITEMS, isActiveNav } from "@/lib/nav";
 
 export function Navbar() {
   const pathname = usePathname();
@@ -52,17 +27,21 @@ export function Navbar() {
               height={24}
               className="rounded-lg"
             />
-            <span className="hidden sm:inline">종가랩</span>
+            {/* 모바일에서도 사이트명을 낸다 — 하단 탭이 화면 이름만 보여주므로
+                상단에 브랜드가 없으면 어느 사이트인지 드러나지 않는다.
+                (내비 링크는 lg 미만에서 hidden 이라 폭에 여유가 있다) */}
+            <span>종가랩</span>
           </Link>
 
-          {/* 데스크톱 (lg+) 메인 네비게이션 */}
-          <div className="hidden lg:flex items-center gap-1">
-            {NAV_ITEMS.map(({ href, label, icon: Icon, match }) => {
-              const isActive = isActiveNav(pathname, href, match);
+          {/* 데스크톱 (lg+) 메인 네비게이션 — 모바일은 하단 탭바가 담당 */}
+          <div className="hidden items-center gap-1 lg:flex">
+            {NAV_ITEMS.map((item) => {
+              const { href, label, icon: Icon } = item;
+              const isActive = isActiveNav(pathname, item);
               return (
                 <Link
                   key={href}
-                  href={href === "/feed" ? "/feed?page=1" : href}
+                  href={href}
                   className={`flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-sm font-bold transition-colors ${
                     isActive
                       ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
@@ -81,10 +60,12 @@ export function Navbar() {
         <div className="flex shrink-0 items-center gap-1.5">
           <ThemeToggle />
 
+          {/* 하단 탭 5칸이 공개 화면으로 다 차서 '더보기' 시트가 없어졌다 —
+              관리 진입점은 모바일에서도 여기서만 닿는다. */}
           <Link
             href="/admin/tickers"
             aria-label="관리"
-            className={`hidden sm:flex shrink-0 items-center justify-center rounded-full p-2 transition-colors ${
+            className={`flex shrink-0 items-center justify-center rounded-full p-2 transition-colors ${
               pathname.startsWith("/admin")
                 ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100"
                 : "text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"

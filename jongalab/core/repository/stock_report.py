@@ -463,6 +463,117 @@ def get_top_picks_by_dates(dates: list[str]) -> dict[str, dict]:
     return picks
 
 
+def get_record_summary(days: int = 20) -> dict:
+    """최근 N 거래일 선정 종목의 누적 성적 요약 (화면 '성적' 스트립·탭용).
+
+    모집단은 gap_stats 와 동일하게 **selected=1 + 갭 체크 완료** 행이다
+    (rank_no 로 자르지 않는다 — 룰 선정 종목은 점수 순위가 10위 밖이다).
+    갭 등락률은 KRX 우선·NXT 폴백, 실체결 손익률은 exec_leg_ret 을 그대로 쓴다.
+    두 지표의 표본 수를 따로 실어 보낸다 — 실체결 라벨은 매매 경로에서 채워지므로
+    갭보다 늦거나 비어 있을 수 있고, 화면이 둘을 같은 모수로 오독하면 안 된다.
+
+    반환: {days, from_date, to_date, picks, wins, losses, flats, win_rate,
+           avg_gap_pct, avg_exec_ret, exec_samples, best_day, worst_day}
+    """
+    if days <= 0:
+        return {}
+
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            """SELECT DISTINCT report_date
+                 FROM daily_stock_report
+                WHERE selected = 1
+                  AND (gap_krx_pct IS NOT NULL OR gap_nxt_pct IS NOT NULL)
+                ORDER BY report_date DESC
+                LIMIT %s""",
+            (days,),
+        )
+        date_rows = cursor.fetchall()
+        if not date_rows:
+            return {}
+
+        dates = [r["report_date"] for r in date_rows]
+        placeholders = ",".join(["%s"] * len(dates))
+        cursor.execute(
+            f"""SELECT report_date,
+                       COALESCE(gap_krx_pct, gap_nxt_pct) AS pct,
+                       exec_leg_ret
+                  FROM daily_stock_report
+                 WHERE report_date IN ({placeholders})
+                   AND selected = 1
+                   AND (gap_krx_pct IS NOT NULL OR gap_nxt_pct IS NOT NULL)""",
+            tuple(dates),
+        )
+        rows = cursor.fetchall()
+
+    def _as_key(d) -> str:
+        return d.isoformat() if isinstance(d, (date, datetime)) else str(d)
+
+    def _as_float(v):
+        if v is None:
+            return None
+        return float(v) if isinstance(v, Decimal) else float(v)
+
+    wins = losses = flats = 0
+    gap_sum = 0.0
+    exec_sum = 0.0
+    exec_n = 0
+    exec_days: set[str] = set()
+    per_day: dict[str, list[float]] = {}
+
+    for row in rows:
+        day = _as_key(row["report_date"])
+        pct = _as_float(row["pct"])
+        if pct is None:
+            continue
+        if pct > 0:
+            wins += 1
+        elif pct < 0:
+            losses += 1
+        else:
+            flats += 1
+        gap_sum += pct
+        per_day.setdefault(day, []).append(pct)
+
+        ret = _as_float(row["exec_leg_ret"])
+        if ret is not None:
+            exec_sum += ret
+            exec_n += 1
+            exec_days.add(day)
+
+    picks = wins + losses + flats
+    if picks == 0:
+        return {}
+
+    day_avgs = {d: sum(v) / len(v) for d, v in per_day.items() if v}
+    best = max(day_avgs.items(), key=lambda kv: kv[1])
+    worst = min(day_avgs.items(), key=lambda kv: kv[1])
+    day_keys = sorted(day_avgs)
+    exec_keys = sorted(exec_days)
+
+    return {
+        "days": len(day_keys),
+        "from_date": day_keys[0],
+        "to_date": day_keys[-1],
+        "picks": picks,
+        "wins": wins,
+        "losses": losses,
+        "flats": flats,
+        "win_rate": round(wins / picks * 100, 1),
+        "avg_gap_pct": round(gap_sum / picks, 3),
+        "avg_exec_ret": round(exec_sum / exec_n, 3) if exec_n else None,
+        "exec_samples": exec_n,
+        # 실체결 라벨은 매매 경로 가동 이후 구간에만 있다(실측 2026-08-06 기준 최근 20 영업일).
+        # 갭 구간과 창이 다르면 두 평균을 나란히 놓는 것만으로 "실체결이 더 좋다"로 오독되므로
+        # 실체결 자신의 구간을 함께 내려 화면이 그 사실을 밝히게 한다.
+        "exec_days": len(exec_keys),
+        "exec_from_date": exec_keys[0] if exec_keys else None,
+        "exec_to_date": exec_keys[-1] if exec_keys else None,
+        "best_day": {"date": best[0], "pct": round(best[1], 3)},
+        "worst_day": {"date": worst[0], "pct": round(worst[1], 3)},
+    }
+
+
 def _score_to_grade(score: float) -> str:
     """supply_score(0~100) → 등급 문자열. classify_supply_score와 임계값 동일."""
     if score >= 85:

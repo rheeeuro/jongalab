@@ -19,7 +19,7 @@ export async function generateMetadata({
   const stockName = await getStockName(decodedTicker);
 
   return {
-    title: `${stockName} — 종목 분석`,
+    title: `${stockName} 종목 분석`,
     alternates: { canonical: `/stocks/${decodedTicker}` },
   };
 }

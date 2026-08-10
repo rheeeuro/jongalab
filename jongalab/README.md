@@ -96,6 +96,7 @@ jongalab/
 | `/api/macro-events` | — | `?days=`(향후) / `?month=YYYY-MM`(그 달 전체·과거 포함) |
 | `/api/market-holidays?month=` | — | 그 달 KRX 휴장 평일 + 한글 이름 |
 | `/api/us-extended` | — | US 프록시 정규장+프리/애프터(trading 게이트가 소비) |
+| `/api/stock-report/record-summary?days=` | 집계 | 최근 N 거래일 선정 종목 누적 성적(승률·평균 갭·평균 실체결·최고/최악일). 모집단은 `gap-stats` 와 같은 **selected=1 + 갭 체크 완료**(rank_no 로 자르지 않는다). ⚠️ `exec_leg_ret` 은 매매 경로 가동 이후 구간에만 있어 갭과 창이 다르므로 `exec_days`·`exec_from_date`·`exec_to_date` 를 함께 내려보낸다 |
 | `/api/job-runs` | admin | 스케줄러 잡 실행 이력 |
 | `/api/edge-rules` | GET 공개 / POST admin | 스코어보드. `/{id}/matched?days=`(≤90) 날짜별 매칭 종목 이력. 등록 시 `title`(한글 카드 제목)·`description`(초심자용 인과 근거) 필수, `family`·`role` 은 레지스트리 검증. 승격은 `edge_policy.check_promotion` 단일 소스 — 미충족 409+사유, **force 없음**. 라우터가 추가로 검사하는 건 **판정 일정 규율**(`decision.verdict=='confirmed'` 아니면 409) 하나다 |
 

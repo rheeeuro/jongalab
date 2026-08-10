@@ -51,6 +51,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "hourly",
       priority: 0.8,
     },
+    // 추천 성적(달력·누적 승률) — 추천 화면 다음으로 신뢰에 직접 닿는 공개 화면
+    {
+      url: `${baseUrl}/record`,
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.9,
+    },
+    {
+      url: `${baseUrl}/lab`,
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.7,
+    },
   ];
 
   const reportDates = await fetchJson<string[]>(

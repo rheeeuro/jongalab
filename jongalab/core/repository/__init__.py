@@ -60,6 +60,7 @@ from core.repository.stock_report import (
     save_exec_leg_labels,
     get_gap_stats_by_dates,
     get_top_picks_by_dates,
+    get_record_summary,
 )
 
 from core.repository.market_snapshot import (

@@ -31,6 +31,35 @@ export interface TopPick {
   score: number;
 }
 
+// GET /api/stock-report/record-summary — 최근 N 거래일 선정 종목 누적 성적.
+// 모집단은 selected=1 + 갭 체크 완료 행(rank_no 로 자르지 않는다).
+export interface RecordDay {
+  date: string;
+  pct: number;
+}
+
+export interface RecordSummary {
+  days: number;              // 집계된 거래일 수
+  from_date: string | null;
+  to_date: string | null;
+  picks: number;             // 총 종목 수(= wins+losses+flats)
+  wins: number;
+  losses: number;
+  flats: number;
+  win_rate: number;          // %
+  avg_gap_pct: number;       // 익일 시가 갭 평균 등락률 %
+  // ⚠️ 실체결 손익률은 매매 경로 가동 이후 구간에만 있어 **갭과 창이 다르다**.
+  // 두 평균을 나란히 놓으면 "실체결이 더 좋다"로 오독되므로, 화면은 창이 다를 때
+  // exec_from_date~exec_to_date 를 반드시 함께 표기한다.
+  avg_exec_ret: number | null;
+  exec_samples: number;
+  exec_days: number;
+  exec_from_date: string | null;
+  exec_to_date: string | null;
+  best_day: RecordDay | null;
+  worst_day: RecordDay | null;
+}
+
 export interface PaginatedResponse<T> {
   success: boolean;
   data: T[];

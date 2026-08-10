@@ -13,6 +13,7 @@ from core.repository import (
     get_gap_stats_by_dates,
     get_top_picks_by_dates,
     get_top_themes_by_dates,
+    get_record_summary,
 )
 
 router = APIRouter(prefix="/api", tags=["stock-report"])
@@ -183,6 +184,41 @@ def gap_stats(dates: str = Query(..., description="콤마 구분 YYYY-MM-DD 목�
         if not date_list:
             return {}
         return get_gap_stats_by_dates(date_list)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RecordDay(BaseModel):
+    date: str
+    pct: float = 0.0
+
+
+class RecordSummary(BaseModel):
+    days: int = 0
+    from_date: Optional[str] = None
+    to_date: Optional[str] = None
+    picks: int = 0
+    wins: int = 0
+    losses: int = 0
+    flats: int = 0
+    win_rate: float = 0.0
+    avg_gap_pct: float = 0.0
+    # 실체결 손익률은 매매 경로에서 채워져 갭보다 표본이 적을 수 있다 —
+    # 화면이 갭과 같은 모수로 읽지 않게 표본 수를 함께 내린다.
+    avg_exec_ret: Optional[float] = None
+    exec_samples: int = 0
+    exec_days: int = 0
+    exec_from_date: Optional[str] = None
+    exec_to_date: Optional[str] = None
+    best_day: Optional[RecordDay] = None
+    worst_day: Optional[RecordDay] = None
+
+
+@router.get("/stock-report/record-summary", response_model=Optional[RecordSummary])
+def record_summary(days: int = Query(20, ge=1, le=250, description="집계할 최근 거래일 수")):
+    """최근 N 거래일 선정 종목의 누적 성적 (승률·평균 갭·평균 실체결 손익률)"""
+    try:
+        return get_record_summary(days) or None
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

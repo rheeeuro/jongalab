@@ -88,4 +88,32 @@ export async function getEdgeRuleWithDailyByName(name: string, days = 60): Promi
   };
 }
 
+// ── 추천 화면 공통 조회 헬퍼 ──
+
+import type { RecordSummary, StockReport } from '@/types';
+
+/** 리포트가 존재하는 영업일 목록(최신순). 날짜 이동은 이 목록 위를 걷는다. */
+export async function getReportDates(limit = 120): Promise<string[]> {
+  return apiFetch<string[]>(`/api/stock-report/dates?limit=${limit}`, []);
+}
+
+export async function getStockReports(date: string): Promise<StockReport[]> {
+  if (!date) return [];
+  return apiFetch<StockReport[]>(`/api/stock-report/${date}`, []);
+}
+
+export async function getRecordSummary(days = 20): Promise<RecordSummary | null> {
+  return apiFetch<RecordSummary | null>(`/api/stock-report/record-summary?days=${days}`, null);
+}
+
+/** 룰 슬러그(f5_prog_persistent) → 화면에 낼 한글 제목.
+ *
+ * 사용자 화면에 내부 식별자를 노출하지 않는다는 용어 원칙에 따라, 픽 카드의
+ * '왜 뽑혔나' 줄과 리포트 상세 칩이 공유한다. title 이 비면 슬러그로 폴백.
+ */
+export async function getRuleTitleMap(): Promise<Map<string, string>> {
+  const rules = await getEdgeRules();
+  return new Map(rules.map((r) => [r.name, r.title || r.name]));
+}
+
 export { API_BASE };

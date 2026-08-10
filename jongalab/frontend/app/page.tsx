@@ -1,97 +1,126 @@
 import type { Metadata } from "next";
-import { ContentAnalysis, StockReport, MentionStats, MarketIndex, PaginatedResponse, SectorReport, MacroEvent, MacroEventsResponse } from "@/types";
-import { apiFetch } from "@/lib/api";
+import { Suspense } from "react";
+import {
+  MacroEvent,
+  MacroEventsResponse,
+  MarketIndex,
+  NewsHeatItem,
+  SectorReport,
+} from "@/types";
+import {
+  apiFetch,
+  getRecordSummary,
+  getReportDates,
+  getRuleTitleMap,
+  getStockReports,
+} from "@/lib/api";
+import { PickHero } from "@/components/pick/PickHero";
+import { RecordStrip } from "@/components/pick/RecordStrip";
+import { PickList } from "@/components/pick/PickList";
+import { SeedAllocator } from "@/components/pick/SeedAllocator";
+import { MacroEventNotice } from "@/components/pick/MacroEventNotice";
+import {
+  IndexDigest,
+  IndexDigestSkeleton,
+  NewsDigest,
+  SectorDigest,
+} from "@/components/home/HomeDigest";
 
 export const metadata: Metadata = {
+  // 루트 page 는 루트 layout 의 title.template 적용 대상이 아니라(자식 세그먼트만 해당)
+  // 접미사가 붙지 않는다 — 다른 화면과 형태를 맞추려면 여기서만 전체 문자열을 쓴다.
+  title: { absolute: "오늘의 추천 · 종가랩" },
+  description:
+    "수급·기술·재료 데이터로 매 거래일 자동 선정한 추천 종목과 선정 근거, 그리고 지난 추천의 실제 성적.",
   alternates: { canonical: "/" },
 };
-import { TodayHero } from "@/components/today/TodayHero";
-import { TopPicks } from "@/components/today/TopPicks";
-import { LeadingSectorsStrip } from "@/components/today/LeadingSectorsStrip";
-import { MentionPulse } from "@/components/today/MentionPulse";
-import { ContentTeaser } from "@/components/today/ContentTeaser";
-import { IndicesStrip, IndicesStripSkeleton } from "@/components/today/IndicesStrip";
-import { MacroEventNotice } from "@/components/today/MacroEventNotice";
-import { Suspense } from "react";
-
-async function getContents(): Promise<PaginatedResponse<ContentAnalysis>> {
-  return apiFetch(`/api/contents?page=1&limit=6`, {
-    success: false,
-    data: [],
-    pagination: null,
-  });
-}
-
-// 최신 영업일의 종목 랭킹 1위(rank_no=1)를 오늘의 추천으로 사용한다.
-async function getLatestTopPick(): Promise<StockReport | null> {
-  const dates = await apiFetch<string[]>(`/api/stock-report/dates?limit=1`, []);
-  if (!dates.length) return null;
-  const reports = await apiFetch<StockReport[]>(
-    `/api/stock-report/${dates[0]}`,
-    [],
-  );
-  return reports[0] ?? null;
-}
-
-async function getMentionStats(): Promise<MentionStats | null> {
-  const res = await apiFetch<{ success: boolean; data: MentionStats } | null>(
-    `/api/contents/mention-stats`,
-    null,
-  );
-  return res?.success ? res.data : null;
-}
-
-async function getLatestSectorReport(): Promise<SectorReport[]> {
-  const dates = await apiFetch<string[]>(`/api/stock-report/dates?limit=1`, []);
-  if (!dates.length) return [];
-  return apiFetch<SectorReport[]>(`/api/sector-report/${dates[0]}`, []);
-}
 
 // 오늘 밤 배너용 — 이틀치면 충분(오늘 남은 발표 + 내일 새벽 FOMC)
 async function getMacroEvents(): Promise<MacroEvent[]> {
-  const res = await apiFetch<MacroEventsResponse | null>(`/api/macro-events?days=2`, null);
+  const res = await apiFetch<MacroEventsResponse | null>(
+    `/api/macro-events?days=2`,
+    null,
+  );
   return res?.events ?? [];
 }
 
-async function getMarketIndices(): Promise<{
-  US: MarketIndex[];
-  KR: MarketIndex[];
-  COMMODITIES: MarketIndex[];
-} | null> {
-  return apiFetch(`/api/market-indices`, null);
+async function getSectors(date: string): Promise<SectorReport[]> {
+  if (!date) return [];
+  return apiFetch<SectorReport[]>(`/api/sector-report/${date}`, []);
+}
+
+async function getNewsHeat(date: string): Promise<NewsHeatItem[]> {
+  if (!date) return [];
+  const res = await apiFetch<{ success: boolean; data: NewsHeatItem[] } | null>(
+    `/api/news/heat?date=${date}&limit=6`,
+    null,
+  );
+  return res?.data ?? [];
+}
+
+// 외부 시세 API 라 1초 이상 걸리는 구간 — 추천 목록을 막지 않도록 Suspense 로 스트리밍한다.
+async function IndexDigestSection() {
+  const indices = await apiFetch<{
+    US: MarketIndex[];
+    KR: MarketIndex[];
+  } | null>(`/api/market-indices`, null);
+  return <IndexDigest indices={indices} />;
 }
 
 export const dynamic = "force-dynamic";
 
-// 시세 외부 API 호출로 1초 이상 걸리는 구간. 나머지 빠른 콘텐츠를 막지 않도록
-// 별도 async 컴포넌트로 분리해 Suspense로 스트리밍한다.
-async function IndicesSection() {
-  const indices = await getMarketIndices();
-  return <IndicesStrip indices={indices} />;
-}
-
+/** 홈(추천 탭) — 종목 추천이 본체이고, 그 아래 시장·섹터·뉴스는 **압축 요약**만 둔다.
+ *
+ * `/reports/{date}` 와 구성을 일부러 다르게 한다: 홈에만 최근 성적·매크로 경고·요약 3종이
+ * 붙고, 날짜 이동과 그날 섹터 상세는 리포트 화면이 갖는다. 두 화면이 똑같으면 랜딩으로서의
+ * 역할이 없어진다.
+ */
 export default async function HomePage() {
-  const [contents, topPick, mentionStats, sectorReport, macroEvents] =
+  // 기준일은 '오늘'이 아니라 **가장 최근 리포트일**이다 — 휴장일·장중에 화면이 통째로
+  // 비지 않게 한다. 과거 날짜는 `/reports/{date}` 가 담당한다.
+  const dates = await getReportDates(1);
+  const date = dates[0] ?? "";
+
+  const [reports, record, ruleTitleMap, macroEvents, sectors, newsHeat] =
     await Promise.all([
-      getContents(),
-      getLatestTopPick(),
-      getMentionStats(),
-      getLatestSectorReport(),
+      getStockReports(date),
+      getRecordSummary(20),
+      getRuleTitleMap(),
       getMacroEvents(),
+      getSectors(date),
+      getNewsHeat(date),
     ]);
+
+  // 이 날짜의 픽을 실제로 고른 고유 규칙 수 — 히어로 한 줄의 근거.
+  const ruleCount = new Set(
+    reports.flatMap((r) => (r.rule_names ?? "").split(",").filter(Boolean)),
+  ).size;
 
   return (
     <main className="min-h-screen">
-      <div className="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6 sm:py-10 lg:space-y-10">
-        <TodayHero reportDate={topPick?.report_date ?? null} mentionStats={mentionStats} />
+      <div className="mx-auto max-w-7xl space-y-6 px-4 py-5 sm:px-6 sm:py-8">
+        <PickHero date={date} pickCount={reports.length} ruleCount={ruleCount} />
+
+        <RecordStrip summary={record} />
+
+        {/* 매크로 경고는 '오늘 밤' 기준이라 최신 리포트를 보는 홈에만 둔다 */}
         <MacroEventNotice events={macroEvents} />
-        <TopPicks pick={topPick} />
-        <Suspense fallback={<IndicesStripSkeleton />}>
-          <IndicesSection />
-        </Suspense>
-        <LeadingSectorsStrip sectors={sectorReport} />
-        <MentionPulse stats={mentionStats} />
-        <ContentTeaser items={contents.data || []} />
+
+        <PickList
+          reports={reports}
+          date={date}
+          ruleTitleMap={ruleTitleMap}
+          action={<SeedAllocator reports={reports} />}
+        />
+
+        {/* 시장 요약 — 각 탭의 압축본. 여기서 더 키우지 말 것(HomeDigest 주석 참고). */}
+        <div className="space-y-5 border-t border-slate-100 pt-6 dark:border-slate-800/60">
+          <Suspense fallback={<IndexDigestSkeleton />}>
+            <IndexDigestSection />
+          </Suspense>
+          <SectorDigest sectors={sectors} />
+          <NewsDigest items={newsHeat} date={date} />
+        </div>
       </div>
     </main>
   );

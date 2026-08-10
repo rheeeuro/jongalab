@@ -3,6 +3,15 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Wallet } from "lucide-react";
 import { StockReport } from "@/types";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 const LS_KEY_SEED = "seedAllocator_seed";
 const PREVIEW_COUNT = 8;
@@ -125,20 +134,32 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
   const displayList = expanded ? buyable : buyable.slice(0, PREVIEW_COUNT);
 
   return (
-    <section className="rounded-3xl bg-white p-5 dark:bg-slate-900/60 sm:p-6">
-      <header className="flex items-center gap-2">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full justify-center gap-1.5 sm:w-auto"
+          disabled={reports.length === 0}
+        >
           <Wallet className="h-4 w-4" />
-        </span>
-        <div className="min-w-0">
-          <h2 className="text-base font-extrabold text-slate-900 dark:text-slate-100 sm:text-lg">
+          시드 배분 계산
+        </Button>
+      </DialogTrigger>
+
+      {/* 본문 대신 모달로 — 홈·리포트 화면에서 세로 공간을 크게 먹던 섹션이었다.
+          모바일에서 내용이 길어지므로 뷰포트 높이로 잘라 안쪽만 스크롤시킨다. */}
+      <DialogContent className="max-h-[85vh] gap-0 overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Wallet className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
             시드 배분
-          </h2>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            점수 상위 {Math.min(reports.length, TOP_N)}개 종목에 균등(등가중) 배분
-          </p>
-        </div>
-      </header>
+          </DialogTitle>
+          <DialogDescription>
+            점수 상위 {Math.min(reports.length, TOP_N)}개 종목에 균등(등가중)으로 나눠
+            담았을 때의 수량을 미리 봅니다.
+          </DialogDescription>
+        </DialogHeader>
 
       <div className="mt-4">
         <div className="relative">
@@ -233,7 +254,8 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
           </div>
         </>
       )}
-    </section>
+      </DialogContent>
+    </Dialog>
   );
 }
 

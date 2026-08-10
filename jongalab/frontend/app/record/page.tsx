@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
 import { TopPick, MacroEventsResponse } from "@/types";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getRecordSummary } from "@/lib/api";
 import Link from "next/link";
-import { FileText, ChevronLeft, ChevronRight } from "lucide-react";
+import { Trophy, ChevronLeft, ChevronRight } from "lucide-react";
+import { RecordSummaryPanel } from "@/components/pick/RecordSummaryPanel";
 
 export const metadata: Metadata = {
-  alternates: { canonical: "/reports" },
+  title: "추천 성적",
+  description:
+    "종가랩이 매 거래일 선정한 종목의 실제 성적. 날짜별 승패와 누적 승률·평균 수익률을 그대로 공개합니다.",
+  alternates: { canonical: "/record" },
 };
 import {
   ReportCalendarGrid,
@@ -133,10 +137,12 @@ export default async function ReportsArchivePage({
 }) {
   const sp = await searchParams;
   const dates = await getReportDates();
-  const [gapStats, topThemes, picks] = await Promise.all([
+  const [gapStats, topThemes, picks, recordSummary] = await Promise.all([
     getGapStats(dates),
     getTopThemes(dates),
     getTopPicks(dates),
+    // 캘린더에 표시된 구간(최대 100 영업일)과 같은 모수로 누적 성적을 낸다
+    getRecordSummary(dates.length || 20),
   ]);
 
   const picksByDate = new Map<string, TopPick>();
@@ -196,18 +202,19 @@ export default async function ReportsArchivePage({
       <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-10">
         <header>
           <div className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
-            <FileText className="h-4 w-4 text-indigo-500" />
-            <span>리포트 아카이브</span>
+            <Trophy className="h-4 w-4 text-indigo-500" />
+            <span>추천 성적</span>
           </div>
-          <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 dark:text-slate-100 sm:text-4xl">
-            지난 AI 리포트
-            <br />
-            다시 보기.
+          <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 sm:text-4xl dark:text-slate-100">
+            추천 성적
           </h1>
-          <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
-            날짜를 선택해 그날의 AI 투자 리포트를 확인하세요.
+          <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
+            선정 종목을 종가에 사서 다음 거래일 시가에 판 결과를 그대로 공개합니다.
+            날짜를 누르면 그날의 추천 목록을 볼 수 있습니다.
           </p>
         </header>
+
+        <RecordSummaryPanel summary={recordSummary} />
 
         <section>
           {/* 월 이동 네비게이션 */}
@@ -272,7 +279,7 @@ function MonthNavButton({
   }
   return (
     <Link
-      href={`/reports?month=${month}`}
+      href={`/record?month=${month}`}
       aria-label={label}
       className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:bg-slate-900/60 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
     >

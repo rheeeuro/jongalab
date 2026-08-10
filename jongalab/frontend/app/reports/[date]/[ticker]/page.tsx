@@ -23,7 +23,8 @@ import {
   FlaskConical,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { FixedLossCalculator } from "@/components/FixedLossCalculator";
+import { WhyPicked } from "@/components/pick/WhyPicked";
+import { TradePlan } from "@/components/pick/TradePlan";
 
 function fetchOptions(date: string): RequestInit {
   // 종가베팅 워커가 평일 30분 간격으로 daily_stock_report를 DELETE+INSERT 하므로
@@ -72,7 +73,7 @@ export async function generateMetadata({
   }
 
   const r = data.report;
-  const title = `[${resolvedParams.date}] ${r.stock_name} 일간 리포트`;
+  const title = `${r.stock_name} · ${resolvedParams.date} 리포트`;
   const description = `수급 ${r.supply_grade}(${r.supply_score?.toFixed(1) ?? 0}점) | 종합 ${r.score}점 | 기관 ${formatBillion(r.inst_net_buy)}억 | 외인 ${formatBillion(r.frgn_net_buy)}억`;
 
   return {
@@ -213,18 +214,13 @@ export default async function StockReportPage({
     <main className="min-h-screen">
       <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-10">
         {/* 네비게이션 */}
-        <div className="flex items-center gap-3">
-          <Link
-            href={`/reports/${date}`}
-            className="inline-flex items-center gap-1 text-sm font-bold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            {date} 리포트
-          </Link>
-          <div className="ml-auto">
-            <FixedLossCalculator ticker={r.stock_code} />
-          </div>
-        </div>
+        <Link
+          href={`/reports/${date}`}
+          className="inline-flex items-center gap-1 text-sm font-bold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {date} 추천 목록
+        </Link>
 
         {/* 헤더 */}
         <header>
@@ -261,6 +257,12 @@ export default async function StockReportPage({
             ))}
           </div>
         </header>
+
+        {/* 추천 화면이므로 선정 근거와 매매 전제를 상세 데이터보다 먼저 낸다 —
+            예전에는 기본정보·수급표부터 시작해 '왜 이 종목인지'가 스크롤 아래에 있었다. */}
+        <WhyPicked report={r} />
+
+        <TradePlan report={r} />
 
         {/* 다음날 아침 갭 체크 결과 */}
         {(typeof r.gap_nxt_pct === "number" || typeof r.gap_krx_pct === "number") && (() => {
@@ -351,6 +353,30 @@ export default async function StockReportPage({
                     {r.gap_krx_pct! > 0 ? "+" : ""}
                     {r.gap_krx_pct!.toFixed(2)}%
                   </span>
+                </p>
+              )}
+              {/* 실체결 손익률 — 갭(참조가 기준)과 달리 실제 체결가로 계산된 값이라
+                  두 수치가 어긋날 수 있다. 어느 쪽이 실제인지 밝혀 둔다. */}
+              {typeof r.exec_leg_ret === "number" && (
+                <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                  실제 체결 기준{" "}
+                  <span
+                    className={`font-extrabold tabular-nums ${
+                      r.exec_leg_ret > 0
+                        ? "text-rose-600 dark:text-rose-400"
+                        : r.exec_leg_ret < 0
+                          ? "text-blue-600 dark:text-blue-400"
+                          : "text-slate-500"
+                    }`}
+                  >
+                    {r.exec_leg_ret > 0 ? "+" : ""}
+                    {r.exec_leg_ret.toFixed(2)}%
+                  </span>
+                  {r.exec_leg_venue && (
+                    <span className="ml-1 text-slate-400">
+                      ({r.exec_leg_venue})
+                    </span>
+                  )}
                 </p>
               )}
             </CardContent>
