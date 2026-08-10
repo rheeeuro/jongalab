@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Crown, FlaskConical } from "lucide-react";
 import { StockReport } from "@/types";
-import { CARD, CARD_HOVER } from "@/lib/ui";
+import { CARD, CARD_HOVER, HERO_ROW_H } from "@/lib/ui";
 
 const GRADE_TONE: Record<string, string> = {
   S: "bg-rose-500 text-white",
@@ -11,16 +11,15 @@ const GRADE_TONE: Record<string, string> = {
   D: "bg-slate-300 text-white dark:bg-slate-700",
 };
 
-/** 카드 좌측 세로 띠 — 수급 등급을 배지와 **같은 색**으로 한 번 더 낸다.
- *  10장이 세로로 쌓일 때 카드끼리 구분되는 유일한 단서였고(전부 흰 카드였다),
- *  색 단독 표시가 아니라 같은 카드 안의 `수급 A` 배지가 라벨을 겸한다. */
-const GRADE_BAR: Record<string, string> = {
-  S: "bg-rose-500",
-  A: "bg-orange-500",
-  B: "bg-amber-500",
-  C: "bg-slate-300 dark:bg-slate-600",
-  D: "bg-slate-200 dark:bg-slate-700",
-};
+/** 카드 좌측 세로 띠 — **당일 등락 방향**을 옅은 색으로 낸다(상승 빨강 / 하락 파랑).
+ *  10장이 세로로 쌓일 때 카드끼리 구분되는 단서이며, 색 단독 표시가 아니라 같은 카드 안의
+ *  등락률 배지(+2.3% / -1.1%)가 부호로 라벨을 겸한다. 옅게 두는 이유는 카드 배경(갭 결과)과
+ *  등락률 배지가 이미 같은 적/청 계열이라, 띠까지 진하면 색이 서로 경쟁하기 때문. */
+function changeBar(pct: number): string {
+  if (pct > 0) return "bg-rose-200 dark:bg-rose-500/25";
+  if (pct < 0) return "bg-blue-200 dark:bg-blue-500/25";
+  return "bg-slate-200 dark:bg-slate-700/60";
+}
 
 type GapLine = { label: "NXT" | "KRX"; pct: number };
 
@@ -81,7 +80,9 @@ export function StockReportCard({
   report: StockReport;
   date: string;
   ruleTitles?: string[];
-  /** 그날 규칙이 가장 많이 겹친 종목 — 목록 맨 앞에서 한 줄을 통째로 쓴다.
+  /** 그날 규칙이 가장 많이 겹친 종목 — 목록 맨 앞에서 한 줄을 통째로 쓴다(`col-span-full`).
+   *  높이는 홈 사이드바의 성적 카드와 같은 `HERO_ROW_H` 하한을 쓴다(둘이 어긋나면 우측
+   *  뉴스 카드 상단이 좌측 2·3·4등 줄과 틀어진다).
    *  배지에는 **기준만** 적는다('유력'·'강력 추천' 같은 예측 문구 금지). */
   featured?: boolean;
 }) {
@@ -115,13 +116,13 @@ export function StockReportCard({
       href={`/reports/${date}/${r.stock_code}`}
       className={`group relative flex flex-col overflow-hidden p-4 pl-5 ${gapTone} ${CARD_HOVER} ${
         featured
-          ? "ring-2 ring-indigo-300 @4xl:col-span-3 dark:ring-indigo-500/40"
+          ? `ring-2 ring-indigo-300 col-span-full ${HERO_ROW_H} dark:ring-indigo-500/40`
           : ""
       }`}
     >
       <span
         aria-hidden
-        className={`absolute inset-y-0 left-0 w-1.5 ${GRADE_BAR[r.supply_grade] || GRADE_BAR.D}`}
+        className={`absolute inset-y-0 left-0 w-1.5 ${changeBar(r.change_pct)}`}
       />
 
       {featured && (

@@ -20,3 +20,11 @@ export const INSET = "rounded-lg bg-slate-100 dark:bg-slate-800/60";
 /** 카드 호버 — 목록 안의 누를 수 있는 카드에만 붙인다. */
 export const CARD_HOVER =
   "transition-all hover:-translate-y-0.5 hover:shadow-md";
+
+/** 홈 2단 첫 줄의 공통 높이 — **1등 픽 카드**(좌)와 **성적 카드**(우)가 같이 쓴다.
+ *
+ * 둘은 서로 다른 그리드 열/행에 있어 CSS 로 높이를 맞출 방법이 없다. 그래서 둘 다 자기
+ * 자연 높이(성적 ≈ 202px · 1등 ≈ 164px)보다 큰 **같은 하한**을 잡아 실제 높이를 일치시킨다.
+ * 높이가 어긋나면 그 차이만큼 우측 뉴스 카드 상단이 좌측 2행(2·3·4등) 상단과 틀어진다.
+ * ⚠️ 한쪽 카드에 줄을 추가해 이 값을 넘기면 정렬이 깨진다 — 그땐 이 값을 함께 올린다. */
+export const HERO_ROW_H = "lg:min-h-56";

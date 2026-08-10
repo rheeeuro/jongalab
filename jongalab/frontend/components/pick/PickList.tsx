@@ -31,6 +31,11 @@ function ruleCount(r: StockReport): number {
  *
  * 맨 앞 한 장은 전체 폭 카드다(3열에서 1 + 9 = 4행). 전체 폭 카드가 중간에 끼면 그 앞줄에
  * 빈칸이 남으므로 **반드시 첫 장**이어야 한다. 규칙 선정이 하나도 없는 날은 강조하지 않는다.
+ * 전체 폭 span 은 열 수와 무관하게 걸어야 한다(`col-span-full`) — 2열 구간에서만 일반 셀이
+ * 되면 배지 줄만큼 높은 1등 카드가 우측 카드를 늘려 아래에 빈 공간이 남는다.
+ *
+ * **'이 날 결과' 줄은 목록 아래**다. 위에 두면 홈 2단에서 좌측 첫 카드가 그만큼 내려가
+ * 우측 성적 카드와 시작선이 어긋나고, 마무리 수치라 읽는 순서로도 아래가 맞다.
  * 검색·정렬 컨트롤은 두지 않는다(하루 10종목 규모라 눈으로 훑는 편이 빠르다).
  */
 export function PickList({
@@ -65,9 +70,26 @@ export function PickList({
 
   return (
     <section className="@container">
+      {/* 열 수는 화면 폭이 아니라 **이 목록이 실제로 받은 폭**을 따른다(컨테이너 쿼리) —
+          홈은 우측 사이드바에 폭을 내주고 `/reports/{date}` 는 전체 폭을 쓴다. */}
+      <div className="grid grid-cols-1 gap-3 @md:grid-cols-2 @4xl:grid-cols-3">
+        {reports.map((r) => (
+          <StockReportCard
+            key={r.stock_code}
+            report={r}
+            date={date}
+            featured={r === featured}
+            ruleTitles={(r.rule_names ?? "")
+              .split(",")
+              .filter(Boolean)
+              .map((n) => ruleTitleMap.get(n) || n)}
+          />
+        ))}
+      </div>
+
       {(result || action) && (
         <div
-          className={`mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-xs font-bold ${CARD}`}
+          className={`mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-xs font-bold ${CARD}`}
         >
           {result ? (
             <>
@@ -96,23 +118,6 @@ export function PickList({
           {action && <div className="ml-auto shrink-0">{action}</div>}
         </div>
       )}
-
-      {/* 열 수는 화면 폭이 아니라 **이 목록이 실제로 받은 폭**을 따른다(컨테이너 쿼리) —
-          홈은 우측 사이드바에 폭을 내주고 `/reports/{date}` 는 전체 폭을 쓴다. */}
-      <div className="grid grid-cols-1 gap-3 @md:grid-cols-2 @4xl:grid-cols-3">
-        {reports.map((r) => (
-          <StockReportCard
-            key={r.stock_code}
-            report={r}
-            date={date}
-            featured={r === featured}
-            ruleTitles={(r.rule_names ?? "")
-              .split(",")
-              .filter(Boolean)
-              .map((n) => ruleTitleMap.get(n) || n)}
-          />
-        ))}
-      </div>
     </section>
   );
 }

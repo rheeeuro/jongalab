@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { RecordSummary } from "@/types";
-import { CARD, INSET } from "@/lib/ui";
+import { CARD, HERO_ROW_H, INSET } from "@/lib/ui";
 
 function signed(pct: number): string {
   return `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
@@ -37,7 +37,9 @@ export function RecordStrip({
     summary.avg_exec_ret !== null && summary.exec_days !== summary.days;
 
   return (
-    <Link href={href} className={`group block p-4 ${CARD}`}>
+    // `HERO_ROW_H` 는 홈 2단에서 좌측 1등 픽 카드와 **높이를 맞추기 위한 공통 하한**이다
+    // (어긋나면 그만큼 우측 뉴스 카드 상단이 좌측 2·3·4등 줄과 틀어진다).
+    <Link href={href} className={`group block p-4 ${HERO_ROW_H} ${CARD}`}>
       <div className="flex items-center gap-1.5">
         <p className="text-[11px] font-extrabold tracking-wide text-slate-400 uppercase dark:text-slate-500">
           최근 {summary.days}거래일 성적

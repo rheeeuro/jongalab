@@ -123,8 +123,12 @@ export default async function HomePage() {
             그래서 3개 자식을 명시적 그리드 좌표로 배치한다.
             `grid-rows-[auto_1fr]` 가 필수다 — 두 행이 다 auto 면 2행을 걸친 추천 목록의
             높이가 **두 행에 절반씩 나뉘어** 1행이 성적 카드보다 훨씬 커지고, 성적과 뉴스
-            사이에 빈 공간이 생긴다. 2행을 flexible 로 두면 남는 높이를 2행이 흡수한다. */}
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-6">
+            사이에 빈 공간이 생긴다. 2행을 flexible 로 두면 남는 높이를 2행이 흡수한다.
+
+            **세로 간격(`gap-3`)은 카드 그리드 안쪽과 같은 값이어야 한다.** 우측 뉴스 카드는
+            `성적 + 세로 간격` 아래에서 시작하고 좌측 2행(2·3·4등)은 `1등 카드 + gap-3` 아래에서
+            시작하므로, 두 간격이 다르거나 두 카드 높이(`HERO_ROW_H`)가 다르면 상단이 틀어진다. */}
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_19rem] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-6">
           <div className="lg:col-start-2 lg:row-start-1">
             <RecordStrip summary={record} />
           </div>
