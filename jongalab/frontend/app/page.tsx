@@ -20,11 +20,11 @@ import { PickList } from "@/components/pick/PickList";
 import { SeedAllocator } from "@/components/pick/SeedAllocator";
 import { MacroEventNotice } from "@/components/pick/MacroEventNotice";
 import {
-  IndexDigest,
-  IndexDigestSkeleton,
-  NewsDigest,
-  SectorDigest,
-} from "@/components/home/HomeDigest";
+  IndexChips,
+  IndexChipsSkeleton,
+  MarketPulse,
+} from "@/components/home/MarketPulse";
+import { NewsDigest } from "@/components/home/NewsDigest";
 
 export const metadata: Metadata = {
   // 루트 page 는 루트 layout 의 title.template 적용 대상이 아니라(자식 세그먼트만 해당)
@@ -59,19 +59,23 @@ async function getNewsHeat(date: string): Promise<NewsHeatItem[]> {
 }
 
 // 외부 시세 API 라 1초 이상 걸리는 구간 — 추천 목록을 막지 않도록 Suspense 로 스트리밍한다.
-async function IndexDigestSection() {
+async function IndexChipsSection() {
   const indices = await apiFetch<{
     US: MarketIndex[];
     KR: MarketIndex[];
   } | null>(`/api/market-indices`, null);
-  return <IndexDigest indices={indices} />;
+  return <IndexChips indices={indices} />;
 }
 
 export const dynamic = "force-dynamic";
 
-/** 홈(추천 탭) — 종목 추천이 본체이고, 그 아래 시장·섹터·뉴스는 **압축 요약**만 둔다.
+/** 홈(추천 탭) — 종목 추천이 본체이고, 시장 지표는 **압축 요약**만 둔다.
  *
- * `/reports/{date}` 와 구성을 일부러 다르게 한다: 홈에만 최근 성적·매크로 경고·요약 3종이
+ * 화면은 `헤더 → 시장 칩 한 줄 → 매크로 경고 → (추천 | 성적·뉴스)` 순이다.
+ * 지표를 픽 목록 위로 올린 건 예전 구조에서 카드 10장을 스크롤해야 지수·섹터가 나왔기
+ * 때문이고, 칩 한 줄로 묶은 건 그래도 추천이 첫 화면을 유지해야 하기 때문이다.
+ *
+ * `/reports/{date}` 와 구성을 일부러 다르게 한다: 홈에만 최근 성적·매크로 경고·시장 요약이
  * 붙고, 날짜 이동과 그날 섹터 상세는 리포트 화면이 갖는다. 두 화면이 똑같으면 랜딩으로서의
  * 역할이 없어진다.
  */
@@ -98,28 +102,42 @@ export default async function HomePage() {
 
   return (
     <main className="min-h-screen">
-      <div className="mx-auto max-w-7xl space-y-6 px-4 py-5 sm:px-6 sm:py-8">
+      <div className="mx-auto max-w-7xl space-y-4 px-4 py-5 sm:px-6 sm:py-8">
         <PickHero date={date} pickCount={reports.length} ruleCount={ruleCount} />
 
-        <RecordStrip summary={record} />
+        {/* 시장 지표는 추천 **위**에 둔다 — 칩 한 줄이라 픽을 밀어내지 않는다 */}
+        <MarketPulse
+          sectors={sectors}
+          indexSlot={
+            <Suspense fallback={<IndexChipsSkeleton />}>
+              <IndexChipsSection />
+            </Suspense>
+          }
+        />
 
         {/* 매크로 경고는 '오늘 밤' 기준이라 최신 리포트를 보는 홈에만 둔다 */}
         <MacroEventNotice events={macroEvents} />
 
-        <PickList
-          reports={reports}
-          date={date}
-          ruleTitleMap={ruleTitleMap}
-          action={<SeedAllocator reports={reports} />}
-        />
+        {/* 데스크탑(lg+)은 좌 추천 / 우 사이드바 2단. 모바일은 DOM 순서 그대로
+            성적 → 추천 → 뉴스 로 쌓인다(사이드바를 통째로 위에 두면 픽이 밀린다).
+            그래서 3개 자식을 명시적 그리드 좌표로 배치한다. */}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start lg:gap-6">
+          <div className="lg:col-start-2 lg:row-start-1">
+            <RecordStrip summary={record} />
+          </div>
 
-        {/* 시장 요약 — 각 탭의 압축본. 여기서 더 키우지 말 것(HomeDigest 주석 참고). */}
-        <div className="space-y-5 border-t border-slate-100 pt-6 dark:border-slate-800/60">
-          <Suspense fallback={<IndexDigestSkeleton />}>
-            <IndexDigestSection />
-          </Suspense>
-          <SectorDigest sectors={sectors} />
-          <NewsDigest items={newsHeat} date={date} />
+          <div className="lg:col-start-1 lg:row-start-1 lg:row-span-2">
+            <PickList
+              reports={reports}
+              date={date}
+              ruleTitleMap={ruleTitleMap}
+              action={<SeedAllocator reports={reports} />}
+            />
+          </div>
+
+          <div className="lg:col-start-2 lg:row-start-2">
+            <NewsDigest items={newsHeat} date={date} />
+          </div>
         </div>
       </div>
     </main>

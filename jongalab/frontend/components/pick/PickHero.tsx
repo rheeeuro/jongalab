@@ -44,21 +44,24 @@ export function PickHero({
         </div>
       )}
 
-      <h1 className="mt-2 text-3xl font-black leading-tight tracking-tight text-slate-900 sm:text-4xl dark:text-slate-100">
-        오늘의 추천{" "}
-        <span className="text-indigo-600 tabular-nums dark:text-indigo-400">
-          {pickCount}종목
-        </span>
-      </h1>
-
-      <p className="mt-2 text-sm font-medium text-slate-500 dark:text-slate-400">
-        {ruleCount > 0
-          ? `실험실에서 검증을 통과한 규칙 ${ruleCount}개가 골랐습니다.`
-          : "수급·기술·재료 종합 점수로 골랐습니다."}
-      </p>
+      {/* 제목과 선정 근거를 한 줄에 붙인다 — 모바일 첫 화면에서 지표(MarketPulse)까지
+          보이려면 헤더가 세 줄을 넘지 않아야 한다. */}
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <h1 className="text-2xl font-black leading-tight tracking-tight text-slate-900 sm:text-3xl dark:text-slate-100">
+          오늘의 추천{" "}
+          <span className="text-indigo-600 tabular-nums dark:text-indigo-400">
+            {pickCount}종목
+          </span>
+        </h1>
+        <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+          {ruleCount > 0
+            ? `검증 통과 규칙 ${ruleCount}개가 선정`
+            : "수급·기술·재료 종합 점수로 선정"}
+        </p>
+      </div>
 
       {/* 면책 — 닫힌 상태에서도 핵심 문구가 보이게 남긴다(모바일 첫 화면을 문단이 먹지 않게) */}
-      <details className="group mt-3 rounded-2xl bg-amber-50/70 px-3.5 py-2.5 dark:bg-amber-500/5">
+      <details className="group mt-2 rounded-2xl bg-amber-50/70 px-3 py-2 dark:bg-amber-500/5">
         <summary className="flex cursor-pointer list-none items-start gap-1.5 text-xs leading-relaxed font-semibold text-amber-800 dark:text-amber-300">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>

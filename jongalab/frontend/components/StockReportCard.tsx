@@ -83,9 +83,16 @@ export function StockReportCard({
           ? "bg-blue-50/30 ring-1 ring-blue-200/40 dark:bg-blue-950/20 dark:ring-blue-900/40"
           : "bg-white dark:bg-slate-900/60";
 
-  // 근거 줄은 최대 2개까지만 — 3개 이상이면 모바일에서 카드 높이가 들쭉날쭉해진다.
+  // 근거는 한 줄에 최대 2개까지만 — 나머지는 '외 N' 으로 접어 카드 높이를 고정한다.
   const shownRules = ruleTitles.slice(0, 2);
   const hiddenRuleCount = ruleTitles.length - shownRules.length;
+  const reasonText =
+    isRulePick && shownRules.length > 0
+      ? shownRules.join(" · ") +
+        (hiddenRuleCount > 0 ? ` 외 ${hiddenRuleCount}` : "")
+      : isRulePick
+        ? "검증된 규칙 선정"
+        : "종합 점수 상위 선정";
 
   return (
     <Link
@@ -138,106 +145,77 @@ export function StockReportCard({
         </div>
       </div>
 
-      {/* 왜 뽑혔나 — 선정 근거를 카드에서 바로 읽게 한다(예전엔 '룰 선정 3' 숫자만 있었다) */}
-      <div className="mt-3 rounded-xl bg-slate-50/80 px-2.5 py-2 dark:bg-slate-800/40">
-        <p className="flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-          <FlaskConical className="h-3 w-3" />
-          왜 뽑혔나
+      {/* 왜 뽑혔나 + 점수 — 한 줄. 예전엔 라벨 붙은 박스 + 점수 줄이 따로였는데,
+          홈에서 카드 10장이 세로로 쌓이면 그만큼 시장 지표가 화면 밖으로 밀렸다.
+          플라스크 아이콘이 '선정 근거'를 대신 표시하고, 전체 규칙은 title 에 남긴다. */}
+      <div className="mt-2.5 flex items-center gap-1.5">
+        <FlaskConical className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
+        <p
+          title={ruleTitles.length > 0 ? ruleTitles.join(", ") : undefined}
+          className="min-w-0 flex-1 truncate text-xs font-bold text-slate-700 dark:text-slate-200"
+        >
+          {reasonText}
         </p>
-        {isRulePick && shownRules.length > 0 ? (
-          <ul className="mt-1 space-y-0.5">
-            {shownRules.map((title) => (
-              <li
-                key={title}
-                className="truncate text-xs font-bold text-slate-700 dark:text-slate-200"
-              >
-                {title}
-              </li>
-            ))}
-            {hiddenRuleCount > 0 && (
-              <li className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
-                외 {hiddenRuleCount}개 규칙
-              </li>
-            )}
-          </ul>
-        ) : (
-          <p className="mt-1 truncate text-xs font-bold text-slate-700 dark:text-slate-200">
-            {isRulePick ? "검증된 규칙 선정" : "종합 점수 상위 선정"}
-          </p>
-        )}
-      </div>
-
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span
-            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
-              GRADE_TONE[r.supply_grade] || GRADE_TONE.D
-            }`}
-          >
-            수급 {r.supply_grade}
-          </span>
-          {(r.news_count ?? 0) > 0 && (
-            <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
-              뉴스 {r.news_count}
-            </span>
-          )}
-        </div>
-        <div className="shrink-0 text-right tabular-nums">
+        <span className="shrink-0 tabular-nums">
           <span className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">
             {r.score.toFixed(0)}
           </span>
-          <span className="text-xs text-slate-400">점</span>
-        </div>
+          <span className="text-[10px] text-slate-400">점</span>
+        </span>
       </div>
 
-      {/* 다음날 아침 갭 결과 — NXT, KRX, 최종 한 줄 */}
-      {(gapLines.length > 0 || totalPct !== null) && (
-        <div
-          className={`mt-3 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 rounded-lg px-2.5 py-1.5 text-[11px] font-bold ${
-            totalPct === null
-              ? "bg-slate-50 dark:bg-slate-800/60"
-              : totalPct > 0
-                ? "bg-rose-100/60 dark:bg-rose-950/40"
-                : totalPct < 0
-                  ? "bg-blue-100/60 dark:bg-blue-950/40"
-                  : "bg-slate-50 dark:bg-slate-800/60"
+      {/* 배지 + 다음날 아침 갭 결과(NXT·KRX·최종) — 한 줄에 묶는다 */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-bold">
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+            GRADE_TONE[r.supply_grade] || GRADE_TONE.D
           }`}
         >
-          {/* 무상증자 권리락일(sql/50) — 아래 등락률이 조정 기준가 대비임을 밝힌다.
-              (없으면 배정비율만큼 낮아진 기준가 때문에 오른 종목이 하락으로 읽힌다) */}
-          {r.gap_ex_rights_ratio != null && (
-            <span
-              title="무상증자 권리락일입니다 — 배정비율만큼 낮아진 권리락 기준가 대비 등락률입니다"
-              className="shrink-0 rounded-full bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900 dark:bg-amber-900/50 dark:text-amber-200"
-            >
-              권리락
-            </span>
-          )}
-          {gapLines.map((g) => (
-            <span
-              key={g.label}
-              className="inline-flex items-baseline gap-1"
-            >
-              <span className="text-slate-500 dark:text-slate-400">
-                {g.label}
+          수급 {r.supply_grade}
+        </span>
+        {(r.news_count ?? 0) > 0 && (
+          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+            뉴스 {r.news_count}
+          </span>
+        )}
+        {/* 무상증자 권리락일(sql/50) — 아래 등락률이 조정 기준가 대비임을 밝힌다.
+            (없으면 배정비율만큼 낮아진 기준가 때문에 오른 종목이 하락으로 읽힌다) */}
+        {r.gap_ex_rights_ratio != null && (
+          <span
+            title="무상증자 권리락일입니다 — 배정비율만큼 낮아진 권리락 기준가 대비 등락률입니다"
+            className="shrink-0 rounded-full bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900 dark:bg-amber-900/50 dark:text-amber-200"
+          >
+            권리락
+          </span>
+        )}
+
+        {(gapLines.length > 0 || totalPct !== null) && (
+          <span className="ml-auto flex shrink-0 items-baseline gap-2">
+            {gapLines.map((g) => (
+              <span key={g.label} className="inline-flex items-baseline gap-0.5">
+                <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                  {g.label}
+                </span>
+                <span className={`tabular-nums ${pctColor(g.pct)}`}>
+                  {g.pct > 0 ? "+" : ""}
+                  {g.pct.toFixed(2)}%
+                </span>
               </span>
-              <span className={`tabular-nums ${pctColor(g.pct)}`}>
-                {g.pct > 0 ? "+" : ""}
-                {g.pct.toFixed(2)}%
+            ))}
+            {totalPct !== null && (
+              <span className="inline-flex items-baseline gap-0.5">
+                <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                  최종
+                </span>
+                <span className={`font-extrabold tabular-nums ${pctColor(totalPct)}`}>
+                  {totalPct > 0 ? "+" : ""}
+                  {totalPct.toFixed(2)}%
+                </span>
               </span>
-            </span>
-          ))}
-          {totalPct !== null && (
-            <span className="ml-auto inline-flex items-baseline gap-1">
-              <span className="text-slate-500 dark:text-slate-400">최종</span>
-              <span className={`tabular-nums ${pctColor(totalPct)}`}>
-                {totalPct > 0 ? "+" : ""}
-                {totalPct.toFixed(2)}%
-              </span>
-            </span>
-          )}
-        </div>
-      )}
+            )}
+          </span>
+        )}
+      </div>
     </Link>
   );
 }

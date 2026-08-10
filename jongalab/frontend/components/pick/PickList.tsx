@@ -52,7 +52,7 @@ export function PickList({
   const result = dayResult(reports);
 
   return (
-    <section>
+    <section className="@container">
       {(result || action) && (
         <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl bg-white px-4 py-3 text-xs font-bold dark:bg-slate-900/60">
           {result ? (
@@ -83,7 +83,9 @@ export function PickList({
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {/* 열 수는 화면 폭이 아니라 **이 목록이 실제로 받은 폭**을 따른다(컨테이너 쿼리) —
+          홈은 우측 사이드바에 폭을 내주고 `/reports/{date}` 는 전체 폭을 쓴다. */}
+      <div className="grid grid-cols-1 gap-3 @md:grid-cols-2 @4xl:grid-cols-3">
         {reports.map((r) => (
           <StockReportCard
             key={r.stock_code}
