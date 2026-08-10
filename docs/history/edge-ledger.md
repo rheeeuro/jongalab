@@ -797,6 +797,30 @@ sql/23(통합 눌림 benchmark)을 등록 당일 표본 0 시점 사용자 정�
 
 이로써 7/19 하루에 rule 12종 등록(레벨 5 + 서지 3 + 프로그램 1 + 용어 3) — **8월 판정 전까지 추가 등록은 쉬기로 함**(rule 난립 방지). 판정 시 서지 축은 1~2일/3~4일 구간별로 함께 볼 것.
 
+### 2026-08-10 — 수급 3종에서 은어 제거: 제목(sql/62) → 슬러그·백필(sql/63)
+> 미사일·독수리·변곡점은 이름만 보고 무엇을 잡는 룰인지 알 수 없다는 사용자 지적 → 표시명과 슬러그를 조건이 읽히는 이름으로 교체. **predicate·status·표본·`edge_rule.id` 는 불변**(f5_frgn_surge_flat34 는 live 유지, 3종 모두 `edge_rule_daily` 15행·7/20~8/7 그대로).
+
+| 이전 슬러그 | 현재 슬러그 | 이전 title | 현재 title |
+|---|---|---|---|
+| `f5_supply_missile` | `f5_bottom_entry_dual_buy` | 수급 미사일 | 바닥권 첫 등장 + 외인·기관 동반 매수 |
+| `f5_supply_eagle` | `f5_frgn_surge_flat34` | 수급 독수리 | 외인 대량 매수 후 3~4일 횡보 |
+| `f5_supply_inflection` | `f5_supply_turn_vol2` | 수급 변곡점 | 순매수 전환 첫날 + 거래량 2배 |
+
+이 문서 다른 항목들의 은어·옛 슬러그 표기는 append-only 원칙대로 두므로, 옛 이름이 보이면 이 표로 매핑한다.
+
+**두 단계로 나뉜 경위**: sql/62 는 `title`·`description` 만 바꿨다(description 은 `"수급 미사일"이라는
+트레이더 용어에서 온 전략입니다` 식 도입부만 제거, 조건 설명 본문은 sql/30 그대로). 슬러그는
+과거 태깅이 깨질 것을 우려해 두려 했으나 — 실험실 상세 URL(`/lab/<name>`)과 상세 하단 mono
+표기로 **사용자에게 그대로 노출되는 값**이라 은어를 남길 이유가 없어, 사용자 지시로 sql/63 에서
+슬러그까지 교체하고 백필했다.
+
+**백필 대상은 슬러그 문자열을 저장하는 두 컬럼뿐**: `jongalab.daily_stock_report.rule_names`(9행) ·
+`trading.trade_signal.rule_names`(17행, 짝 마이그레이션 `trading/sql/5`). 둘 다 콤마 목록이라
+`REPLACE()` 부분 문자열 치환으로 처리했다(세 슬러그가 서로 접두어가 아니라 순서 무관).
+`edge_rule_daily` 는 `rule_id`(INT) 참조, `edge_rule_daily.matched` 는 종목 코드/명만 담아 무영향.
+`family`('f5_supply')는 `edge_policy.FAMILIES` 상수와 맞물린 별개 축이라 유지했다.
+**코드에 슬러그 하드코딩은 없다**(확인: 파이썬 전역 grep — 테스트 픽스처와 주석뿐).
+
 ### volume-profile-prog-0719
 > 2026-07-19 매물대 PDF 후속 — 볼륨프로파일 피처 선축적(sql/25, rule 없음·8월 결합) + 프로그램 오후 전환 rule(sql/26, 스냅샷 차분·ka90008 신규 엔드포인트)
 

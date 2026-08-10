@@ -208,17 +208,19 @@
 - **사전 점검 불가**: 틱/스냅샷 이력이 없어 인샘플 재현 불가 — 초기 시드(sql/8)와 같은
   순수 out-of-sample 검증. 첫 캡처는 등록 다음 거래일부터.
 
-### `f5_supply_missile` · `f5_supply_eagle` · `f5_supply_inflection` (2026-07-19 — sql/27~29, 수급매매 용어 3종)
+### `f5_bottom_entry_dual_buy` · `f5_frgn_surge_flat34` · `f5_supply_turn_vol2` (2026-07-19 — sql/27~29, 수급매매 용어 3종)
+> 2026-08-10 은어 제거로 title(sql/62)·슬러그(sql/63)가 모두 바뀌었다 — predicate·표본은 그대로.
+> 등록 당시 슬러그는 각각 `f5_supply_missile`·`f5_supply_eagle`·`f5_supply_inflection`(구 제목: 수급 미사일·독수리·변곡점).
 - **출처**: 수급매매 용어 PDF(트레이더 칼럼) — 신규 피처 없이 **기존 컬럼 조합만**으로 등록
   (같은 PDF의 수급 1,2음봉·돌파매매는 기등록, N자형·뒷발차기는 새 피처 필요라 보류).
-- **수급 미사일**: 소외 중소형주 바닥권의 외인·기관 동반 매수 첫 등장.
+- **바닥권 첫 등장 + 외인·기관 동반 매수**(`f5_bottom_entry_dual_buy`): 소외 중소형주 바닥권의 외인·기관 동반 매수 첫 등장.
   `first_seen==1` AND `inst_net_buy>0` AND `frgn_net_buy>0` AND `market_cap<=2조` AND
   `dist_prior_high_pct<=-30`. 사전 점검 n=1(+0.29%) — **저빈도**(전제 충족 자체가 16거래일
   2~3건), 모집단 first_seen 전체는 −1.62%·승률 35%라 그 반례 부분집합 가설.
-- **수급 독수리**: 서지 3~4일 뒤 횡보(2차 상승 직전 매집). `days_since_frgn_surge between
+- **외인 대량 매수 후 3~4일 횡보**(`f5_frgn_surge_flat34`): 서지 3~4일 뒤 횡보(2차 상승 직전 매집). `days_since_frgn_surge between
   [3,4]` AND `change_pct between [-3,3]` — 서지 축(1~2일 눌림/지속)의 확장으로 경과 축 완성.
   사전 점검 n=16/8일 **+1.55%** 승률 62.5% t=1.79 — 인샘플 양(+).
-- **수급 변곡점**: 연속 순매수 첫날(전환) + 거래량 2배 + 양전. `supply_days==1` AND
+- **순매수 전환 첫날 + 거래량 2배**(`f5_supply_turn_vol2`): 연속 순매수 첫날(전환) + 거래량 2배 + 양전. `supply_days==1` AND
   `vol_ratio>=2` AND `change_pct>=0`. vol_ratio>=3 은 매칭 0이라 등록 전 완화.
   사전 점검 n=5(+1.92%, 극소) — 거래량 무관 전체는 −0.65%라 거래량 필터가 핵심 변별.
 
