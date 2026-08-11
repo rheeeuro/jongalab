@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Flame } from "lucide-react";
 import { NewsHeatItem } from "@/types";
 import { MaterialBadge } from "@/components/MaterialBadge";
+import { newsHeatLabel } from "@/lib/news";
 
 /**
  * 뉴스가 몰린 종목 — **유니버스 밖 종목까지** 포함하는 유일한 자리.
@@ -25,13 +26,13 @@ export function NewsBuzzRail({ items }: { items: NewsHeatItem[] }) {
           <Flame className="h-4.5 w-4.5 text-emerald-500" />
           뉴스가 몰린 종목
         </h2>
-        <span className="shrink-0 text-[11px] font-medium text-slate-400">평소 대비 배수</span>
+        <span className="shrink-0 text-[11px] font-medium text-slate-400">평소 대비 뉴스량</span>
       </div>
 
       <ul className="overflow-hidden rounded-2xl bg-white dark:bg-slate-900/60">
         {items.map((it, idx) => {
           const surprise = it.surprise ?? it.mention_count;
-          const prior = it.prior_avg ?? 0;
+          const label = newsHeatLabel(it.mention_count, it.prior_avg);
           return (
             <li key={it.ticker} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
               <Link
@@ -54,8 +55,14 @@ export function NewsBuzzRail({ items }: { items: NewsHeatItem[] }) {
                       )}
                       <MaterialBadge durability={it.durability} />
                     </span>
-                    <span className="shrink-0 text-sm font-extrabold tabular-nums text-emerald-600 dark:text-emerald-400">
-                      ×{surprise.toFixed(1)}
+                    <span
+                      className={`shrink-0 text-sm font-extrabold tabular-nums ${
+                        label.emphasis
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-slate-400 dark:text-slate-500"
+                      }`}
+                    >
+                      {label.headline}
                     </span>
                   </div>
 
@@ -67,9 +74,7 @@ export function NewsBuzzRail({ items }: { items: NewsHeatItem[] }) {
                   </div>
 
                   <p className="mt-1 truncate text-[11px] font-medium text-slate-400 dark:text-slate-500">
-                    <span className="tabular-nums">{it.mention_count}건</span>
-                    {" · "}
-                    <span className="tabular-nums">평소 {prior.toFixed(1)}건/일</span>
+                    <span className="tabular-nums">{label.detail}</span>
                     {it.catalyst ? ` · ${it.catalyst}` : ""}
                   </p>
                 </div>

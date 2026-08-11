@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { NewsMaterialRow } from "@/types";
 import { MaterialBadge, materialAxisLabels } from "@/components/MaterialBadge";
-import { newsSurprise } from "@/lib/news";
+import { newsHeatLabel, newsSurprise } from "@/lib/news";
 
 /**
  * 종목별 재료 목록 — **하나의 목록 + 필터**. (예전 구조: 지속성 등급별 3개 그룹)
@@ -25,7 +25,7 @@ type View = "all" | "selected" | "연속" | "소진" | "pending";
 type Sort = "news" | "change" | "rank";
 
 const SORT_LABEL: Record<Sort, string> = {
-  news: "뉴스 많은 순",
+  news: "평소보다 뉴스 많은 순",
   change: "등락률 순",
   rank: "후보 순위 순",
 };
@@ -211,7 +211,7 @@ function Chip({
 function MaterialRow({ row, date }: { row: NewsMaterialRow; date: string }) {
   const chg = row.change_pct ?? 0;
   const axes = materialAxisLabels(row);
-  const surprise = newsSurprise(row.news_count, row.news_prior_avg);
+  const heat = newsHeatLabel(row.news_count, row.news_prior_avg);
 
   return (
     <Link
@@ -252,9 +252,13 @@ function MaterialRow({ row, date }: { row: NewsMaterialRow; date: string }) {
       <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] font-medium text-slate-400 dark:text-slate-500">
         {row.sector && <span className="truncate">{row.sector}</span>}
         <span aria-hidden>·</span>
-        <span className="tabular-nums">뉴스 {row.news_count}건</span>
-        <span className="tabular-nums text-emerald-600 dark:text-emerald-400">
-          평소 대비 ×{surprise.toFixed(1)}
+        <span className="tabular-nums">{heat.detail}</span>
+        <span
+          className={`tabular-nums ${
+            heat.emphasis ? "font-bold text-emerald-600 dark:text-emerald-400" : ""
+          }`}
+        >
+          {heat.headline}
         </span>
         {axes.map((t) => (
           <span key={t}>· {t}</span>

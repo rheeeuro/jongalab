@@ -40,6 +40,48 @@ export function newsSurprise(count: number, priorAvg?: number | null): number {
   return Math.round((count / Math.max(priorAvg ?? 0, 1)) * 10) / 10;
 }
 
+/** 뉴스량 배수의 화면 표기 — 강조 라벨 + 근거 한 줄. */
+export type NewsHeatLabel = {
+  /** 우측 강조 자리 — "뉴스 4배" · "첫 등장" · "평소 수준" */
+  headline: string;
+  /** 보조줄 근거 — "뉴스 41건 · 평소 10.0건/일" */
+  detail: string;
+  /** 색을 입힐 값인가(평소 수준·뉴스 없음은 회색으로 눕힌다) */
+  emphasis: boolean;
+};
+
+/**
+ * 배수를 사람이 읽는 문구로 — 세 화면(홈 카드·뉴스 랭킹·재료 목록)이 같은 말을 쓰게 한다.
+ *
+ * 표기 규칙이 셋으로 갈려 있던 걸(`평소의 5.0배`·`×5.0`·`평소 대비 ×5.0`) 하나로 모으면서
+ * 두 가지를 고친다.
+ *   1. **목적어를 붙인다** — "평소의 5배"는 주가·거래량으로도 읽힌다. "뉴스 5배"로 못 박는다.
+ *   2. **기저가 없는 종목은 배수로 말하지 않는다** — 분모 하한이 1이라(백엔드 `_SURPRISE_FLOOR`)
+ *      직전 7일 언급이 0건이면 배수가 곧 오늘 건수다. "3배 늘었다"가 아니라 "처음 떴다"이고,
+ *      정렬이 배수순이라 이런 종목이 오히려 상단에 몰린다 — 가장 먼저 읽히는 줄이 가장 틀렸었다.
+ *
+ * 0 < 기저 < 1 구간은 하한 때문에 배수가 **실제보다 작게** 나오는데, 그대로 둔다.
+ * 정렬(백엔드 surprise)과 같은 값을 써야 순위와 라벨이 어긋나지 않는다 — 보조줄의
+ * `평소 0.3건/일` 이 실제 기저를 보여주므로 과장 방향으로 틀리는 일은 없다.
+ *
+ * 배수는 정수로 반올림한다. 하루 건수의 비율에 소수점 한 자리는 없는 정밀도다.
+ */
+export function newsHeatLabel(count: number, priorAvg?: number | null): NewsHeatLabel {
+  const prior = priorAvg ?? 0;
+  if (!count) return { headline: "뉴스 없음", detail: "뉴스 0건", emphasis: false };
+
+  const base = `뉴스 ${count}건`;
+  if (prior <= 0) {
+    return { headline: "첫 등장", detail: `${base} · 최근 7일 없음`, emphasis: true };
+  }
+
+  const detail = `${base} · 평소 ${prior.toFixed(1)}건/일`;
+  const m = newsSurprise(count, prior);
+  if (m >= 9.5) return { headline: "뉴스 10배+", detail, emphasis: true };
+  if (m >= 1.5) return { headline: `뉴스 ${Math.round(m)}배`, detail, emphasis: true };
+  return { headline: "평소 수준", detail, emphasis: false };
+}
+
 /**
  * 재료 판정 근거를 사이트 사용자의 말로 — 저장된 문장에 섞인 내부 필드명을 치환한다.
  *

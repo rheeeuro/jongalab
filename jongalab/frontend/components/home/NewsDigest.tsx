@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ChevronRight, Newspaper } from "lucide-react";
 import { NewsHeatItem } from "@/types";
 import { CARD, INSET } from "@/lib/ui";
+import { newsHeatLabel } from "@/lib/news";
 
 /** 뉴스가 몰린 종목 — 홈의 **압축본**이다(전체는 `/news`).
  *
@@ -41,10 +42,15 @@ export function NewsDigest({
           <ChevronRight className="h-3 w-3" />
         </Link>
       </div>
+      {/* 창(24시간)과 막대 기준을 못 박는다 — 뉴스 탭 랭킹은 '하루' 창이라 값이 달라 보인다. */}
+      <p className="mt-0.5 text-[10px] font-medium text-slate-400 dark:text-slate-500">
+        최근 24시간 · 평소 대비 뉴스량
+      </p>
 
       <ul className="mt-2 space-y-2.5">
         {top.map((n) => {
           const surprise = n.surprise ?? 1;
+          const label = newsHeatLabel(n.mention_count, n.prior_avg);
           return (
             <li key={n.ticker}>
               <Link
@@ -62,8 +68,14 @@ export function NewsDigest({
                       </span>
                     )}
                   </p>
-                  <p className="shrink-0 text-[11px] font-extrabold text-slate-500 tabular-nums dark:text-slate-400">
-                    평소의 {surprise.toFixed(1)}배
+                  <p
+                    className={`shrink-0 text-[11px] font-extrabold tabular-nums ${
+                      label.emphasis
+                        ? "text-slate-600 dark:text-slate-300"
+                        : "text-slate-400 dark:text-slate-500"
+                    }`}
+                  >
+                    {label.headline}
                   </p>
                 </div>
                 <div className={`mt-1 h-1.5 ${INSET}`}>
@@ -72,8 +84,8 @@ export function NewsDigest({
                     style={{ width: `${Math.max((surprise / max) * 100, 4)}%` }}
                   />
                 </div>
-                <p className="mt-0.5 text-[10px] font-medium text-slate-400 tabular-nums dark:text-slate-500">
-                  기사 {n.mention_count}건
+                <p className="mt-0.5 truncate text-[10px] font-medium text-slate-400 tabular-nums dark:text-slate-500">
+                  {label.detail}
                 </p>
               </Link>
             </li>
