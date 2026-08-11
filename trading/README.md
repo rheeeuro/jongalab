@@ -98,8 +98,10 @@ fills_sync (15:31 / 19:55) · ka10076 체결 동기화 → position 갱신 + 매
         │
 settle --venue nxt (08:03)      · NXT 상장 종목: NXT 시초가로 갭 판정 (tag=nxt)
 settle --venue krx_open (09:03) · NXT 미상장 종목: KRX 개장가로 갭 판정 (tag=krxopen)
-  · **갭상승 → 전량 매도(잔량·plan 없음) / 갭하락 → 절반 매도 + 저가이탈선(시초가−STOP_BUFFER_PCT) plan 생성**
-    (1주는 절반=0 이라 매도 없이 전량 보유로 회복 대기)
+  · **갭 방향 무관 절반 매도 + 잔량 plan 생성. 갈리는 건 초기 스탑선뿐이다** —
+    갭상승 = **시초가(:03) 한 틱 아래**(버퍼 없음, 한 틱만 밀려도 모니터가 잔량 청산) /
+    갭하락 = 저가이탈선(시초가−STOP_BUFFER_PCT 버퍼, 회복 대기)
+    (1주는 절반=0 이라 매도 없이 전량 보유로 감시)
   · 두 단계는 동일 전략(`_run_open_stage` 공용). 대상 종목 집합·거래소·tag 만 다르다
   · NXT 미상장 종목은 NXT 호가가 없어 08:03 을 건너뛰고 KRX 개장(워밍업 후) 09:03 에 처리한다
         │
@@ -157,7 +159,7 @@ watchdog 은 **jongalab 통합 스케줄러의 dead-man's switch 도 겸한다**
 | 서킷브레이커 | `risk_engine.py` + `risk_state.py` | 일일 실현손실 ≤ -MAX_DAILY_LOSS 시 자동 킬스위치 발동 |
 | 하드 한도 | `risk_engine.py` | 일일 주문수(기본 20, **매수만 카운트**). 종목당 명목금액·동시 보유종목수 상한은 제거됨(`MAX_NOTIONAL_PER_NAME`/`MAX_POSITIONS` 는 폴백 사이징 용도로만 존치) |
 | 멱등키 | `execution_engine.py`, `order.py` | `YYYYMMDD:signal_id:side` UNIQUE — cron 재실행 중복 방지(거부 `:x<id>`, dead `:dead:<id>`, 부분체결 `:partial:N` 접미사로 키 해제) |
-| 하드 손절 / 트레일링 | `monitor.py`, `settle_plan.py` | `HARD_STOP_LOSS_PCT` 즉시 전량(plan 유무 무관 — 보유 포지션 전부) / `TRAIL_PCT` 단조 상승 스톱(**갭하락 잔량 plan 에만 해당** — 갭상승은 시초가 전량매도라 잔량이 없다) |
+| 하드 손절 / 트레일링 | `monitor.py`, `settle_plan.py` | `HARD_STOP_LOSS_PCT` 즉시 전량(plan 유무 무관 — 보유 포지션 전부) / `TRAIL_PCT` 단조 상승 스톱(**갭상승·갭하락 잔량 plan 양쪽**. 갭상승은 초기 스탑선이 시초가 한 틱 아래라 첫 하락틱에 청산되고, 버티면 트레일링이 상승을 따라간다) |
 | 종목당 시드 캡 | `seed_allocator.py` + `SEED_MAX_NAME_PCT`(0.25) | 하한가에선 손절이 물리적으로 불가하므로 **단일 종목 최악 손실은 이 캡으로만 봉쇄된다**. 고가주 첫 1주만 캡×2 이내 예외. 확신도와 무관하게 항상 적용 |
 | 확신도 사이징 | `seed_allocator.conviction_from_signal`, `signal_executor.py`, `/buy-preview` + `SEED_CONVICTION_MAX_MULT`(3.0) | 표 = 매칭 selector rule 수(`rule_names`) + legacy 점수 1표(그날 점수 top-N 판정 N 은 `edge_rule.get_selected_count` — 집행 레이어 rule 의 `in_scope` 와 같은 기준). 목표금액 = `seed × 표/Σ표`. 표 없음/조회 실패 → 전원 1표 = **등가중과 완전 동일**. ⚠️ **점수 '크기' tilt 는 금지**(쓰는 건 근거의 중복 매칭 개수뿐). ⚠️ 미검증 통설 — `audit_log('seed_conviction')` 로 사후 채점, 롤백은 값 1.0 |
 | 배분 대상 컷(TOP_N=10) | `seed_allocator.allocate` | 유효가 후보를 **표 수 내림차순 → 점수 내림차순**으로 정렬해 상위 10개만 배분한다. 사이징이 표 비례라 컷도 같은 자를 쓴다 — 표 많은 종목을 컷에서 떨어뜨리면 두 단계가 상충한다. 정렬 키가 클램프된 표 수라 `SEED_CONVICTION_MAX_MULT=1.0` 이면 전원 1.0 → **종전 점수순 컷으로 정확히 롤백**된다 |
@@ -177,7 +179,8 @@ watchdog 은 **jongalab 통합 스케줄러의 dead-man's switch 도 겸한다**
 | 정합성 점검 | `reconcile.py` | 매일 브로커 잔고 vs 로컬 포지션 대조 — **감지·알림만 하고 자동 교정은 하지 않는다** |
 | 미실행 감시 | `watchdog.py` + `audit_log` worker_done | 위 흐름 말미 참고 |
 
-튜닝 파라미터(`config.py`): `STOP_BUFFER_PCT`(갭하락 버퍼) · `TRAIL_PCT`(트레일링, 15초 주기 기준으로
+튜닝 파라미터(`config.py`): `STOP_BUFFER_PCT`(**갭하락 전용** 버퍼 — 갭상승 스탑선은 파라미터가 아니라
+`시초가−1원`(한 틱) 고정이다) · `TRAIL_PCT`(트레일링, 15초 주기 기준으로
 튜닝된 값) · `HARD_STOP_LOSS_PCT`(하드 손절) · `FUTURES_SD_*`(선물 게이트 축별 σ — 이 값이 강도 눈금의
 기준이라 시장 변동성 레짐이 바뀌면 재측정 대상) · `FUTURES_FLAT_BAND`/`FUTURES_FULL_CUT_PCT`(이 둘은
 **monitor 의 US 정규장 손절 강화 축 전용** — 선물 게이트는 σ 기준으로 옮겼다) · `SEED_MAX_NAME_PCT`(종목당 시드 캡) ·
@@ -244,8 +247,8 @@ cd trading/frontend && npm run dev                                        # 대�
 - 집행 레이어 rule — 레이어 감지·fail-open 4종·점수 선정분 불개입·오설정 rule 격리·행 비변형·
   밴드는 predicate 소관 / NXT 갭 산식 / **predicate 복제 드리프트**(jongalab 원본과 op·NULL 규약·AND
   결합이 어긋나면 '측정한 것과 다른 것을 산다')
-- 레버리지 치환 순수 로직 · 죽은 주문 판정 가드 4종 · 시초가 단계 분기(갭상승=전량·plan 미생성 / 갭하락=
-  절반+버퍼 plan)
+- 레버리지 치환 순수 로직 · 죽은 주문 판정 가드 4종 · 시초가 단계 분기(방향 무관 절반+plan, 스탑선만
+  갈림 — 갭상승=시초가−1틱 / 갭하락=시초가−버퍼)
 - 실시간 피드 — TTL/미구독/다른 보드/예외 → REST 폴백, 부호 붙은 현재가 절대값 파싱, 체결통보 1회 소비,
   등록 상한 캡, **틱 경로는 하드손절 즉시 집행하되 트레일링 상향은 안 함**, 쿨다운 억제·경과 후 재시도,
   체결 확인 시 스냅샷 제거, **수급 관측이 판정에 개입하지 않음**

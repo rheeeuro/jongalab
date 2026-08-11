@@ -2,9 +2,10 @@
 
 검증 포인트(자금 경로):
   - 단계가 자기 대상 종목만 처리한다(NXT 단계=NXT 상장, KRX 개장 단계=NXT 미상장).
-  - **갭상승은 전량 매도하고 감시계획을 만들지 않는다**(2026-08-03 잔량 트레일링 폐지).
-  - 갭하락은 절반 매도 + 스탑선 = 시초가-버퍼로 잔량 감시계획을 만든다.
-  - 갭하락 1주(절반=0)는 매도 없이 감시계획만 만든다(회복 대기).
+  - 갭 방향 무관 절반 매도 + 잔량 감시계획. **갈리는 건 초기 스탑선뿐**이다.
+  - **갭상승 스탑선 = 시초가 한 틱 아래**(버퍼 없음 — 한 틱만 밀려도 청산, 2026-08-11).
+  - 갭하락은 스탑선 = 시초가-버퍼(STOP_BUFFER_PCT, 회복 대기).
+  - 1주(절반=0)는 방향 무관 매도 없이 감시계획만 만든다.
 DB·네트워크 없이 fake 로 검증한다(conftest 철학 동일).
 """
 import pytest
@@ -88,11 +89,11 @@ def test_gap_down_stop_is_open_minus_buffer(patched, monkeypatch):
     assert kwargs["stop_price"] == round(9000 * (1 - STOP_BUFFER_PCT / 100))
 
 
-def test_gap_up_sells_full_qty_without_plan(patched, monkeypatch):
-    """갭상승이면 잔량 없이 전량 매도하고 감시계획을 만들지 않는다(2026-08-03 변경).
+def test_gap_up_stop_is_open_minus_one_tick(patched, monkeypatch):
+    """갭상승이면 절반 매도 + 잔량 스탑선 = 시초가 한 틱 아래(버퍼 없음, 2026-08-11 변경).
 
-    종전엔 절반만 팔고 잔량 스탑선을 절반매도 체결가(버퍼 0)로 뒀으나, 실체결 66건에서
-    잔량이 65/66건 더 싸게 팔려(중앙 보유 0분) 잔량 경로 자체를 없앴다.
+    스탑선을 시초가 그대로 두면 모니터 breach 판정(`cur <= stop_price`)이 하락 없이도
+    발동하므로 1원을 뺀다 — 시초가에서 한 틱이라도 밀리면 잔량이 청산된다.
     """
     monkeypatch.setattr(settle.position_repo, "get_open_positions",
                         lambda: _positions(("AAA", 10, 10000)))
@@ -101,21 +102,24 @@ def test_gap_up_sells_full_qty_without_plan(patched, monkeypatch):
     settle.run_krx_open(eng, "20260629")
 
     assert len(eng.sells) == 1
-    assert eng.sells[0]["qty"] == 10  # 절반(5)이 아니라 전량
+    assert eng.sells[0]["qty"] == 5  # 절반(10//2)
     assert eng.sells[0]["price"] == 12000 and eng.sells[0]["tag"] == "krxopen"
-    assert patched == [], "갭상승은 감시계획을 만들지 않는다"
+    (args, kwargs) = patched[0]
+    assert args[2] == "up"
+    assert kwargs["stop_price"] == 11999  # 시초가 - 1원(= 어떤 하락틱이든 선 아래)
 
 
-def test_gap_up_single_share_sells_full(patched, monkeypatch):
-    """갭상승 1주도 전량(1주) 매도 — 종전엔 절반=0 이라 매도 없이 plan 만 만들었다."""
+def test_gap_up_single_share_holds_with_plan(patched, monkeypatch):
+    """갭상승 1주(절반=0)는 매도 없이 감시계획만 — 잔량 트레일링으로 상승분을 따라간다."""
     monkeypatch.setattr(settle.position_repo, "get_open_positions",
                         lambda: _positions(("AAA", 1, 10000)))
     eng = FakeEngine(price=12000, nxt_codes=set())
 
     settle.run_krx_open(eng, "20260629")
 
-    assert [s["qty"] for s in eng.sells] == [1]
-    assert patched == []
+    assert eng.sells == []
+    (_, kwargs) = patched[0]
+    assert kwargs["stop_price"] == 11999
 
 
 def test_gap_down_single_share_holds_with_plan(patched, monkeypatch):

@@ -4,14 +4,15 @@
   [NXT 08:03]  NXT **상장 종목**: NXT 시초가 vs 평단으로 갭 판정
   [KRX 09:03]  NXT **미상장 종목**: KRX 개장가 vs 평단으로 갭 판정
      (NXT 단계와 동일 로직 미러 — NXT 미상장 종목은 NXT 호가가 없어 KRX 정규장 개장 후 처리한다)
-     - 갭상승: **전량 매도**(잔량·감시계획 없음) — 2026-08-03 실체결 측정으로 잔량 트레일링 폐지
-     - 갭하락: 절반 매도 + 저가이탈선(= 시초가 - 버퍼) 감시 → 이탈 시 모니터가 즉시 전량 매도
-  [~09:28]  모니터(monitor.py)가 갭하락 잔량을 들고 가며 스탑선을 고점 추종으로 끌어올린다
-     (트레일링 스탑) — 시초가 회복 시 상승분을 따라간다.
+     - 갭상승: 절반 매도 + 스탑선(= 시초가 한 틱 아래, 버퍼 없음) 감시 → 시초가에서 한 틱만
+       밀려도 모니터가 즉시 잔량 전량 매도
+     - 갭하락: 절반 매도 + 저가이탈선(= 시초가 - STOP_BUFFER_PCT 버퍼) 감시 → 이탈 시 즉시 전량 매도
+  [~09:28]  모니터(monitor.py)가 잔량을 들고 가며 스탑선을 고점 추종으로 끌어올린다
+     (트레일링 스탑) — 갭상승은 상승분을, 갭하락은 시초가 회복분을 따라간다.
   [KRX 09:28]  데드라인 — 트레일링에 안 걸리고 남은 잔량을 전량 매도(보유 안 함).
      09:30 모니터 종료 직전, 미체결 잔량을 정리하는 최종 백스톱.
 
-가정(미세 조정 가능): '시초가'는 각 단계 실행 시점의 현재가로 근사. '저가 이탈선'은 시초가 기준.
+가정(미세 조정 가능): '시초가'는 각 단계 실행 시점(:03)의 현재가로 근사. '저가 이탈선'은 그 시초가 기준.
 """
 import sys
 import argparse
@@ -35,8 +36,9 @@ logger = logging.getLogger("Settle")
 
 def _run_open_stage(engine: ExecutionEngine, trade_date: str, *,
                     stage_tag: str, stex: str, want_nxt: bool) -> None:
-    """시초가 갭 판정 → 갭상승 전량 매도 / 갭하락 절반 매도+감시계획 (NXT 08:03 / KRX 개장 09:03 공용).
+    """시초가 갭 판정 → 절반 매도 + 잔량 감시계획 (NXT 08:03 / KRX 개장 09:03 공용).
 
+    갭 방향은 **초기 스탑선만** 가른다: 갭상승=시초가 한 틱 아래(즉시 이탈), 갭하락=시초가-버퍼.
     NXT 단계와 KRX 개장 단계는 동일 전략이고, 대상 종목 집합·거래소·멱등 tag 만 다르다.
       want_nxt=True  → NXT 상장 종목만 (stex='NXT' 최유리IOC, tag='nxt')      — 08:03
       want_nxt=False → NXT 미상장 종목만 (stex='KRX' 시장가, tag='krxopen')   — 09:03
@@ -58,35 +60,35 @@ def _run_open_stage(engine: ExecutionEngine, trade_date: str, *,
                 logger.warning("[%s] 현재가 조회 실패 — 보류 [%s]", label, stk_cd)
                 continue
             gap_dir = "up" if open_px > avg else "down"
-            if gap_dir == "up":
-                # 갭상승: 잔량 없이 전량 매도(감시계획 없음).
-                #   종전엔 절반만 팔고 잔량 스탑선을 '절반매도 체결가(버퍼 0)'로 뒀으나,
-                #   실체결 66건(2026-06-19~08-03) 측정 결과 첫 하락틱에 걸려 **보유 중앙값 0분**
-                #   (5분 내 청산 56/66)에 시장가/IOC 로 스탑선보다 몇 틱 아래 체결됐다 —
-                #   잔량이 절반매도가보다 싸게 팔린 게 65/66건(평균 -0.49%), 트레일링이 실제로
-                #   상승을 따라간 건 1건뿐. "시초가에 전량" 반사실이 잔량 +0.52%p·포지션
-                #   +0.45%p/건(t=3.35, 기간·단계 분할 모두 양수)이라 잔량 자체를 없앤다.
-                #   초기 스탑 버퍼(0.5~3%)·트레일 완화·조건부 슬라이스는 전부 무효~마이너스였다.
-                #   갭하락은 부호가 반대(버퍼 후 회복 대기가 +0.78%p 유리)라 아래 경로를 유지한다.
-                engine.execute_sell(trade_date, stk_cd, qty, open_px,
-                                    dmst_stex_tp=stex, tag=stage_tag)
-                logger.info("[%s] %s 갭상승 전량매도 %d주 @%d (잔량 0 — 감시계획 없음)",
-                            label, stk_cd, qty, open_px)
-                continue
-            # 갭하락: 절반 매도 + 잔량은 저가이탈선 감시(시초가 회복 대기)
-            half = qty // 2  # 내림(소숫점 내림) — 1주는 절반=0(매도 안 함, 전량 보유로 회복 대기)
+            # 방향 무관 동일 형태: 절반 매도 + 잔량은 스탑선 감시(모니터가 트레일링 상향).
+            # 다른 것은 **초기 스탑선뿐**이다.
+            half = qty // 2  # 내림(소숫점 내림) — 1주는 절반=0(매도 안 함, 전량 보유로 감시)
             if half >= 1:
                 engine.execute_sell(trade_date, stk_cd, half, open_px,
                                     dmst_stex_tp=stex, tag=stage_tag)
             remaining = qty - half
             if remaining > 0:
-                # 저가이탈선 = 시초가에서 STOP_BUFFER_PCT% 아래(버퍼). 시초가를 그대로 잡으면
-                # 한 틱만 눌려도 잔량이 즉시 털리므로 시초가 회복 대기를 위한 버퍼를 둔다.
-                stop_price = round(open_px * (1 - STOP_BUFFER_PCT / 100))
+                if gap_dir == "up":
+                    # 갭상승 스탑선 = 이 단계(:03) 시초가의 **한 틱 아래**(버퍼 없음).
+                    #   시초가에서 한 틱이라도 밀리면 잔량을 즉시 청산하고, 밀리지 않으면
+                    #   모니터 트레일링(TRAIL_PCT)이 상승을 따라간다.
+                    #   1원을 빼는 이유: 모니터 breach 판정이 `cur <= stop_price` 라 선을 시초가
+                    #   그대로 두면 하락 없이 같은 값에서도 발동한다. 호가단위와 무관하게 실제
+                    #   한 틱 하락은 1원 이상이라 항상 선 아래로 들어온다.
+                    # ⚠️ 2026-08-11 사용자 지시로 잔량 트레일링을 재도입했다. 실측은 반대
+                    #   방향이었다(2026-08-03 잔량 -0.49%·포지션 -0.45%p/건 t=3.35 —
+                    #   docs/history/execution-exit.md).
+                    stop_price = open_px - 1
+                else:
+                    # 갭하락 저가이탈선 = 시초가에서 STOP_BUFFER_PCT% 아래(버퍼, 현행 유지).
+                    # 시초가를 그대로 잡으면 한 틱만 눌려도 잔량이 즉시 털리므로 회복 대기를
+                    # 위한 버퍼를 둔다(버퍼 후 대기가 즉시 전량 대비 +0.78%p 유리, n=26).
+                    stop_price = round(open_px * (1 - STOP_BUFFER_PCT / 100))
                 plan_repo.upsert_plan(trade_date, stk_cd, gap_dir, avg, open_px,
                                       stop_price=stop_price, note=f"{stage_tag} half={half}")
-                logger.info("[%s] %s 갭하락 절반매도 %d주 @%d (잔량 %d, 이탈선 %d)",
-                            label, stk_cd, half, open_px, remaining, stop_price)
+                logger.info("[%s] %s 갭%s 절반매도 %d주 @%d (잔량 %d, 스탑선 %d)",
+                            label, stk_cd, "상승" if gap_dir == "up" else "하락",
+                            half, open_px, remaining, stop_price)
         except Exception as e:
             logger.error("[%s] 청산 실패 [%s]: %s", label, stk_cd, e)
 
