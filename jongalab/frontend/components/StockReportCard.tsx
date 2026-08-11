@@ -4,11 +4,14 @@ import { EdgeRule, StockReport } from "@/types";
 import { STATUS_BADGE, STATUS_LABEL } from "@/lib/edge";
 import { CARD, CARD_HOVER, HERO_ROW_H, INSET } from "@/lib/ui";
 
-/** 1등 카드 근거 블록에 이름으로 펼칠 규칙 수 상한.
+/** 1등 카드 근거 블록에 이름으로 펼칠 규칙 수 — **블록이 항상 2줄이 되도록** 정한다.
  *
  * 실측 규칙 수는 1~4개다. 2줄까지는 `HERO_ROW_H`(224px) 안에 들어가지만 3줄부터는 넘겨서
- * 성적 카드와의 상단 정렬이 깨진다 → 나머지는 '외 N개' 한 줄로 접는다. */
-const MAX_RULE_CARDS = 2;
+ * 성적 카드와의 상단 정렬이 깨진다. 규칙이 3개 이상인 날은 마지막 줄을 '외 N개'가 쓰므로
+ * 규칙은 1개만 펼친다 — 그래야 규칙 수와 무관하게 카드 높이가 하한 안에 고정된다. */
+function ruleCardCount(total: number): number {
+  return total > 2 ? 1 : total;
+}
 
 const GRADE_TONE: Record<string, string> = {
   S: "bg-rose-500 text-white",
@@ -115,6 +118,16 @@ export function StockReportCard({
    *  카드가 1등임은 종목명 크기·전체 폭·인디고 링·아래 근거 블록이 이미 말한다. */
   const nameSize = featured ? "text-lg lg:text-4xl" : "";
 
+  /** 1등 카드는 안쪽 여백을 한 단 넓게 쓴다 — 카드 폭이 한 줄을 통째로 쓰는데 여백이 일반
+   *  카드와 같으면 내용이 테두리에 붙어 보인다. 좌측은 등락 띠(w-1.5) 위를 지나므로 한 단 더 준다.
+   *
+   *  ⚠️ **가로(`px`)만 늘린다.** 세로 여백을 늘리면 카드가 그만큼 커지고, `HERO_ROW_H` 하한을
+   *  넘기는 순간 우측 성적 카드와 상단 정렬이 깨진다(2026-08-11 `lg:p-6` 로 256px 이 되어 실패). */
+  const padding = featured ? "px-5 py-4 pl-6 lg:px-6 lg:pl-7" : "p-4 pl-5";
+
+  /** 근거 블록에 이름으로 펼칠 규칙 수 — 규칙 수와 무관하게 블록을 2줄로 고정한다(위 참고). */
+  const ruleCards = ruleCardCount(rules.length);
+
   // 근거는 한 줄에 최대 2개까지만 — 나머지는 '외 N' 으로 접어 카드 높이를 고정한다.
   const shownRules = ruleTitles.slice(0, 2);
   const hiddenRuleCount = ruleTitles.length - shownRules.length;
@@ -129,7 +142,7 @@ export function StockReportCard({
   return (
     <Link
       href={`/reports/${date}/${r.stock_code}`}
-      className={`group relative flex flex-col overflow-hidden p-4 pl-5 ${gapTone} ${CARD_HOVER} ${
+      className={`group relative flex flex-col overflow-hidden ${padding} ${gapTone} ${CARD_HOVER} ${
         featured
           ? `ring-2 ring-indigo-300 col-span-full lg:justify-between ${HERO_ROW_H} dark:ring-indigo-500/40`
           : ""
@@ -150,7 +163,10 @@ export function StockReportCard({
 
       {/* 상단: 종목명 + 플래그 / 우측: 현재가 + 등락율 */}
       <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
+        {/* 종목명·섹터 열은 우측 숫자 열(가격·등락률·점수)보다 짧아 위로 붙어 보인다 →
+            `self-center` 로 숫자 열 높이에 세로 중앙을 맞춘다. 짧은 쪽만 옮기는 것이라
+            행 높이(=카드 높이)는 그대로다. */}
+        <div className="min-w-0 flex-1 self-center">
           <div className="flex items-center gap-1.5">
             <span
               className={`min-w-0 truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400 ${nameSize}`}
@@ -237,7 +253,7 @@ export function StockReportCard({
       {featured && rules.length > 0 && (
         <div className={`mt-2.5 hidden p-3 lg:block ${INSET}`}>
           <ul className="space-y-1.5">
-            {rules.slice(0, MAX_RULE_CARDS).map((rule) => (
+            {rules.slice(0, ruleCards).map((rule) => (
               <li key={rule.name} className="flex items-baseline gap-2">
                 <FlaskConical className="h-3.5 w-3.5 shrink-0 translate-y-0.5 text-slate-400 dark:text-slate-500" />
                 <span className="shrink-0 text-sm font-extrabold text-slate-800 dark:text-slate-100">
@@ -262,9 +278,9 @@ export function StockReportCard({
               </li>
             ))}
           </ul>
-          {rules.length > MAX_RULE_CARDS && (
+          {rules.length > ruleCards && (
             <p className="mt-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500">
-              외 {rules.length - MAX_RULE_CARDS}개 규칙도 이 종목을 지목했습니다
+              외 {rules.length - ruleCards}개 규칙도 이 종목을 지목했습니다
             </p>
           )}
         </div>
