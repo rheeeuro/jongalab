@@ -6,7 +6,7 @@ import { CARD, CARD_HOVER, HERO_ROW_H, INSET } from "@/lib/ui";
 
 /** 1등 카드 근거 블록에 이름으로 펼칠 규칙 수 상한.
  *
- * 실측 규칙 수는 1~4개다. 2줄까지는 `HERO_ROW_H`(240px) 안에 들어가지만 3줄부터는 넘겨서
+ * 실측 규칙 수는 1~4개다. 2줄까지는 `HERO_ROW_H`(224px) 안에 들어가지만 3줄부터는 넘겨서
  * 성적 카드와의 상단 정렬이 깨진다 → 나머지는 '외 N개' 한 줄로 접는다. */
 const MAX_RULE_CARDS = 2;
 
@@ -110,19 +110,10 @@ export function StockReportCard({
         ? "rounded-2xl bg-rose-50/60 shadow-sm ring-1 ring-rose-200/60 dark:bg-rose-950/20 dark:shadow-none dark:ring-rose-900/40"
         : "rounded-2xl bg-blue-50/60 shadow-sm ring-1 ring-blue-200/60 dark:bg-blue-950/20 dark:shadow-none dark:ring-blue-900/40";
 
-  /** 1등 카드의 **데스크탑 전용** 글자 확대. 아래 근거 블록과 함께 전체 폭 카드의 여백을 채운다.
-   *  ⚠️ 카드 자연 높이(계산 ≈232px)가 `HERO_ROW_H` 안에 있어야 성적 카드와의 상단 정렬이 유지된다.
-   *  모바일은 하한이 없어(`lg:` 한정) 여백이 안 생기므로 원래 크기 그대로다. */
-  const big = {
-    name: featured ? "text-lg lg:text-2xl" : "",
-    sub: featured ? "lg:text-sm" : "",
-    price: featured ? "lg:text-xl" : "",
-    unit: featured ? "lg:text-xs" : "",
-    change: featured ? "lg:text-sm" : "",
-    reason: featured ? "lg:text-sm" : "",
-    score: featured ? "lg:text-lg" : "",
-    pill: featured ? "lg:text-xs" : "",
-  };
+  /** 1등 카드는 **종목명만** 키운다(데스크탑 36px). 가격·점수·배지까지 같이 키웠더니 카드가
+   *  통째로 확대된 것처럼 보여 되돌렸다(2026-08-11) — 나머지는 일반 카드와 같은 크기이고,
+   *  카드가 1등임은 종목명 크기·전체 폭·인디고 링·아래 근거 블록이 이미 말한다. */
+  const nameSize = featured ? "text-lg lg:text-4xl" : "";
 
   // 근거는 한 줄에 최대 2개까지만 — 나머지는 '외 N' 으로 접어 카드 높이를 고정한다.
   const shownRules = ruleTitles.slice(0, 2);
@@ -162,7 +153,7 @@ export function StockReportCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span
-              className={`min-w-0 truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400 ${big.name}`}
+              className={`min-w-0 truncate font-extrabold text-slate-900 group-hover:text-indigo-600 dark:text-slate-100 dark:group-hover:text-indigo-400 ${nameSize}`}
             >
               {r.stock_name}
             </span>
@@ -176,7 +167,7 @@ export function StockReportCard({
             )}
           </div>
           <p
-            className={`mt-1 truncate text-xs text-slate-500 dark:text-slate-400 ${big.sub}`}
+            className={`mt-1 truncate text-xs text-slate-500 dark:text-slate-400`}
           >
             {r.sector || "기타"} ·{" "}
             {(r.trading_value / 1e8).toLocaleString("ko-KR", {
@@ -187,18 +178,16 @@ export function StockReportCard({
         </div>
         <div className="shrink-0 text-right tabular-nums">
           <div
-            className={`text-sm font-extrabold text-slate-900 dark:text-slate-100 ${big.price}`}
+            className={`text-sm font-extrabold text-slate-900 dark:text-slate-100`}
           >
             {r.current_price.toLocaleString("ko-KR")}
-            <span
-              className={`ml-0.5 text-[10px] font-bold text-slate-400 ${big.unit}`}
-            >
+            <span className={`ml-0.5 text-[10px] font-bold text-slate-400`}>
               원
             </span>
           </div>
           {/* 당일 등락률 — 카드마다 값이 다른 유일한 큰 색면이라 카드 구분의 1차 단서다 */}
           <div
-            className={`mt-1 inline-block rounded-md px-1.5 py-0.5 text-xs font-extrabold ${big.change} ${
+            className={`mt-1 inline-block rounded-md px-1.5 py-0.5 text-xs font-extrabold ${
               isUp
                 ? "bg-rose-100/80 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300"
                 : isDown
@@ -213,7 +202,7 @@ export function StockReportCard({
               같은 숫자 열에 모은다(모바일·일반 카드는 근거 줄 오른쪽에 그대로 있다). */}
           {featured && (
             <div className="mt-1 hidden lg:block">
-              <ScoreBadge score={r.score} size={big.score} unit={big.unit} />
+              <ScoreBadge score={r.score} />
             </div>
           )}
         </div>
@@ -233,11 +222,11 @@ export function StockReportCard({
         />
         <p
           title={ruleTitles.length > 0 ? ruleTitles.join(", ") : undefined}
-          className={`min-w-0 flex-1 truncate text-xs font-bold text-slate-700 dark:text-slate-200 ${big.reason}`}
+          className={`min-w-0 flex-1 truncate text-xs font-bold text-slate-700 dark:text-slate-200`}
         >
           {reasonText}
         </p>
-        <ScoreBadge score={r.score} size={big.score} unit={big.unit} />
+        <ScoreBadge score={r.score} />
       </div>
 
       {/* 선정 근거 — **1등 카드 + lg 이상에서만**. 카드 전체 폭을 쓰는 한 단 낮은 면이고,
@@ -283,10 +272,10 @@ export function StockReportCard({
 
       {/* 배지 + 다음날 아침 갭 결과(NXT·KRX·최종) — 한 줄에 묶는다 */}
       <div
-        className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-bold ${big.pill}`}
+        className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-bold`}
       >
         <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${big.pill} ${
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
             GRADE_TONE[r.supply_grade] || GRADE_TONE.D
           }`}
         >
@@ -294,7 +283,7 @@ export function StockReportCard({
         </span>
         {(r.news_count ?? 0) > 0 && (
           <span
-            className={`shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 ${big.pill}`}
+            className={`shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400`}
           >
             뉴스 {r.news_count}
           </span>
@@ -304,7 +293,7 @@ export function StockReportCard({
         {r.gap_ex_rights_ratio != null && (
           <span
             title="무상증자 권리락일입니다 — 배정비율만큼 낮아진 권리락 기준가 대비 등락률입니다"
-            className={`shrink-0 rounded-full bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900 dark:bg-amber-900/50 dark:text-amber-200 ${big.pill}`}
+            className={`shrink-0 rounded-full bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900 dark:bg-amber-900/50 dark:text-amber-200`}
           >
             권리락
           </span>
@@ -348,25 +337,13 @@ export function StockReportCard({
 
 /** 종합 점수 배지 — 일반 카드는 근거 줄 오른쪽, 1등 카드(데스크탑)는 가격 열 아래에 같은 모양으로
  *  붙는다. 두 자리에 같은 마크업을 두 벌 두지 않으려고 뺀 것뿐이라 로직은 없다. */
-function ScoreBadge({
-  score,
-  size,
-  unit,
-}: {
-  score: number;
-  size: string;
-  unit: string;
-}) {
+function ScoreBadge({ score }: { score: number }) {
   return (
     <span className="inline-block shrink-0 rounded-lg bg-indigo-50 px-1.5 py-0.5 tabular-nums dark:bg-indigo-950/50">
-      <span
-        className={`text-sm font-extrabold text-indigo-700 dark:text-indigo-300 ${size}`}
-      >
+      <span className="text-sm font-extrabold text-indigo-700 dark:text-indigo-300">
         {score.toFixed(0)}
       </span>
-      <span
-        className={`text-[10px] font-bold text-indigo-400 dark:text-indigo-400/70 ${unit}`}
-      >
+      <span className="text-[10px] font-bold text-indigo-400 dark:text-indigo-400/70">
         점
       </span>
     </span>
