@@ -20,8 +20,8 @@ import { PickList } from "@/components/pick/PickList";
 import { SeedAllocator } from "@/components/pick/SeedAllocator";
 import { MacroEventNotice } from "@/components/pick/MacroEventNotice";
 import {
-  IndexChips,
-  IndexChipsSkeleton,
+  IndexCard,
+  IndexCardSkeleton,
   MarketPulse,
 } from "@/components/home/MarketPulse";
 import { NewsDigest } from "@/components/home/NewsDigest";
@@ -59,12 +59,12 @@ async function getNewsHeat(date: string): Promise<NewsHeatItem[]> {
 }
 
 // 외부 시세 API 라 1초 이상 걸리는 구간 — 추천 목록을 막지 않도록 Suspense 로 스트리밍한다.
-async function IndexChipsSection() {
+async function IndexCardSection() {
   const indices = await apiFetch<{
     US: MarketIndex[];
     KR: MarketIndex[];
   } | null>(`/api/market-indices`, null);
-  return <IndexChips indices={indices} />;
+  return <IndexCard indices={indices} />;
 }
 
 export const dynamic = "force-dynamic";
@@ -105,12 +105,13 @@ export default async function HomePage() {
       <div className="mx-auto max-w-7xl space-y-4 px-4 py-5 sm:px-6 sm:py-8">
         <PickHero date={date} pickCount={reports.length} ruleCount={ruleCount} />
 
-        {/* 시장 지표는 추천 **위**에 둔다 — 칩 한 줄이라 픽을 밀어내지 않는다 */}
+        {/* 시장 지표는 추천 **위**에 둔다 — 좌우 2칸 한 줄이라 픽을 밀어내지 않는다 */}
         <MarketPulse
           sectors={sectors}
+          pickCodes={reports.map((r) => r.stock_code)}
           indexSlot={
-            <Suspense fallback={<IndexChipsSkeleton />}>
-              <IndexChipsSection />
+            <Suspense fallback={<IndexCardSkeleton />}>
+              <IndexCardSection />
             </Suspense>
           }
         />
