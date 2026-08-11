@@ -11,7 +11,7 @@ import {
   apiFetch,
   getRecordSummary,
   getReportDates,
-  getRuleTitleMap,
+  getRuleMap,
   getStockReports,
 } from "@/lib/api";
 import { PickHero } from "@/components/pick/PickHero";
@@ -85,11 +85,11 @@ export default async function HomePage() {
   const dates = await getReportDates(1);
   const date = dates[0] ?? "";
 
-  const [reports, record, ruleTitleMap, macroEvents, sectors, newsHeat] =
+  const [reports, record, ruleMap, macroEvents, sectors, newsHeat] =
     await Promise.all([
       getStockReports(date),
       getRecordSummary(20),
-      getRuleTitleMap(),
+      getRuleMap(),
       getMacroEvents(),
       getSectors(date),
       getNewsHeat(date),
@@ -137,7 +137,7 @@ export default async function HomePage() {
             <PickList
               reports={reports}
               date={date}
-              ruleTitleMap={ruleTitleMap}
+              ruleMap={ruleMap}
               action={<SeedAllocator reports={reports} />}
             />
           </div>

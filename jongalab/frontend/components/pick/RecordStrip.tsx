@@ -39,7 +39,10 @@ export function RecordStrip({
   return (
     // `HERO_ROW_H` 는 홈 2단에서 좌측 1등 픽 카드와 **높이를 맞추기 위한 공통 하한**이다
     // (어긋나면 그만큼 우측 뉴스 카드 상단이 좌측 2·3·4등 줄과 틀어진다).
-    <Link href={href} className={`group block p-4 ${HERO_ROW_H} ${CARD}`}>
+    <Link
+      href={href}
+      className={`group flex flex-col justify-between p-4 ${HERO_ROW_H} ${CARD}`}
+    >
       <div className="flex items-center gap-1.5">
         <p className="text-[11px] font-extrabold tracking-wide text-slate-400 uppercase dark:text-slate-500">
           최근 {summary.days}거래일 성적

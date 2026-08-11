@@ -5,7 +5,7 @@ import { SeedAllocator } from "@/components/pick/SeedAllocator";
 import {
   apiFetch,
   getReportDates,
-  getRuleTitleMap,
+  getRuleMap,
   getStockReports,
 } from "@/lib/api";
 import { Metadata } from "next";
@@ -61,11 +61,11 @@ export default async function ReportPage({
   const resolvedParams = await params;
   const date = resolvedParams.date;
 
-  const [stockReports, sectorReports, dates, ruleTitleMap] = await Promise.all([
+  const [stockReports, sectorReports, dates, ruleMap] = await Promise.all([
     getStockReports(date),
     getSectorReports(date),
     getReportDates(120),
-    getRuleTitleMap(),
+    getRuleMap(),
   ]);
 
   if (stockReports.length === 0) {
@@ -129,7 +129,7 @@ export default async function ReportPage({
         <PickList
           reports={stockReports}
           date={date}
-          ruleTitleMap={ruleTitleMap}
+          ruleMap={ruleMap}
           action={<SeedAllocator reports={stockReports} />}
         />
 

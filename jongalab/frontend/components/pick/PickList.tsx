@@ -1,4 +1,4 @@
-import { StockReport } from "@/types";
+import { EdgeRule, StockReport } from "@/types";
 import { StockReportCard, finalGapPct } from "@/components/StockReportCard";
 import { CARD } from "@/lib/ui";
 
@@ -22,6 +22,12 @@ function ruleCount(r: StockReport): number {
   return (r.rule_names ?? "").split(",").filter(Boolean).length;
 }
 
+/** 스코어보드에서 못 찾은 슬러그(은퇴 후 목록에서 빠진 룰 등)의 최소 표시용 대역.
+ *  카드는 제목만 쓰므로 슬러그를 제목 자리에 넣고 설명은 비운다 — 없는 근거를 지어내지 않는다. */
+function fallbackRule(name: string): EdgeRule {
+  return { name, title: name, description: "", status: "live" } as EdgeRule;
+}
+
 /** 추천 종목 목록 — 이 사이트의 본체.
  *
  * **정렬은 백엔드가 준 순서를 그대로 쓴다** — `규칙 수 내림차순 → rank_no 오름차순`이며
@@ -41,12 +47,14 @@ function ruleCount(r: StockReport): number {
 export function PickList({
   reports,
   date,
-  ruleTitleMap,
+  ruleMap,
   action,
 }: {
   reports: StockReport[];
   date: string;
-  ruleTitleMap: Map<string, string>;
+  /** 룰 슬러그 → 룰 원본(`lib/api.getRuleMap`). 카드가 한글 제목을 찾고, 1등 카드는
+   *  설명·상태까지 꺼내 선정 근거를 펼친다. */
+  ruleMap: Map<string, EdgeRule>;
   /** 결과 줄 우측에 붙일 도구 버튼(시드 배분 모달 등). 세로 공간을 먹지 않는 것만 넣는다. */
   action?: React.ReactNode;
 }) {
@@ -79,10 +87,10 @@ export function PickList({
             report={r}
             date={date}
             featured={r === featured}
-            ruleTitles={(r.rule_names ?? "")
+            rules={(r.rule_names ?? "")
               .split(",")
               .filter(Boolean)
-              .map((n) => ruleTitleMap.get(n) || n)}
+              .map((n) => ruleMap.get(n) ?? fallbackRule(n))}
           />
         ))}
       </div>

@@ -106,14 +106,15 @@ export async function getRecordSummary(days = 20): Promise<RecordSummary | null>
   return apiFetch<RecordSummary | null>(`/api/stock-report/record-summary?days=${days}`, null);
 }
 
-/** 룰 슬러그(f5_prog_persistent) → 화면에 낼 한글 제목.
+/** 룰 슬러그(f5_prog_persistent) → 룰 원본.
  *
- * 사용자 화면에 내부 식별자를 노출하지 않는다는 용어 원칙에 따라, 픽 카드의
- * '왜 뽑혔나' 줄과 리포트 상세 칩이 공유한다. title 이 비면 슬러그로 폴백.
+ * 픽 카드는 슬러그를 그대로 내지 않고 이 맵으로 **한글 제목**(`title`, 없으면 슬러그)을 찾고,
+ * 1등 카드는 여기서 **초심자용 설명(`description`)과 상태**까지 꺼내 선정 근거를 펼친다.
+ * 목록 화면이 이미 한 번 부르는 공개 엔드포인트라 추가 왕복이 없다.
  */
-export async function getRuleTitleMap(): Promise<Map<string, string>> {
+export async function getRuleMap(): Promise<Map<string, EdgeRule>> {
   const rules = await getEdgeRules();
-  return new Map(rules.map((r) => [r.name, r.title || r.name]));
+  return new Map(rules.map((r) => [r.name, r]));
 }
 
 export { API_BASE };

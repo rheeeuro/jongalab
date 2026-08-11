@@ -1,7 +1,14 @@
 import Link from "next/link";
 import { Crown, FlaskConical } from "lucide-react";
-import { StockReport } from "@/types";
-import { CARD, CARD_HOVER, HERO_ROW_H } from "@/lib/ui";
+import { EdgeRule, StockReport } from "@/types";
+import { STATUS_BADGE, STATUS_LABEL } from "@/lib/edge";
+import { CARD, CARD_HOVER, HERO_ROW_H, INSET } from "@/lib/ui";
+
+/** 1등 카드 근거 블록에 이름으로 펼칠 규칙 수 상한.
+ *
+ * 실측 규칙 수는 1~4개다. 2줄까지는 `HERO_ROW_H`(240px) 안에 들어가지만 3줄부터는 넘겨서
+ * 성적 카드와의 상단 정렬이 깨진다 → 나머지는 '외 N개' 한 줄로 접는다. */
+const MAX_RULE_CARDS = 2;
 
 const GRADE_TONE: Record<string, string> = {
   S: "bg-rose-500 text-white",
@@ -67,25 +74,28 @@ function pctColor(pct: number): string {
  * 것처럼 읽힌다. 순위 대신 **점수 배지 + '왜 뽑혔나'(룰 한글 제목)** 로 선정 근거를 직접 낸다.
  * 점수 순위(rank_no)가 필요하면 리포트 상세에서 본다.
  *
- * @param ruleTitles 부모가 `lib/api.getRuleTitleMap()` 으로 미리 매핑한 한글 제목.
- *   슬러그(f5_prog_persistent)를 화면에 노출하지 않기 위한 값이며, 비어 있으면 근거 줄을
- *   '점수 상위 선정'으로 낸다(rule_names 가 NULL = 점수순 선정).
+ * **1등 카드는 데스크탑에서만 아래에 '선정 근거' 블록이 붙는다**(아래 `featured` 참고).
+ *
+ * @param rules 이 종목을 뽑은 룰 원본(`lib/api.getRuleMap`). 일반 카드는 한글 제목만 쓰고,
+ *   1등 카드는 설명·상태까지 펼친다. 비어 있으면 근거 줄을 '점수 상위 선정'으로 낸다
+ *   (rule_names 가 NULL = 점수순 선정).
  */
 export function StockReportCard({
   report: r,
   date,
-  ruleTitles = [],
+  rules = [],
   featured = false,
 }: {
   report: StockReport;
   date: string;
-  ruleTitles?: string[];
+  rules?: EdgeRule[];
   /** 그날 규칙이 가장 많이 겹친 종목 — 목록 맨 앞에서 한 줄을 통째로 쓴다(`col-span-full`).
    *  높이는 홈 사이드바의 성적 카드와 같은 `HERO_ROW_H` 하한을 쓴다(둘이 어긋나면 우측
    *  뉴스 카드 상단이 좌측 2·3·4등 줄과 틀어진다).
    *  배지에는 **기준만** 적는다('유력'·'강력 추천' 같은 예측 문구 금지). */
   featured?: boolean;
 }) {
+  const ruleTitles = rules.map((rule) => rule.title || rule.name);
   const isUp = r.change_pct > 0;
   const isDown = r.change_pct < 0;
   const isRulePick = Boolean(r.rule_names);
@@ -100,13 +110,9 @@ export function StockReportCard({
         ? "rounded-2xl bg-rose-50/60 shadow-sm ring-1 ring-rose-200/60 dark:bg-rose-950/20 dark:shadow-none dark:ring-rose-900/40"
         : "rounded-2xl bg-blue-50/60 shadow-sm ring-1 ring-blue-200/60 dark:bg-blue-950/20 dark:shadow-none dark:ring-blue-900/40";
 
-  /** 1등 카드의 **데스크탑 전용** 글자 확대.
-   *
-   * `HERO_ROW_H`(224px) 하한 때문에 lg 이상에서 카드가 자연 높이(≈164px)보다 커지고 아래가
-   * 비었다 → 같은 내용의 글자를 키워 그 높이를 쓴다. 데이터를 더 넣지 않는 이유는 수급 표·
-   * 스파크라인 두 안이 이미 기각됐기 때문이다(docs/history/frontend-ui.md 2026-08-10 8차-b).
-   * ⚠️ 확대 후에도 **자연 높이가 하한 안**(계산 ≈190px)이어야 성적 카드와의 상단 정렬이 유지된다.
-   * 모바일은 하한이 없어(`lg:` 한정) 여백이 안 생기므로 원래 크기 그대로다. */
+  /** 1등 카드의 **데스크탑 전용** 글자 확대. 아래 근거 블록과 함께 전체 폭 카드의 여백을 채운다.
+   *  ⚠️ 카드 자연 높이(계산 ≈232px)가 `HERO_ROW_H` 안에 있어야 성적 카드와의 상단 정렬이 유지된다.
+   *  모바일은 하한이 없어(`lg:` 한정) 여백이 안 생기므로 원래 크기 그대로다. */
   const big = {
     name: featured ? "text-lg lg:text-2xl" : "",
     sub: featured ? "lg:text-sm" : "",
@@ -143,9 +149,10 @@ export function StockReportCard({
         className={`absolute inset-y-0 left-0 w-1.5 ${changeBar(r.change_pct)}`}
       />
 
+      {/* 데스크탑 1등 카드는 아래 근거 블록이 규칙을 이름으로 부르므로 이 배지를 반복하지 않는다. */}
       {featured && (
-        <p className="mb-2 inline-flex w-fit items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-extrabold text-indigo-700 lg:text-xs dark:bg-indigo-950/50 dark:text-indigo-300">
-          <FlaskConical className="h-3 w-3 lg:h-3.5 lg:w-3.5" />
+        <p className="mb-2 inline-flex w-fit items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-extrabold text-indigo-700 lg:hidden dark:bg-indigo-950/50 dark:text-indigo-300">
+          <FlaskConical className="h-3 w-3" />
           규칙 {ruleTitles.length}개가 겹쳐 고른 종목
         </p>
       )}
@@ -202,13 +209,23 @@ export function StockReportCard({
             {isUp ? "+" : ""}
             {r.change_pct.toFixed(1)}%
           </div>
+          {/* 데스크탑 1등 카드는 아래 근거 줄이 우측 열로 빠지므로, 점수를 가격·등락률과
+              같은 숫자 열에 모은다(모바일·일반 카드는 근거 줄 오른쪽에 그대로 있다). */}
+          {featured && (
+            <div className="mt-1 hidden lg:block">
+              <ScoreBadge score={r.score} size={big.score} unit={big.unit} />
+            </div>
+          )}
         </div>
       </div>
 
       {/* 왜 뽑혔나 + 점수 — 한 줄. 예전엔 라벨 붙은 박스 + 점수 줄이 따로였는데,
           홈에서 카드 10장이 세로로 쌓이면 그만큼 시장 지표가 화면 밖으로 밀렸다.
-          플라스크 아이콘이 '선정 근거'를 대신 표시하고, 전체 규칙은 title 에 남긴다. */}
-      <div className="mt-2.5 flex items-center gap-1.5">
+          플라스크 아이콘이 '선정 근거'를 대신 표시하고, 전체 규칙은 title 에 남긴다.
+          1등 카드는 데스크탑에서 이 줄을 우측 '왜 이 종목인가' 열이 대신한다. */}
+      <div
+        className={`mt-2.5 flex items-center gap-1.5 ${featured ? "lg:hidden" : ""}`}
+      >
         <FlaskConical
           className={`h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500 ${
             featured ? "lg:h-4 lg:w-4" : ""
@@ -220,19 +237,49 @@ export function StockReportCard({
         >
           {reasonText}
         </p>
-        <span className="shrink-0 rounded-lg bg-indigo-50 px-1.5 py-0.5 tabular-nums dark:bg-indigo-950/50">
-          <span
-            className={`text-sm font-extrabold text-indigo-700 dark:text-indigo-300 ${big.score}`}
-          >
-            {r.score.toFixed(0)}
-          </span>
-          <span
-            className={`text-[10px] font-bold text-indigo-400 dark:text-indigo-400/70 ${big.unit}`}
-          >
-            점
-          </span>
-        </span>
+        <ScoreBadge score={r.score} size={big.score} unit={big.unit} />
       </div>
+
+      {/* 선정 근거 — **1등 카드 + lg 이상에서만**. 카드 전체 폭을 쓰는 한 단 낮은 면이고,
+            열로 쪼개지 않는다(2026-08-11 좌우 2단 기각). 작은 카드가 제목 2개로 줄여 쓰는
+            같은 내용을, 여기서는 규칙 이름 + **초심자용 설명**까지 편다 — 새 조회는 없다.
+            ⚠️ 룰 성적 수치(승률·평균 수익)는 넣지 않는다 — 종목 옆에 붙으면 **그 종목의
+            확률**로 읽힌다. 상태는 스코어보드와 같은 `lib/edge.STATUS_LABEL` 만 쓴다. */}
+      {featured && rules.length > 0 && (
+        <div className={`mt-2.5 hidden p-3 lg:block ${INSET}`}>
+          <ul className="space-y-1.5">
+            {rules.slice(0, MAX_RULE_CARDS).map((rule) => (
+              <li key={rule.name} className="flex items-baseline gap-2">
+                <FlaskConical className="h-3.5 w-3.5 shrink-0 translate-y-0.5 text-slate-400 dark:text-slate-500" />
+                <span className="shrink-0 text-sm font-extrabold text-slate-800 dark:text-slate-100">
+                  {rule.title || rule.name}
+                </span>
+                {/* 규칙이 하나뿐인 날(실측 흔하다)은 설명을 2줄까지 풀어 아래 여백을 메우고,
+                      두 줄 이상이면 한 줄로 잘라 카드가 높이 하한을 넘지 않게 한다. */}
+                <p
+                  className={`min-w-0 flex-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400 ${
+                    rules.length === 1 ? "line-clamp-2" : "truncate"
+                  }`}
+                >
+                  {rule.description}
+                </p>
+                <span
+                  className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-extrabold ${
+                    STATUS_BADGE[rule.status] ?? STATUS_BADGE.live
+                  }`}
+                >
+                  {STATUS_LABEL[rule.status] ?? rule.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {rules.length > MAX_RULE_CARDS && (
+            <p className="mt-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500">
+              외 {rules.length - MAX_RULE_CARDS}개 규칙도 이 종목을 지목했습니다
+            </p>
+          )}
+        </div>
+      )}
 
       {/* 배지 + 다음날 아침 갭 결과(NXT·KRX·최종) — 한 줄에 묶는다 */}
       <div
@@ -266,7 +313,10 @@ export function StockReportCard({
         {(gapLines.length > 0 || totalPct !== null) && (
           <span className="ml-auto flex shrink-0 items-baseline gap-2">
             {gapLines.map((g) => (
-              <span key={g.label} className="inline-flex items-baseline gap-0.5">
+              <span
+                key={g.label}
+                className="inline-flex items-baseline gap-0.5"
+              >
                 <span className="text-[10px] text-slate-400 dark:text-slate-500">
                   {g.label}
                 </span>
@@ -281,7 +331,9 @@ export function StockReportCard({
                 <span className="text-[10px] text-slate-400 dark:text-slate-500">
                   최종
                 </span>
-                <span className={`font-extrabold tabular-nums ${pctColor(totalPct)}`}>
+                <span
+                  className={`font-extrabold tabular-nums ${pctColor(totalPct)}`}
+                >
                   {totalPct > 0 ? "+" : ""}
                   {totalPct.toFixed(2)}%
                 </span>
@@ -291,5 +343,32 @@ export function StockReportCard({
         )}
       </div>
     </Link>
+  );
+}
+
+/** 종합 점수 배지 — 일반 카드는 근거 줄 오른쪽, 1등 카드(데스크탑)는 가격 열 아래에 같은 모양으로
+ *  붙는다. 두 자리에 같은 마크업을 두 벌 두지 않으려고 뺀 것뿐이라 로직은 없다. */
+function ScoreBadge({
+  score,
+  size,
+  unit,
+}: {
+  score: number;
+  size: string;
+  unit: string;
+}) {
+  return (
+    <span className="inline-block shrink-0 rounded-lg bg-indigo-50 px-1.5 py-0.5 tabular-nums dark:bg-indigo-950/50">
+      <span
+        className={`text-sm font-extrabold text-indigo-700 dark:text-indigo-300 ${size}`}
+      >
+        {score.toFixed(0)}
+      </span>
+      <span
+        className={`text-[10px] font-bold text-indigo-400 dark:text-indigo-400/70 ${unit}`}
+      >
+        점
+      </span>
+    </span>
   );
 }
