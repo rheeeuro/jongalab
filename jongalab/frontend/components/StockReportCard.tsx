@@ -1,17 +1,13 @@
 import Link from "next/link";
-import { Crown, FlaskConical } from "lucide-react";
+import { Crown, FlaskConical, Newspaper } from "lucide-react";
 import { EdgeRule, StockReport } from "@/types";
-import { STATUS_BADGE, STATUS_LABEL } from "@/lib/edge";
+import { newsHeatLabel } from "@/lib/news";
 import { CARD, CARD_HOVER, HERO_ROW_H, INSET } from "@/lib/ui";
 
-/** 1등 카드 근거 블록에 이름으로 펼칠 규칙 수 — **블록이 항상 2줄이 되도록** 정한다.
- *
- * 실측 규칙 수는 1~4개다. 2줄까지는 `HERO_ROW_H`(224px) 안에 들어가지만 3줄부터는 넘겨서
- * 성적 카드와의 상단 정렬이 깨진다. 규칙이 3개 이상인 날은 마지막 줄을 '외 N개'가 쓰므로
- * 규칙은 1개만 펼친다 — 그래야 규칙 수와 무관하게 카드 높이가 하한 안에 고정된다. */
-function ruleCardCount(total: number): number {
-  return total > 2 ? 1 : total;
-}
+/** 1등 카드 근거 블록에 칩으로 낼 규칙 수 — **규칙 줄이 항상 1줄이 되도록** 정한다.
+ *  실측 규칙 수는 1~4개이고 이름 칩 3개까지가 한 줄에 들어간다. 넘는 만큼은 '외 N개'로
+ *  접어, 규칙 수와 무관하게 카드 높이를 `HERO_ROW_H` 하한 안에 고정한다. */
+const RULE_CHIPS = 3;
 
 const GRADE_TONE: Record<string, string> = {
   S: "bg-rose-500 text-white",
@@ -57,8 +53,9 @@ function resolveGapLines(r: StockReport): GapLine[] {
   return lines;
 }
 
+/** 리포트가 → 누적 등락(KRX 우선, NXT 폴백). 카드에 숫자로 찍지는 않고
+ *  카드 배경 톤과 목록 하단 '이 날 결과' 평균의 기준값으로만 쓴다. */
 export function finalGapPct(r: StockReport): number | null {
-  // 리포트가 → 최종(KRX 우선, NXT 폴백) 누적 등락 기준
   if (typeof r.gap_krx_pct === "number") return r.gap_krx_pct;
   if (typeof r.gap_nxt_pct === "number") return r.gap_nxt_pct;
   return null;
@@ -79,8 +76,8 @@ function pctColor(pct: number): string {
  *
  * **1등 카드는 데스크탑에서만 아래에 '선정 근거' 블록이 붙는다**(아래 `featured` 참고).
  *
- * @param rules 이 종목을 뽑은 룰 원본(`lib/api.getRuleMap`). 일반 카드는 한글 제목만 쓰고,
- *   1등 카드는 설명·상태까지 펼친다. 비어 있으면 근거 줄을 '점수 상위 선정'으로 낸다
+ * @param rules 이 종목을 뽑은 룰 원본(`lib/api.getRuleMap`). 쓰는 건 한글 제목뿐이고
+ *   (1등 카드는 그 제목을 칩으로 낸다), 비어 있으면 근거 줄을 '점수 상위 선정'으로 낸다
  *   (rule_names 가 NULL = 점수순 선정).
  */
 export function StockReportCard({
@@ -125,8 +122,13 @@ export function StockReportCard({
    *  넘기는 순간 우측 성적 카드와 상단 정렬이 깨진다(2026-08-11 `lg:p-6` 로 256px 이 되어 실패). */
   const padding = featured ? "px-5 py-4 pl-6 lg:px-6 lg:pl-7" : "p-4 pl-5";
 
-  /** 근거 블록에 이름으로 펼칠 규칙 수 — 규칙 수와 무관하게 블록을 2줄로 고정한다(위 참고). */
-  const ruleCards = ruleCardCount(rules.length);
+  /** 1등 카드 근거 블록의 뉴스 줄 라벨. 뉴스가 없는 날은 null — 줄은 그대로 두고
+   *  '당일 뉴스 없음' 플레이스홀더로 바뀐다(헤드라인 '뉴스 없음' + 근거 '뉴스 0건'은
+   *  같은 말을 두 번 하는 꼴이라 라벨을 그대로 쓰지 않는다). */
+  const newsHeat =
+    (r.news_count ?? 0) > 0
+      ? newsHeatLabel(r.news_count, r.news_prior_avg)
+      : null;
 
   // 근거는 한 줄에 최대 2개까지만 — 나머지는 '외 N' 으로 접어 카드 높이를 고정한다.
   const shownRules = ruleTitles.slice(0, 2);
@@ -246,47 +248,70 @@ export function StockReportCard({
       </div>
 
       {/* 선정 근거 — **1등 카드 + lg 이상에서만**. 카드 전체 폭을 쓰는 한 단 낮은 면이고,
-            열로 쪼개지 않는다(2026-08-11 좌우 2단 기각). 작은 카드가 제목 2개로 줄여 쓰는
-            같은 내용을, 여기서는 규칙 이름 + **초심자용 설명**까지 편다 — 새 조회는 없다.
+            열로 쪼개지 않는다(2026-08-11 좌우 2단 기각). 두 줄 고정:
+              1) 이 종목을 지목한 **규칙 이름 칩** — 설명도 상태 배지도 붙이지 않는다.
+                 설명까지 펴면 카드가 규칙 해설판이 되고(설명은 스코어보드에 있다), 선정에
+                 쓰이는 규칙은 `list_rules(status='live')` 뿐이라 상태는 항상 '적용중'이다.
+              2) **뉴스 한 줄** — 배수 라벨은 홈 뉴스·재료 목록과 같은 `lib/news.newsHeatLabel`.
+                 뉴스가 없는 날도 줄을 없애지 않고 '당일 뉴스 없음'을 낸다 — 줄이 사라지면
+                 카드 높이가 날마다 달라지고, 뉴스가 없다는 사실 자체가 읽을 값이다.
+            여백은 `p-2.5`·`gap-1.5` 로 조인다 — 두 줄짜리 블록이라 `p-3`·`gap-2` 로 두면
+            카드가 `HERO_ROW_H`(224px) 하한을 넘겨 우측 성적 카드와 상단 정렬이 깨진다.
             ⚠️ 룰 성적 수치(승률·평균 수익)는 넣지 않는다 — 종목 옆에 붙으면 **그 종목의
-            확률**로 읽힌다. 상태는 스코어보드와 같은 `lib/edge.STATUS_LABEL` 만 쓴다. */}
+            확률**로 읽힌다. 뉴스 배수도 색을 손익 방향(빨강/파랑)으로 쓰지 않는다. */}
       {featured && rules.length > 0 && (
-        <div className={`mt-2.5 hidden p-3 lg:block ${INSET}`}>
-          <ul className="space-y-1.5">
-            {rules.slice(0, ruleCards).map((rule) => (
-              <li key={rule.name} className="flex items-baseline gap-2">
-                <FlaskConical className="h-3.5 w-3.5 shrink-0 translate-y-0.5 text-slate-400 dark:text-slate-500" />
-                <span className="shrink-0 text-sm font-extrabold text-slate-800 dark:text-slate-100">
-                  {rule.title || rule.name}
-                </span>
-                {/* 규칙이 하나뿐인 날(실측 흔하다)은 설명을 2줄까지 풀어 아래 여백을 메우고,
-                      두 줄 이상이면 한 줄로 잘라 카드가 높이 하한을 넘지 않게 한다. */}
-                <p
-                  className={`min-w-0 flex-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400 ${
-                    rules.length === 1 ? "line-clamp-2" : "truncate"
-                  }`}
-                >
-                  {rule.description}
-                </p>
-                <span
-                  className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-extrabold ${
-                    STATUS_BADGE[rule.status] ?? STATUS_BADGE.live
-                  }`}
-                >
-                  {STATUS_LABEL[rule.status] ?? rule.status}
-                </span>
-              </li>
+        <div className={`mt-2.5 hidden flex-col gap-1.5 p-2.5 lg:flex ${INSET}`}>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <FlaskConical className="mr-0.5 h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
+            {rules.slice(0, RULE_CHIPS).map((rule) => (
+              <span
+                key={rule.name}
+                className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-extrabold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+              >
+                {rule.title || rule.name}
+              </span>
             ))}
-          </ul>
-          {rules.length > ruleCards && (
-            <p className="mt-1.5 text-[11px] font-bold text-slate-400 dark:text-slate-500">
-              외 {rules.length - ruleCards}개 규칙도 이 종목을 지목했습니다
-            </p>
-          )}
+            {rules.length > RULE_CHIPS && (
+              <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500">
+                외 {rules.length - RULE_CHIPS}개
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Newspaper className="mr-0.5 h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
+            {newsHeat ? (
+              <>
+                <span
+                  className={`shrink-0 text-xs font-extrabold ${
+                    newsHeat.emphasis
+                      ? "text-slate-700 dark:text-slate-200"
+                      : "text-slate-400 dark:text-slate-500"
+                  }`}
+                >
+                  {newsHeat.headline}
+                </span>
+                {r.news_catalyst && (
+                  <span className="shrink-0 rounded-full bg-slate-200/70 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/60 dark:text-slate-300">
+                    {r.news_catalyst}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-slate-400 tabular-nums dark:text-slate-500">
+                  {newsHeat.detail}
+                </span>
+              </>
+            ) : (
+              <span className="text-xs font-bold text-slate-400 dark:text-slate-500">
+                당일 뉴스 없음
+              </span>
+            )}
+          </div>
         </div>
       )}
 
-      {/* 배지 + 다음날 아침 갭 결과(NXT·KRX·최종) — 한 줄에 묶는다 */}
+      {/* 배지 + 다음날 아침 갭 결과(NXT·KRX) — 한 줄에 묶는다.
+          누적(리포트가 → KRX)은 카드에 찍지 않는다 — 한쪽 장만 있는 날엔 바로 앞 값과
+          같은 숫자가 두 번 나오고, 둘 다 있는 날의 누적은 리포트 상세가 명시 라벨로 낸다.
+          카드에서 누적은 배경 톤(`gapTone`)과 목록 하단 평균이 대신 말한다. */}
       <div
         className={`mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-bold`}
       >
@@ -297,9 +322,13 @@ export function StockReportCard({
         >
           수급 {r.supply_grade}
         </span>
+        {/* 1등 카드는 데스크탑에서 위 근거 블록의 뉴스 줄이 같은 건수를 이미 말한다 —
+            한 카드에 같은 숫자를 두 번 찍지 않는다. */}
         {(r.news_count ?? 0) > 0 && (
           <span
-            className={`shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400`}
+            className={`shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 ${
+              featured ? "lg:hidden" : ""
+            }`}
           >
             뉴스 {r.news_count}
           </span>
@@ -315,7 +344,7 @@ export function StockReportCard({
           </span>
         )}
 
-        {(gapLines.length > 0 || totalPct !== null) && (
+        {gapLines.length > 0 && (
           <span className="ml-auto flex shrink-0 items-baseline gap-2">
             {gapLines.map((g) => (
               <span
@@ -331,19 +360,6 @@ export function StockReportCard({
                 </span>
               </span>
             ))}
-            {totalPct !== null && (
-              <span className="inline-flex items-baseline gap-0.5">
-                <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                  최종
-                </span>
-                <span
-                  className={`font-extrabold tabular-nums ${pctColor(totalPct)}`}
-                >
-                  {totalPct > 0 ? "+" : ""}
-                  {totalPct.toFixed(2)}%
-                </span>
-              </span>
-            )}
           </span>
         )}
       </div>

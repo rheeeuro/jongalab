@@ -52,8 +52,8 @@ export function PickList({
 }: {
   reports: StockReport[];
   date: string;
-  /** 룰 슬러그 → 룰 원본(`lib/api.getRuleMap`). 카드가 한글 제목을 찾고, 1등 카드는
-   *  설명·상태까지 꺼내 선정 근거를 펼친다. */
+  /** 룰 슬러그 → 룰 원본(`lib/api.getRuleMap`). 카드는 한글 제목만 쓴다
+   *  (1등 카드는 그 제목을 칩으로 낸다). */
   ruleMap: Map<string, EdgeRule>;
   /** 결과 줄 우측에 붙일 도구 버튼(시드 배분 모달 등). 세로 공간을 먹지 않는 것만 넣는다. */
   action?: React.ReactNode;
