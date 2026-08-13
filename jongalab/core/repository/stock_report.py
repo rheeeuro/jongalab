@@ -820,6 +820,32 @@ def get_report_codes(report_date: str) -> list[str]:
         return [r["stock_code"] for r in cursor.fetchall()]
 
 
+# T-1 확정 리스크 라벨 — 선정 시점(closing_bet)에 캐리포워드하는 대상.
+# ah_*·exec_str 은 **당일 장 마감 후** 값이라 선정 시점에 존재할 수 없어 뺀다.
+_RISK_LABEL_COLS = ("credit_remn_rt", "short_wght", "short_wght_5d", "lend_remn", "lend_irds_5d")
+
+
+def get_today_risk_labels(stock_codes: list[str]) -> dict[str, dict]:
+    """오늘 행에 이미 있는 T-1 확정 리스크 라벨 — closing_bet 선정 시점 캐리포워드용.
+
+    rule 평가는 **메모리 dict** 를 보므로, 14:30 회차(after_hours_labels --risk-only)가 채운
+    값을 여기서 실어줘야 selector/veto 가 그 값을 본다(뉴스 라벨의 get_today_news_labels 와
+    같은 역할·같은 이유). 반환: {code: {<_RISK_LABEL_COLS...>}}
+    """
+    codes = [c.split("_")[0].split(".")[0] for c in stock_codes if c]
+    if not codes:
+        return {}
+    placeholders = ", ".join(["%s"] * len(codes))
+    cols = ", ".join(_RISK_LABEL_COLS)
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"""SELECT stock_code, {cols} FROM daily_stock_report
+                 WHERE report_date = CURDATE() AND stock_code IN ({placeholders})""",
+            tuple(codes),
+        )
+        return {r.pop("stock_code"): r for r in cursor.fetchall()}
+
+
 def save_after_hours_labels(report_date: str, rows: list[dict]) -> int:
     """시간외단일가·리스크 라벨 UPDATE (관측 컬럼 — closing_bet upsert 와 분리, 멱등).
 

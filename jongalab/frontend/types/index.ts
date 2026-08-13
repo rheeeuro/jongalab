@@ -461,7 +461,10 @@ export interface EdgeRuleDecision {
   discovery?: EdgeRuleDecisionStep;
   confirm?: EdgeRuleDecisionStep;
   decided_at?: string;
-  verdict?: 'confirmed' | 'discovery_failed' | 'confirm_failed';
+  // exec_blocked: 통계와 무관하게 **매수 시점에 평가할 방법이 없어** 종료(2026-08-13, sql/64).
+  // 다른 verdict 는 rule_evaluator 가 통계로 찍지만 이것만 수동 종료라 retire_reason 이 함께 온다.
+  verdict?: 'confirmed' | 'discovery_failed' | 'confirm_failed' | 'exec_blocked';
+  retire_reason?: string;   // 종료 사유(사람이 읽는 문장) — 화면은 이 값을 그대로 보여준다
 }
 
 export interface EdgeRule {

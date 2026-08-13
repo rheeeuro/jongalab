@@ -87,14 +87,48 @@ def test_selection_executable_ok_for_selection_time_cols():
     assert ok and missing == []
 
 
-def test_selection_executable_rejects_1950_and_market_cols():
+def test_selection_executable_rejects_1950_and_realtime_market_cols():
     ok, missing = selection_executable([
         {"col": "change_pct", "op": ">=", "value": 15},
-        {"col": "nxt_gap_pct", "op": ">=", "value": 5},       # 19:50 수집
-        {"col": "market.sox_ret", "op": ">=", "value": 1.5},  # market_snapshot
+        {"col": "nxt_gap_pct", "op": ">=", "value": 5},    # 19:50 수집
+        {"col": "market.vix", "op": ">", "value": 20},     # 시각에 따라 값이 달라지는 축
     ])
     assert not ok
-    assert missing == ["nxt_gap_pct", "market.sox_ret"]
+    assert missing == ["nxt_gap_pct", "market.vix"]
+
+
+def test_selection_executable_allows_settled_us_market_cols():
+    """미국 정규장 확정치(SOX·SPX)는 선정 시점에 쓸 수 있다 (2026-08-13).
+
+    market_snapshot 을 매수 직전 14:30 에도 굽게 하면서 열렸다. 판정 기준은 '접두사'가 아니라
+    **14:30 값과 19:50(채점이 보는) 값이 같은가**다 — 미국장은 한국시간 06:00 에 끝나 그날
+    안에는 더 변하지 않는다. 실시간 축은 위 테스트대로 계속 막힌다.
+    """
+    ok, missing = selection_executable([
+        {"col": "market.sox_ret", "op": ">=", "value": 1.5},
+        {"col": "sector_rel_ret", "op": "<=", "value": 0},
+    ])
+    assert ok and missing == []
+
+
+def test_selection_executable_allows_t1_risk_labels():
+    """T-1 확정 리스크 라벨은 선정 시점에 쓸 수 있다 (2026-08-13).
+
+    값 자체가 전일 확정치라 원래부터 선정 시점에 알 수 있었고, 수집만 17:50 이라 막혀 있었다.
+    14:30 `--risk-only` 회차가 같은 값을 먼저 채운다(수집 코드가 `dt < 오늘` 행만 고른다).
+    """
+    ok, missing = selection_executable([{"col": "short_wght", "op": ">=", "value": 15}])
+    assert ok and missing == []
+
+
+def test_selection_executable_still_rejects_same_day_session_labels():
+    """ah_*·exec_str 은 **당일 장 마감 후** 값이라 선정 시점에 존재할 수 없다 — 계속 차단."""
+    ok, missing = selection_executable([
+        {"col": "ah_react", "op": "<=", "value": -1.5},
+        {"col": "exec_str", "op": ">=", "value": 120},
+    ])
+    assert not ok
+    assert missing == ["ah_react", "exec_str"]
 
 
 # ── 승격 게이트: selector ──
@@ -155,9 +189,9 @@ def test_selector_passes_even_when_below_best_control():
 
 def test_selector_blocked_on_non_executable_predicate():
     # 통계가 아무리 좋아도 **어느 레이어에서도** 못 쓰는 피처면 live 는 무음 no-op → 차단.
-    # short_wght 는 17:50 수집이라 선정(13~15시)에도 NXT 집행(19:50)에도 없다.
-    rule = _rule(family="f7_risk", role="selector", stats=GOOD_STATS,
-                 predicate=[{"col": "short_wght", "op": ">=", "value": 15}])
+    # ah_react 는 당일 시간외 세션(16~18시) 값이라 선정(13~15시)에도 NXT 집행(19:50)에도 없다.
+    rule = _rule(family="f6_ah", role="selector", stats=GOOD_STATS,
+                 predicate=[{"col": "ah_react", "op": ">=", "value": 1.5}])
     gate = check_promotion(rule, [_control(0.2)])
     assert not gate["eligible"]
     assert gate["stat_reasons"] == []      # 통계는 충족 → '집행 설계 필요' 알림 분기
@@ -191,10 +225,13 @@ def test_rule_layer_prefers_selection_over_execution():
     # 섞이면 가장 늦은 레이어(집행)에서만 가능
     assert rule_layer([{"col": "supply_score", "op": ">=", "value": 50},
                        {"col": "nxt_gap_pct", "op": ">=", "value": 1}]) == "execution"
-    # 17:50·익일 수집은 어느 레이어에서도 불가
-    assert rule_layer([{"col": "short_wght", "op": ">=", "value": 15}]) is None
+    # 당일 세션(ah_*·exec_str)·익일 수집은 어느 레이어에서도 불가
+    assert rule_layer([{"col": "ah_react", "op": "<=", "value": -1.5}]) is None
     assert rule_layer([{"col": "next_open_ret", "op": ">", "value": 0}]) is None
-    # market.* 는 선정 시점 스냅샷이 없어 여전히 불가(기존 규약 유지)
+    # T-1 확정 리스크 라벨·미국 정규장 확정치는 선정 레이어 (2026-08-13)
+    assert rule_layer([{"col": "short_wght", "op": ">=", "value": 15}]) == "selection"
+    assert rule_layer([{"col": "market.sox_ret", "op": ">=", "value": 1.5}]) == "selection"
+    # 시각에 따라 값이 달라지는 시장 축은 계속 불가 — 채점(19:50)과 집행(14:30) 값이 어긋난다
     assert rule_layer([{"col": "market.vix", "op": ">", "value": 20}]) is None
 
 
@@ -240,9 +277,9 @@ def test_veto_blocked_without_benefit_evidence():
 
 
 def test_veto_blocked_on_non_executable_predicate():
-    # 17:50 수집(short_wght)은 선정에도 NXT 집행에도 없다 → veto 여도 무음 no-op.
-    dead_rule = _rule(family="f7_risk", role="veto", stats=GOOD_VETO_STATS,
-                      predicate=[{"col": "short_wght", "op": ">=", "value": 15}])
+    # 당일 세션 값(ah_react)은 선정에도 NXT 집행에도 없다 → veto 여도 무음 no-op.
+    dead_rule = _rule(family="f6_ah", role="veto", stats=GOOD_VETO_STATS,
+                      predicate=[{"col": "ah_react", "op": "<=", "value": -1.5}])
     gate = check_promotion(dead_rule, [])
     assert not gate["eligible"] and gate["exec_reasons"]
 
@@ -571,8 +608,8 @@ def test_experimental_still_requires_trading_days_and_executability():
                          policy="experimental")
     assert not g1["eligible"] and any("거래일 부족" in r for r in g1["stat_reasons"])
     g2 = check_promotion(
-        _rule(family="f7_risk", role="selector", stats=_WEAK_SIG,
-              predicate=[{"col": "short_wght", "op": ">=", "value": 15}]),
+        _rule(family="f6_ah", role="selector", stats=_WEAK_SIG,
+              predicate=[{"col": "ah_react", "op": ">=", "value": 1.5}]),
         [_control(-0.227)], policy="experimental")
     assert not g2["eligible"] and g2["exec_reasons"]
 

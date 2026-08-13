@@ -122,6 +122,55 @@ role·family 는 분류 메타데이터라 채점 이력과 무관하지만, sel
 ### 선정 가능한 rule 은 집행으로 내리지 않는다
 집행 레이어는 후보 풀·시드가 19:30 에 확정된 뒤라 종목을 추가할 수 없고 거른 몫의 시드가 논다.
 
+### 2026-08-13 — '실행 불가' 4종 중 2종은 게이트 오분류였다 (사용자 지적)
+화면에 "매수 시점에 못 쓰는 조건"으로 뜨던 candidate 4종(`veto_ah_react_down`·`f6_ah_react_up`·
+`veto_short_surge`·`f2_us_semis_laggard`)을 사용자가 "뒤 둘은 NXT 매수 시점엔 알 수 있는 것
+아니냐"고 지적했고 **맞았다**. 물리적 제약이 아니라 **수집 시각과 화이트리스트**의 문제였다.
+
+**원인 ① — 게이트가 데이터의 성격이 아니라 수집 시각을 봤다.**
+`short_wght`(ka10014)는 수집 코드가 `dt < 오늘` 행만 고르는 **T-1 확정치**다. 즉 값 자체는
+15:20 에도 알 수 있었는데 수집만 17:50 이라 선정 시점에 NULL 이었다. `credit_remn_rt`·
+`lend_*` 도 같다. 반면 `ah_react`·`exec_str` 은 **당일 장 마감 후** 값이라 성격이 다르다.
+
+**원인 ② — `market.` 접두사를 컬럼 불문 통째로 배제했다.**
+당일 `market_snapshot` 행이 19:50(`gap_check --base-nxt`)에나 생겨서인데, 그 탓에 시각과
+무관하게 값이 같은 축까지 함께 막혔다. `^SOX` 는 한국시간 06:00 에 확정돼 그날 안엔 안 변한다.
+게다가 `closing_bet` 은 `select_signals(market=None)` 으로 **아예 넘기지도 않고 있었다.**
+
+**조치** — 매수 직전 14:30 회차를 두 개 추가(`sector_news_labeler_pre_krx` 와 같은 규율):
+`after_hours_labels --risk-only`(T-1 리스크 3종만) · `gap_check --market-snap`.
+`closing_bet` 이 리스크 라벨을 메모리 dict 로 캐리포워드(뉴스 라벨과 같은 방식)하고 `market`
+행을 실제로 넘긴다. 게이트는 `SELECTION_TIME_COLS` 에 리스크 5종 추가 +
+`SELECTION_TIME_MARKET_COLS`(`sox_ret`·`spx_ret`) 신설.
+
+**허용 기준은 "접두사"가 아니라 "두 시각 값이 같은가"로 정했다.** 채점(`rule_evaluator`)은
+19:50 저장값을 쓰는데 집행은 14:30 값을 본다 — 시각에 따라 값이 달라지는 축(선물·VIX·환율·
+코스피/코스닥)을 열면 **채점 표본 ≠ 집행 값**이 된다. `f3_nxt_gap_quality` 승격 때 세운
+원칙과 같다. 리스크 라벨이 안전한 것도 같은 이유다(14:30·17:50 둘 다 같은 T-1 행).
+
+**실측 검증(당일)**: ka10014 응답 최신 행이 `20260812`(오늘 행 없음) — 14:12 수집분이 17:50
+수집분과 같은 값임을 확인. 56/56 종목 수집(72초). 재분류 후 오늘 유니버스 56종목 매칭:
+`veto_short_surge` 3건 · `f2_us_semis_laggard` 13건 (변경 전에는 둘 다 0건 = 무음).
+
+**live 는 무변경이다.** 두 rule 모두 승격 조건은 여전히 미달 —
+`veto_short_surge` 는 `실익 미입증`(제외 종목 `mean_net` +0.118 > 0)에 8/11 `confirm_failed`,
+`f2_us_semis_laggard` 는 `거래일 부족`(7일)·`신뢰구간 하한 미충족`. 이번 변경으로 사라진
+blocker 는 `실행 불가` 뿐이다.
+
+**`ah_*` 2종은 같은 날 종료했다**(sql/64, 사용자 결정) — `f6_ah_react_up`·`veto_ah_react_down`.
+이쪽은 진짜 구조적 불가다: `ah_price` 가 채워지는 행은 **전부 `nxt_listed=0`**(NXT 상장 480행
+100% NULL, 배타적)이라 NXT 매수(19:50) 대상이 아니고, 그 종목의 유일한 매수 창인 KRX 종가
+(15:20)는 수집(17:50)보다 앞선다(2026-07-31 판정과 같은 결론). 통계로 떨어진 게 아니므로
+`discovery_failed` 가 아니라 **새 verdict `exec_blocked`** 로 찍고 `retire_reason`(사람이 읽는
+문장)을 함께 남겼다 — 기존 `discovery` 기록은 보존한다. 화면은 '종료' 기본 문구("검증에
+실패했거나 수명이 다해") 대신 이 사유를 보여준다(`lib/edge.retireReason`). 채점은 종료 후에도
+계속되므로 집행 설계가 바뀌면(예: KRX 매수 창을 시간외단일가로 이동) 새 rule 로 재등록해
+판정한다 — `registered_at` 을 살린 재개는 하지 않는다(사전 등록 원칙).
+
+**남은 규율**: 이 사고의 뿌리는 게이트가 **데이터의 성격이 아니라 우리 수집 시각**을 봤다는 것이다.
+새 컬럼을 화이트리스트에 넣거나 뺄 때는 "언제 수집하나"가 아니라 **"매수 시점에 이미 확정된
+값인가, 그리고 채점이 보는 값과 같은가"**를 묻는다.
+
 ---
 
 ## rule 등록·판정 이력
@@ -136,6 +185,7 @@ role·family 는 분류 메타데이터라 채점 이력과 무관하지만, sel
 | 07-28 | 37·38 | 공시 veto — `veto_disclosure_bad`(retired) → `veto_disclosure_severe`(live)·`veto_disclosure_dilution`(candidate) |
 | 07-29 | 41 | 재료 지속성 2종 |
 | 08-05 | 54·55·58·59 | v2 표본 리셋 + `f1_material_imminent`·`f1_material_unpriced` + 모델 교체 리셋 + `veto_bad_news_wide` |
+| 08-13 | 64 | 시간외 2종(`f6_ah_react_up`·`veto_ah_react_down`) **종료** — verdict `exec_blocked`(통계 탈락 아님, 매수 시점에 평가 경로 없음). 같은 날 `veto_short_surge`·`f2_us_semis_laggard` 는 게이트 오분류로 판명돼 **살렸다**(위 2026-08-13 항목) |
 
 ### 바이오 veto 판정 (07-27 / 07-28)
 `veto_bio_kosdaq` 만 **live 승격** — 근거는 평균 엣지가 아니라 **하한가 꼬리 차단**

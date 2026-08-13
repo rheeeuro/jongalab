@@ -30,7 +30,9 @@ from core.repository.stock_report import (
     get_prev_frgn_exhaust_map,
     get_today_prog_am_map,
     get_today_news_labels,
+    get_today_risk_labels,
 )
+from core.repository.market_snapshot import get_market_snapshots
 from core.repository.sector_report import save_sector_reports
 from core.repository.content import get_today_content_by_stock
 from core.repository.news import (
@@ -656,6 +658,7 @@ class ClosingBetStrategy:
         # 선정 전에 뉴스 있는 전건의 LLM 재료 라벨을 채운다 — veto/selector rule 이 이 컬럼을
         # 보고 판단하므로 반드시 _apply_selection 앞이어야 한다.
         self._fill_news_material_labels(reports)
+        self._fill_risk_labels(reports)
 
         # 선정 레이어(모드 스위치) — selected/핸드오프 대상만 정한다. 점수·rank_no·저장은 불변.
         rule_names_by_code = self._apply_selection(reports)
@@ -817,6 +820,31 @@ class ClosingBetStrategy:
             f"(뉴스 보유 {len(targets)}종목, 캐시 {len(targets) - len(stale)})"
         )
 
+    def _fill_risk_labels(self, reports: list[dict]) -> None:
+        """T-1 확정 리스크 라벨(공매도 비중·신용잔고율·대차)을 메모리 dict 에 캐리포워드한다.
+
+        값은 14:30 회차(`after_hours_labels --risk-only`)가 이미 오늘 행에 채워 둔 것이다.
+        rule 평가는 메모리 dict 를 보므로 이 단계가 없으면 predicate 가 NULL 을 보고 무음이 된다
+        (뉴스 재료 라벨의 캐리포워드와 같은 이유·같은 방식).
+
+        14:30 회차 전(오전 실행)이나 조회 실패면 그냥 값이 없다 — NULL 은 매칭 실패라
+        selector 는 안 고르고 veto 는 안 거른다(fail-open). 선정을 흔들지 않는다.
+        """
+        try:
+            existing = get_today_risk_labels([r["stock_code"] for r in reports])
+        except Exception as e:
+            logger.warning(f"리스크 라벨 조회 실패(라벨 없이 진행): {e}")
+            return
+        filled = 0
+        for r in reports:
+            vals = existing.get(r["stock_code"]) or {}
+            for col, val in vals.items():
+                if val is not None:
+                    r[col] = val
+            if vals.get("short_wght") is not None:
+                filled += 1
+        logger.info(f"리스크 라벨 캐리포워드: 공매도 비중 {filled}/{len(reports)}종목")
+
     # ── 선정 레이어 (모드 스위치) ──
     def _apply_selection(self, reports: list[dict]) -> dict[str, str]:
         """EDGE_SELECTION_MODE 에 따라 각 report 의 selected 를 확정하고, 선정 종목의
@@ -830,8 +858,10 @@ class ClosingBetStrategy:
         등락률 부호 조건은 없다(2026-08-03 제거) — 유니버스 전체가 점수·rule 로 경쟁한다.
 
         점수·rank_no·저장은 이 함수가 건드리지 않는다(대조군 평가·프론트 표시 불변).
-        선정 시점(13~15시)엔 NXT 스냅샷·당일 market_snapshot 이 없어 그 피처 기반 rule 은
-        매칭될 수 없다 — 그런 rule 의 live 승격 자체를 edge_policy 실행 가능성 게이트가 막는다.
+        선정 시점엔 NXT 스냅샷(19:50)이 없어 그 피처 기반 rule 은 매칭될 수 없다 — 그런 rule 의
+        live 승격 자체를 edge_policy 실행 가능성 게이트가 막는다(집행 레이어로 내려간다).
+        당일 market_snapshot 은 14:30 회차가 굽고, 그중 **선정에 쓸 수 있는 축**만 같은 게이트가
+        허용한다(SELECTION_TIME_MARKET_COLS).
         역할(selector/veto/benchmark) 판정은 core.edge_policy.rule_role 단일 소스.
         """
         mode = EDGE_SELECTION_MODE
@@ -865,8 +895,20 @@ class ClosingBetStrategy:
         selection_reports = [{**r, "rank_no": i} for i, r in enumerate(reports, 1)]
         negative_pool = sum(1 for r in reports if (r.get("change_pct") or 0) < 0)
 
+        # 당일 시장 스냅샷 — 14:30 회차(gap_check --market-snap)가 구운 행. 그 전이면 None 이고
+        # market.* predicate 는 NULL 매칭 실패로 흘러 선정을 흔들지 않는다(fail-open).
+        # ⚠️ 이 행의 실시간 축(선물·VIX·환율·코스피)은 19:50 에 덮어써지는 잠정값이라
+        # **선정에 쓸 수 있는 축은 edge_policy.SELECTION_TIME_MARKET_COLS 로 제한**된다
+        # (미국 정규장 확정치 2종 — 14:30 이든 19:50 이든 같은 값).
+        today_iso = datetime.now().date().isoformat()
+        try:
+            market = get_market_snapshots([today_iso]).get(today_iso)
+        except Exception as e:
+            logger.warning(f"당일 시장 스냅샷 조회 실패(market 축 없이 진행): {e}")
+            market = None
+
         selected_codes, rule_names_by_code, veto_log = select_signals(
-            mode, selection_reports, live_rules, veto_rules, TRADED_TOP_N, market=None,
+            mode, selection_reports, live_rules, veto_rules, TRADED_TOP_N, market=market,
             legacy_mean_net=legacy_mean_net,
         )
         sel_set = set(selected_codes)

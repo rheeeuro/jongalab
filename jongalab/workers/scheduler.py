@@ -103,6 +103,19 @@ JOBS = [
     # 평일 17:50 시간외/리스크 라벨. ka10087 이 16~18시에만 살아있어 유예 5분(18시 넘기면 무의미).
     Job("after_hours_labels", UV_RUN + ["workers/after_hours_labels.py"],
         timeout=900, grace=300, minute="50", hour="17", day_of_week="mon-fri"),
+    # 평일 14:30 리스크 라벨만 먼저 — KRX 매수(15:20)·NXT 매수(19:50) 선정 회차가 공매도 비중·
+    # 신용잔고율·대차를 보게 한다. 값은 T-1 확정치라 17:50 회차와 **같다**(수집 시각만 앞당김).
+    # 유예 20분 — 매수 창을 넘겨 지각 실행하는 건 이 잡의 목적이 아니라 스킵이 맞다
+    # (sector_news_labeler_pre_krx 와 같은 규율). 17:50 회차가 어차피 같은 값을 다시 채운다.
+    Job("after_hours_risk_pre_buy",
+        UV_RUN + ["workers/after_hours_labels.py", "--risk-only"],
+        timeout=600, grace=1200, minute="30", hour="14", day_of_week="mon-fri"),
+    # 평일 14:30 시장 스냅샷 — 위와 같은 이유(매수 직전에 당일 행이 있어야 market.* 축을 쓴다).
+    # 19:50(gap_check --base-nxt)이 같은 행을 전체 덮어쓰므로 **채점이 보는 값은 19:50 것**이고,
+    # 그래서 선정에 허용되는 축은 두 시각 값이 같은 미국 정규장 확정치뿐이다(edge_policy).
+    Job("market_snapshot_pre_buy",
+        UV_RUN + ["workers/gap_check.py", "--market-snap"],
+        timeout=300, grace=1200, minute="30", hour="14", day_of_week="mon-fri"),
     # 토요일 08:00 주간 가중치 튜너(GPT 호출 포함). 유예 6h.
     Job("weight_tuner", UV_RUN + ["workers/weight_tuner.py"],
         timeout=2400, grace=21600, minute="0", hour="8", day_of_week="sat"),

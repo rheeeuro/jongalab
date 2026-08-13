@@ -26,6 +26,7 @@ import {
   STATUS_HELP,
   MEASURE_HELP,
   isMeasurementOnly,
+  retireReason,
   STAT_META,
   exitLabelText,
   condText,
@@ -126,8 +127,11 @@ export function EdgeRuleDetailContent({
           </div>
           {action}
         </div>
+        {/* 상태 설명 — 종료 사유가 기록돼 있으면 일반 문구 대신 그 사유를 쓴다.
+            '종료'는 이유가 여러 가지라(통계 탈락 / 성적 붕괴 / 적용 불가) 기본 문구가
+            "검증에 실패했거나"로 단정하면 통계는 멀쩡한데 못 쓰는 전략을 오해하게 만든다. */}
         <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 dark:border-slate-800 dark:bg-[#202027] dark:text-slate-400">
-          {measure ? MEASURE_HELP : STATUS_HELP[rule.status]}
+          {measure ? MEASURE_HELP : (retireReason(rule) ?? STATUS_HELP[rule.status])}
         </p>
       </header>
 

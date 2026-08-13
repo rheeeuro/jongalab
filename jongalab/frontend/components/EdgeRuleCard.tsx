@@ -19,6 +19,7 @@ import {
   isDecided,
   decisionLabel,
   verifyProgress,
+  retireReason,
 } from "@/lib/edge";
 
 export function EdgeRuleCard({
@@ -89,7 +90,12 @@ export function EdgeRuleCard({
               판정 종결도 상태 배지를 숨긴다 — status 는 candidate 그대로라 '검증 중' 배지가
               바로 옆 '판정 탈락' 배지와 정면으로 모순되고, 배지 수가 달라 카드 키도 어긋난다. */}
           {(!measure || isRetired) && !decided && (
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[rule.status]}`}>
+            // 종료 사유가 기록돼 있으면 툴팁으로 붙인다(레이아웃 불변 — 카드 높이 통일 유지).
+            // 전문은 상세 화면 상태 설명줄에 나온다.
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_BADGE[rule.status]}`}
+              title={retireReason(rule) ?? undefined}
+            >
               {STATUS_LABEL[rule.status]}
             </span>
           )}

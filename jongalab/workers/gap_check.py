@@ -225,6 +225,26 @@ def run_base(venue: str):
     logger.info(f"{venue.upper()} 기준가 수집 {got}/{len(reports)}건 ({today})")
 
 
+def run_market_snap():
+    """market_snapshot 1행 upsert (F2 해외 동조·레짐의 눈).
+
+    두 번 돈다 — **14:30**(매수 직전, `--market-snap`)과 **19:50**(`--base-nxt` 말미).
+    14:30 회차를 넣은 이유: 예전엔 19:50 에만 구워서 선정 시점(13~15시·19:00 회차)엔 당일
+    행이 아예 없었고, 그래서 `market.` 축을 쓰는 rule 은 통계와 무관하게 영구 승격 불가였다.
+
+    ⚠️ 저장은 `_FIELDS` **전체 덮어쓰기**라 최종 저장값은 언제나 19:50 회차 값이다
+    (= 채점이 보는 값). 그래서 선정 시점에 쓸 수 있는 축은 **두 시각 값이 같은 것뿐**이고,
+    그 판정은 core/edge_policy.SELECTION_TIME_MARKET_COLS 가 갖는다(미국 정규장 확정치 2종).
+    """
+    today = datetime.now().date().isoformat()
+    try:
+        snap = fetch_edge_market_snapshot()
+        save_market_snapshot({"snapshot_date": today, **snap})
+        logger.info(f"market_snapshot 저장 완료 ({today})")
+    except Exception as e:
+        logger.warning(f"market_snapshot 저장 실패: {e}")
+
+
 def run_base_nxt():
     """19:50 NXT 기준가 수집 (확장판) — 순수 관측·기록 레이어(매매 영향 0).
 
@@ -287,13 +307,7 @@ def run_base_nxt():
     except Exception as e:
         logger.warning(f"NXT 스냅샷 DB 저장 실패: {e}")
 
-    # 시장 스냅샷 1행 upsert (F2 해외 동조·레짐 연구용)
-    try:
-        snap = fetch_edge_market_snapshot()
-        save_market_snapshot({"snapshot_date": today, **snap})
-        logger.info(f"market_snapshot 저장 완료 ({today})")
-    except Exception as e:
-        logger.warning(f"market_snapshot 저장 실패: {e}")
+    run_market_snap()
 
 
 # ── 갭 확정 (08:03 NXT / 09:03 KRX) ──
@@ -507,9 +521,13 @@ def run_label_nxt():
 
 if __name__ == "__main__":
     from core.market_calendar import exit_if_outside_window
-    # cron: --base-krx 20 15 / --base-nxt 50 19 / --check-nxt 3 8 / --label-nxt 6 8 / --check-krx 3 9 (평일)
+    # cron: --market-snap 30 14 / --base-krx 20 15 / --base-nxt 50 19 / --check-nxt 3 8 /
+    #       --label-nxt 6 8 / --check-krx 3 9 (평일)
     # 휴장일·해당 시간대 밖(pm2 수동 재기동 등)이면 종료.
-    if "--base-krx" in sys.argv:
+    if "--market-snap" in sys.argv:
+        exit_if_outside_window(14, 14)
+        run_market_snap()
+    elif "--base-krx" in sys.argv:
         exit_if_outside_window(15, 15)
         run_base("krx")
     elif "--base-nxt" in sys.argv:

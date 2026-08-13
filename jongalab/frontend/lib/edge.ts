@@ -302,7 +302,15 @@ export const DECISION_LABEL: Record<string, { text: string; tone: 'wait' | 'pass
   confirmed: { text: '확증 완료', tone: 'pass' },
   discovery_failed: { text: '판정 탈락', tone: 'fail' },
   confirm_failed: { text: '재현 실패', tone: 'fail' },
+  exec_blocked: { text: '적용 불가', tone: 'fail' },
 };
+
+// 종료 사유 — '종료(retired)' 는 이유가 여러 가지다(통계 탈락 / 성적 붕괴 / **적용 불가**).
+// 기본 문구(STATUS_HELP.retired)는 "검증에 실패했거나 수명이 다해"라 적용 불가 건에는 틀리다
+// (통계는 멀쩡한데 매수 시점에 평가할 방법이 없어 내린 것). 기록된 사유가 있으면 그걸 쓴다.
+export function retireReason(rule: EdgeRule): string | null {
+  return rule.status === 'retired' ? (rule.decision?.retire_reason ?? null) : null;
+}
 
 export function decisionLabel(rule: EdgeRule): { text: string; tone: 'wait' | 'pass' | 'fail' } | null {
   if (rule.status !== 'candidate' || isMeasurementOnly(rule)) return null;

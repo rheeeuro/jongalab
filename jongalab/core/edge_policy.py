@@ -96,9 +96,39 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     # stock_event 를 closing_bet 선정 시점에 집계. 매 실행 재계산이라 저녁 재실행(19:00)에는
     # 장 마감 후 공시(15:30~18:00)까지 반영된다 → NXT 매수(19:30) 직전 veto 가 실제로 동작.
     "disc_count", "disc_bad_type", "disc_good_type",
+    # 리스크 라벨 (2026-08-13) — 값이 **T-1 확정치**라 원래부터 선정 시점에 알 수 있던 값인데,
+    # 수집만 17:50(after_hours_labels)이라 선정 때 NULL 이었다. 그래서 매수 직전 14:30 에
+    # `--risk-only` 회차를 추가하고(scheduler `after_hours_risk_pre_buy`) closing_bet 이
+    # 오늘 행의 값을 메모리 dict 로 캐리포워드한다(뉴스 라벨과 같은 방식).
+    # ⚠️ 두 회차는 **같은 값**을 쓴다 — 수집 코드가 `dt < 오늘` 행만 고르므로 14:30 이든
+    # 17:50 이든 같은 T-1 행이다. 채점 표본과 집행 값이 같은 변수라 과거 stats 를 그대로
+    # 승격 근거로 쓸 수 있다(f3_nxt_gap_quality 승격 때 세운 원칙과 같다).
+    # ah_*·exec_str 은 여기 넣지 않는다 — 그건 T-1 이 아니라 **당일 장 마감 후** 값이라
+    # 선정 시점에 존재할 수 없다.
+    "credit_remn_rt", "short_wght", "short_wght_5d", "lend_remn", "lend_irds_5d",
 })
 
 _MARKET_PREFIX = "market."
+
+# 선정 시점에 쓸 수 있는 **시장 스냅샷 컬럼** (2026-08-13).
+# 예전엔 `market.` 접두사를 컬럼과 무관하게 통째로 배제했다. 당일 market_snapshot 행이
+# 19:50(gap_check --base-nxt)에나 생겨 선정 때 없었기 때문인데, 그 탓에 시각과 무관하게
+# 값이 같은 축까지 함께 막혔다(f2_us_semis_laggard 가 영구 승격 불가였던 이유).
+#
+# 이제 매수 직전 14:30 에 스냅샷을 한 번 굽는다(scheduler `market_snapshot_pre_buy`).
+# 그래도 **모든 축을 여는 건 틀리다** — 채점은 19:50 저장값으로 하는데 집행은 14:30 값을
+# 보게 되어 두 시점 값이 다른 축은 '채점 표본 ≠ 집행 값'이 된다. 그래서 판정 기준은 하나다:
+#   **미국 정규장이 이미 끝나 그날 안에는 더 변하지 않는 확정치인가.**
+# SOX·SPX 는 한국시간 06:00 에 마감된 값이라 14:30 에 읽든 19:50 에 읽든 같다.
+# 제외: nq_fut/vix/usdkrw/wti(24시간 움직임) · kospi/kosdaq(14:30 은 장중, 19:50 은 마감) ·
+#       k200f_day/night(세션 자체가 다름) · ewy/koru/skhy(미국 프리마켓~정규장) ·
+#       news_*_tone(그 시점까지 라벨된 것만 세는 누적값).
+SELECTION_TIME_MARKET_COLS: frozenset[str] = frozenset({"sox_ret", "spx_ret"})
+
+
+def _market_col_ok(col: str) -> bool:
+    """`market.` 컬럼이 선정 시점에 쓸 수 있는 축인지."""
+    return col[len(_MARKET_PREFIX):] in SELECTION_TIME_MARKET_COLS
 
 
 def selection_executable(predicate: list) -> tuple[bool, list[str]]:
@@ -106,7 +136,8 @@ def selection_executable(predicate: list) -> tuple[bool, list[str]]:
     missing = []
     for cond in predicate or []:
         col = cond.get("col", "") if isinstance(cond, dict) else ""
-        if col.startswith(_MARKET_PREFIX) or col not in SELECTION_TIME_COLS:
+        ok = _market_col_ok(col) if col.startswith(_MARKET_PREFIX) else col in SELECTION_TIME_COLS
+        if not ok:
             missing.append(col)
     return (not missing, missing)
 
@@ -139,7 +170,8 @@ def execution_executable(predicate: list) -> tuple[bool, list[str]]:
     missing = []
     for cond in predicate or []:
         col = cond.get("col", "") if isinstance(cond, dict) else ""
-        if col.startswith(_MARKET_PREFIX) or col not in EXECUTION_TIME_COLS:
+        ok = _market_col_ok(col) if col.startswith(_MARKET_PREFIX) else col in EXECUTION_TIME_COLS
+        if not ok:
             missing.append(col)
     return (not missing, missing)
 
