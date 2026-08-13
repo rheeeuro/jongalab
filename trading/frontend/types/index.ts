@@ -149,7 +149,8 @@ export interface BuyPreviewStock {
   conviction: number; // 선정 근거 수(표) — 1이면 등가중, 2 이상이면 그만큼 비중 증액
   rule_names: string | null; // 선정 근거 rule name 콤마 목록 (점수순 선정은 null)
   keep: number | null; // 선물 섹터 게이트 keep-factor(<1이면 감액됨), 감액 없으면 null
-  note: string | null; // "배분 0주(시드 부족)" / "현재가 없음" / "선물 게이트 감액" / "윈도우 종료" / null(매수 예정)
+  keep_reason: string | null; // keep 감액의 출처 한 줄(하락 축·섹터 keep·수량 변화) — hover/펼침 표시용
+  note: string | null; // "게이트 감액"(게이트가 수량을 0으로) / "배분 0주(시드 부족)" / "현재가 없음" / "윈도우 종료" / null(매수 예정)
 }
 
 // 선물 섹터 게이트 진단 (buy-preview·audit 공유 shape)

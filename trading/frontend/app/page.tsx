@@ -158,6 +158,9 @@ export default async function TodayPage() {
                     return (
                       <li
                         key={s.stk_cd}
+                        // 게이트 감액 사유(축별 등락·강도·섹터 keep·수량 변화)는 hover 로만 보여준다 —
+                        // 목록 스타일을 건드리지 않으려고 별도 줄 없이 title 로 붙였다.
+                        title={s.keep_reason ?? undefined}
                         className={`flex items-center justify-between gap-2 py-3 ${buying ? "" : "opacity-50"}`}
                       >
                         <div className="min-w-0">

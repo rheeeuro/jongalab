@@ -267,7 +267,12 @@ def effective_keep(keep: float, regime_mult: float) -> float:
 
 
 def _sectors_for(stk_cds: list[str]) -> dict[str, str | None]:
-    """stk_cd(6자리) → 섹터명. jongalab ticker_dictionary 캐시(키움 업종명) 읽기전용 조회."""
+    """stk_cd(6자리) → 섹터명. jongalab ticker_dictionary 캐시(키움 업종명) 읽기전용 조회.
+
+    ticker_dictionary 는 종목당 **별칭 행이 여러 개**이고 대부분 sector 가 NULL 이다(005930 은 19행 중
+    2행만 채워짐). 그래서 종목별로 묶어 **채워진 값 하나**를 고른다 — 행 순서에 맡기면 NULL 행이
+    마지막에 걸린 대형주가 neutral 로 떨어져 tech 민감도·US 반도체 축이 통째로 빠진다.
+    """
     codes = [c for c in {*stk_cds} if c]
     if not codes:
         return {}
@@ -275,7 +280,8 @@ def _sectors_for(stk_cds: list[str]) -> dict[str, str | None]:
         with get_jongalab_db() as (conn, cursor):
             ph = ",".join(["%s"] * len(codes))
             cursor.execute(
-                f"SELECT ticker_symbol, sector FROM ticker_dictionary WHERE ticker_symbol IN ({ph})",
+                f"SELECT ticker_symbol, MAX(NULLIF(sector, '')) AS sector FROM ticker_dictionary "
+                f"WHERE ticker_symbol IN ({ph}) GROUP BY ticker_symbol",
                 tuple(codes),
             )
             return {r["ticker_symbol"]: r.get("sector") for r in cursor.fetchall()}

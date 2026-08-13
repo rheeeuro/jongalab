@@ -311,6 +311,43 @@ def signals(date: str | None = None):
     return signal_repo.get_signals_by_date(trade_date)
 
 
+# 선물 게이트 축 → 표시 이름. 코스피 축은 거래소별 이름(주간/야간선물)이라 진단값을 쓴다.
+_AXIS_LABELS = {"nq": "나스닥선물", "us_semis": "미 프리마켓 반도체", "us_korea": "미 프리마켓 한국물"}
+
+
+def _keep_reason(stk_cd: str, futures_diag: dict | None, macro_diag: dict, m_keep: float,
+                 regime_mult: float, pre_shares: int, shares: int) -> str:
+    """감액 keep(<1.0)이 어떤 축에서 왔는지 한 줄 설명 — 대시보드 hover/펼침 표시용.
+
+    '게이트 감액'이라는 라벨만으로는 어느 게이트·어느 축이 얼마나 깎았는지 알 수 없어서,
+    하락 축(강도>0)과 섹터 keep, 그리고 반올림 후 실제 수량 변화를 함께 적는다.
+    """
+    parts = []
+    fd = futures_diag or {}
+    det = (fd.get("detail") or {}).get(stk_cd) or {}
+    axes = fd.get("axes") or {}
+    downs = [
+        f"{_AXIS_LABELS.get(k) or fd.get('kospi_label') or k} {a['pct']:+.2f}%"
+        f"(강도 {a.get('intensity')})"
+        for k, a in axes.items() if (a.get("intensity") or 0) > 0 and a.get("pct") is not None
+    ]
+    if downs:
+        parts.append(f"선물 게이트 · {det.get('sector') or '섹터 미분류'}"
+                     f"({det.get('class')}) keep {det.get('keep')} ← " + " · ".join(downs))
+    if m_keep < 1.0:
+        sev3 = "·".join(e["name"] for e in (macro_diag.get("events") or [])
+                        if (e.get("severity") or 0) >= 3)
+        parts.append(f"거시 이벤트 게이트 keep {m_keep}" + (f" ← {sev3}" if sev3 else ""))
+    if regime_mult < 1.0:
+        parts.append(f"레짐 게이트 시드 ×{regime_mult}")
+    if not parts:
+        return ""
+    parts.append("배분 0주 — 단가가 배분액보다 커서(게이트 무관)" if pre_shares < 1
+                 else f"배분 {pre_shares}주 → {shares}주"
+                 + ("(반올림으로 수량 유지)" if pre_shares == shares else ""))
+    return " / ".join(parts)
+
+
 @app.get("/buy-preview")
 def buy_preview(date: str | None = None):
     """오늘 매수 예정 종목 미리보기 (KRX/NXT 거래소별 시드 배분·예상 수량).
@@ -416,6 +453,7 @@ def buy_preview(date: str | None = None):
         for c, a in zip(items, cands):
             sig = c["sig"]
             shares, cost = a.get("shares", 0), a.get("cost", 0)
+            pre_shares = shares  # 게이트 전 배분 수량 — 0주의 원인이 게이트인지 시드인지 구분용
             # 선물(섹터별) × 거시(공통) 곱에 레짐 결합 하한 반영 (executor 와 동일)
             keep = 1.0 if closed else effective_keep(factors.get(sig["stk_cd"], 1.0) * m_keep,
                                                      regime_mult)
@@ -424,7 +462,9 @@ def buy_preview(date: str | None = None):
                 cost = shares * c["price"]
             note = ("윈도우 종료" if closed
                     else "현재가 없음" if c["price"] <= 0
-                    else "게이트 감액" if keep < 1.0 and shares < 1
+                    # 게이트가 실제로 수량을 0 으로 만든 경우만 게이트 탓. 배분 자체가 0주였으면
+                    # (단가 > 배분액) keep<1 이어도 원인은 시드 부족이다.
+                    else "게이트 감액" if shares < 1 and pre_shares >= 1
                     else "배분 0주(시드 부족)" if shares < 1
                     else None)
             stocks.append({
@@ -439,6 +479,10 @@ def buy_preview(date: str | None = None):
                 "conviction": c["conviction"],
                 "rule_names": sig.get("rule_names") or None,
                 "keep": round(keep, 3) if keep < 1.0 else None,
+                # 감액 keep 의 출처(하락 축·섹터 keep·수량 변화) — 대시보드가 hover/펼침으로 보여준다.
+                "keep_reason": (_keep_reason(sig["stk_cd"], futures_diag, macro_diag, m_keep,
+                                             regime_mult, pre_shares, shares) or None)
+                if keep < 1.0 else None,
                 "note": note,
             })
         stocks.sort(key=lambda s: (s["rank_no"] is None, s["rank_no"] or 0))

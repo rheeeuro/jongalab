@@ -181,6 +181,22 @@ NXT 전용 방어 시드 게이트로 도입. 매수시점 NQ 선물 + 코스피
   프리마켓 `extended_ret` 만 순방향 신호로 쓴다.
 - KRX(15:20)는 매수 시점 미국장이 완전 폐장(다크)이라 확장 데이터가 stale → 이 축 미개입.
 
+### 2026-08-13 — 섹터 조회가 대형주를 neutral 로 떨어뜨려 게이트가 사실상 미적용이었다
+`_sectors_for` 가 `SELECT ticker_symbol, sector FROM ticker_dictionary WHERE ticker_symbol IN (...)`
+결과를 dict 로 접어서, **종목당 별칭 행이 여러 개인 테이블에서 마지막 행의 sector(대개 NULL)** 가 남았다
+(005930 은 19행 중 sector 있는 행 2개, 000660 은 5행 중 3개). 실측: 8/13 19:00 NXT 미리보기에서
+삼성전자·SK하이닉스·한미반도체가 전부 `sector=null → class=neutral`.
+- 영향은 **감액 과소 적용**(안전 방향이지만 게이트가 안 듣는다): tech 민감도 NQ 1.0→0.4, 그리고
+  **US 프리마켓 반도체 축은 `semis_s=1.0 if cls=='tech'` 라 통째로 빠졌다** — 반도체 급락 밤에
+  반도체 대형주가 무감액으로 담긴다.
+- 수정: `MAX(NULLIF(sector,'')) … GROUP BY ticker_symbol` 로 종목당 채워진 값 하나를 고른다.
+  같은 선물 레벨(야간선물 -0.99%·프리 반도체 -1.59%)에서 삼성전자 keep 0.932(neutral) → **0.906(tech)**.
+- 한미반도체는 키움 업종이 `기계/장비`(cyclical)라 US 반도체 축이 여전히 안 걸린다 — 섹터 민감도
+  맵 자체의 문제이고 통설 기반 미검증 영역이라 이번엔 손대지 않았다(`futures-gate-unverified`).
+- 같은 턴 표시 수정: `/buy-preview` note 가 keep<1 이면 시드 부족 0주까지 `게이트 감액`으로 찍고
+  있었다 → 게이트 전 배분이 1주 이상이었던 경우만 게이트 탓으로 표시하고, 감액 사유(축별 등락·강도·
+  섹터 keep·반올림 후 수량 변화)를 `keep_reason` 으로 내려 홈 카드에서 hover/펼침으로 보여준다.
+
 ---
 
 ## 거시 이벤트 게이트 (macro_gate)
