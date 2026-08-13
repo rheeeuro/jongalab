@@ -152,7 +152,7 @@ def set_rule_status(rule_id: int, status: str) -> None:
         conn.commit()
 
 
-# (2026-08-05) `count_promoted_in_month` 는 월 승격 상한 폐지와 함께 삭제했다.
+# 월 승격 상한이 없으므로 월별 승격 수를 세는 헬퍼도 두지 않는다.
 # 승격 이력이 필요하면 `edge_rule.promoted_at` 을 직접 조회한다.
 
 

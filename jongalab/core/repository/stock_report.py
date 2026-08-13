@@ -6,8 +6,8 @@ from decimal import Decimal
 from core.db import get_db
 
 # 선정 근거(rule_names, 콤마 목록)에 걸린 **규칙 수**를 세는 SQL 식. 값이 없으면 0.
-# 추천 목록의 1차 정렬 기준이다 — 최근 60일 실측에서 그날 규칙 최다 그룹이 같은 날 나머지보다
-# 나았다(평균 갭 +1.85% vs +1.49%, 승률 73.1% vs 61.1%). 근거는 docs/history/frontend-ui.md.
+# 추천 목록의 1차 정렬 기준이다 — 그날 규칙이 많이 걸린 종목이 같은 날 나머지보다 나았다.
+# 실측 근거: docs/history/frontend-ui.md
 RULE_COUNT_SQL = (
     "(CASE WHEN rule_names IS NULL OR rule_names = '' THEN 0 "
     "ELSE LENGTH(rule_names) - LENGTH(REPLACE(rule_names, ',', '')) + 1 END)"
@@ -27,8 +27,7 @@ _FIRST_WRITE_WINS = frozenset({"prog_am_net"})
 #    (정상 경로에서는 closing_bet 이 기존 라벨을 읽어 in-memory 로도 이어붙인다 — rule 평가가
 #     메모리 dict 를 보므로 캐리포워드가 필수고, 이 집합은 DB 쪽 백스톱이다.)
 #    ⚠️ LLM 라벨 컬럼은 **하나도 빠짐없이** 이 집합과 _NEWS_LABEL_COLS 양쪽에 있어야 한다.
-#    2026-07-29 첫 실행에서 news_summary/news_sentiment/news_catalyst 를 빼먹어, 캐시 스킵
-#    실행이 그 3개만 NULL 로 덮었다(4축은 살아남아 한 행 안에서 라벨이 어긋났다).
+#    하나라도 빠지면 캐시 스킵 실행이 그 컬럼만 NULL 로 덮어 한 행 안에서 라벨이 어긋난다.
 _PRESERVE_ON_NULL = frozenset({
     "prog_pm_net", "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct",
     "news_summary", "news_sentiment", "news_catalyst",
@@ -590,7 +589,7 @@ def get_record_summary(days: int = 20) -> dict:
         "avg_gap_pct": round(gap_sum / picks, 3),
         "avg_exec_ret": round(exec_sum / exec_n, 3) if exec_n else None,
         "exec_samples": exec_n,
-        # 실체결 라벨은 매매 경로 가동 이후 구간에만 있다(실측 2026-08-06 기준 최근 20 영업일).
+        # 실체결 라벨은 매매 경로 가동 이후 구간에만 있다(갭 라벨보다 창이 짧다).
         # 갭 구간과 창이 다르면 두 평균을 나란히 놓는 것만으로 "실체결이 더 좋다"로 오독되므로
         # 실체결 자신의 구간을 함께 내려 화면이 그 사실을 밝히게 한다.
         "exec_days": len(exec_keys),

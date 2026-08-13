@@ -233,7 +233,7 @@ def _run_exec_leg(
                 continue
             # 권리락 가드 — 다음 거래일이 권리락일이면 수정주가 일봉만 소급 조정되고 분봉·NXT
             # 시세는 실거래가를 그대로 준다. 그 상태로 계산하면 배정비율이 그대로 손실로 찍히고
-            # ±SANE_RET_PCT 도 통과한다(daily_ohlc.is_price_scale_shifted 주석의 대동기어 실측).
+            # ±SANE_RET_PCT 도 통과한다(daily_ohlc.is_price_scale_shifted 참조).
             # 갭·수급이 아닌 기계적 조정이므로 채점 표본에서 빼는 게 맞다 — 일봉 라벨 4종은
             # 양 끝이 모두 조정 스케일이라 정상이고, 여기서 손대지 않는다.
             adj_close = (cache[code].get(report_dt) or (0, 0, 0, 0))[3]

@@ -8,7 +8,7 @@ import { ROLE_META, verifyProgress, isMeasurementOnly, isDecided, promoPolicy, P
 
 // 이 화면은 읽기 전용 — 실전 투입/종료 등 관리는 /admin/edge-rules(관리자 인증)에서만 한다.
 // 위→아래 순서. **끝난 것(판정 종결·종료)은 이 목록이 아니라 페이지 최하단**에 접힌 채로 둔다
-// (2026-08-04 사용자 요청) — 더 심사하지 않는 전략이 위쪽 자리를 차지하면 지금 볼 것을 가린다.
+// 더 심사하지 않는 전략이 위쪽 자리를 차지하면 지금 볼 것을 가린다.
 const GROUPS: { status: "live" | "candidate"; label: string; desc: string }[] = [
   { status: "live", label: "적용 중", desc: "검증을 통과해 종목 선정에 반영되는 전략" },
   { status: "candidate", label: "검증 중", desc: "모의 채점으로 성적을 쌓는 중" },
@@ -64,7 +64,7 @@ export function EdgeBoard({ rules }: { rules: EdgeRuleWithDaily[] }) {
   // (검증 통과할 관문이 없는데 '검증 중' 아래 놓이면 검증 대기처럼 읽힌다).
   const measured = visible.filter(isMeasurementOnly);
   // 판정이 끝난 candidate 도 '검증 중'에서 뺀다 — 더 심사하지 않는데 진행도 순 정렬 때문에
-  // 게이지가 꽉 찬 상태로 목록 맨 위에 올라와 승격 임박처럼 읽혔다(2026-08-04 사용자 지적).
+  // 그러지 않으면 게이지가 꽉 찬 채 목록 맨 위에 올라와 승격 임박처럼 읽힌다.
   // 파이프라인·측정용 아래, **페이지 최하단**으로 모은다.
   const decided = visible.filter(isDecided);
   const retired = visible.filter((r) => r.status === "retired" && !isMeasurementOnly(r) && !isDecided(r));

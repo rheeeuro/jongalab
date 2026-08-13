@@ -70,7 +70,7 @@ function pctColor(pct: number): string {
 /** 추천 픽 카드 — 홈(오늘의 추천)과 리포트 상세가 공유한다.
  *
  * **표시 순번(1,2,3…)을 매기지 않는다.** hybrid/rules 모드에서 뽑힌 종목은 점수 순위와
- * 무관해(실측 2026-08-07 rank_no = 2·4·7…53, 1위가 없다) 목록 순번을 매기면 점수로 뽑힌
+ * 무관해(실측 rank_no 가 2·4·7…53 처럼 흩어지고 1위가 없는 날이 있다) 순번을 매기면 점수로 뽑힌
  * 것처럼 읽힌다. 순위 대신 **점수 배지 + '왜 뽑혔나'(룰 한글 제목)** 로 선정 근거를 직접 낸다.
  * 점수 순위(rank_no)가 필요하면 리포트 상세에서 본다.
  *
@@ -110,8 +110,8 @@ export function StockReportCard({
         ? "rounded-2xl bg-rose-50/60 shadow-sm ring-1 ring-rose-200/60 dark:bg-rose-950/20 dark:shadow-none dark:ring-rose-900/40"
         : "rounded-2xl bg-blue-50/60 shadow-sm ring-1 ring-blue-200/60 dark:bg-blue-950/20 dark:shadow-none dark:ring-blue-900/40";
 
-  /** 1등 카드는 **종목명만** 키운다(데스크탑 36px). 가격·점수·배지까지 같이 키웠더니 카드가
-   *  통째로 확대된 것처럼 보여 되돌렸다(2026-08-11) — 나머지는 일반 카드와 같은 크기이고,
+  /** 1등 카드는 **종목명만** 키운다(데스크탑 36px). 가격·점수·배지까지 같이 키우면 카드가
+   *  통째로 확대된 것처럼 보인다 — 나머지는 일반 카드와 같은 크기이고,
    *  카드가 1등임은 종목명 크기·전체 폭·인디고 링·아래 근거 블록이 이미 말한다. */
   const nameSize = featured ? "text-lg lg:text-4xl" : "";
 

@@ -88,8 +88,7 @@ class ClosingBetStrategy:
             self._prog_am_map = {}
         # 거래대금 통합 순위(mrkt_tp=000) TOP_N_BY_VALUE 윈도우 안에서 ETF/ETN 이 아니고
         # 거래대금 하한(MIN_TRADING_VALUE)을 통과한 종목. 테마 보너스는 이 유동성
-        # 상위권과 교차할 때만 부여한다. (2026-07-28: 시장별 분리 → 통합 순위로 전환.
-        # 이전엔 하한 미달·ETF 도 이 셋에 들어가 테마 보너스 게이트가 느슨했다.)
+        # 상위권과 교차할 때만 부여한다(하한 미달·ETF 가 섞이면 테마 보너스 게이트가 느슨해진다).
         self._top_value_codes: set[str] = set()
         # ETF/ETN 상장 코드 셋(_load_excluded_codes 에서 구축) — 이름 키워드(EXCLUDE_KEYWORDS)는
         # 운용사 리브랜딩(예: ARIRANG→PLUS)에 뚫리므로 코드 기반 제외가 1차, 키워드는 백업.
@@ -150,10 +149,9 @@ class ClosingBetStrategy:
         seen_codes = set()
 
         # (a) 거래대금 상위 — 양시장 통합(mrkt_tp=000) 유동성 절대 순위.
-        #     시장별 분리(001/101) 는 시장 규모 차이를 무시하고 각 50 슬롯을 배분해
-        #     코스닥 중소형을 과대 대표했다(2026-07-28: 개별 75건 중 코스닥 50건).
-        #     1페이지 100행으로 거래대금 하한 아래까지 내려간다(2026-07-28 실측: 78행에서
-        #     하한 1,000억 도달, 100행 끝은 784억). 활황장에 100행이 하한 위에서 끝나면
+        #     시장별 분리(001/101)는 시장 규모 차이를 무시하고 각 50 슬롯을 배분해 코스닥
+        #     중소형을 과대 대표한다(전환 근거: docs/history/selection-scoring.md).
+        #     1페이지 100행이면 보통 거래대금 하한 아래까지 내려간다. 활황장에 100행이 하한 위에서 끝나면
         #     하한 통과 종목이 조용히 잘리므로 그때만 경고를 남긴다(필요 시 max_pages 상향).
         try:
             data = self.api.get_trading_value_rank(mrkt_tp="000")
@@ -359,10 +357,10 @@ class ClosingBetStrategy:
         
         for c in candidates:
             # 등락률 부호로 후보를 걸러내지 않는다 — 음전 후보도 정밀분석·저장하고
-            # 선정(_apply_selection)에서도 점수·rule 로 그대로 경쟁한다(2026-08-03 하드컷 제거).
+            # 선정(_apply_selection)에서도 점수·rule 로 그대로 경쟁한다.
 
-            # 정배열/신고가는 하드 필터에서 점수 가점으로 전환 (2026-07-03) —
-            # 필터가 풀을 하루 10개 미만까지 줄여 점수가 '선정'을 못 하던 문제 해소.
+            # 정배열/신고가는 하드 필터가 아니라 **점수 가점**이다 — 필터로 두면 후보 풀이 하루
+            # 10개 미만까지 줄어 점수가 '선정'을 하지 못한다.
             is_aligned, near_high = self.engine.check_ma_alignment(c.code)
             c.ma_aligned = is_aligned
             c.near_high = near_high
@@ -727,7 +725,7 @@ class ClosingBetStrategy:
 
         # ② 판정 코퍼스 조립. 룩백은 재료 stage(첫 발표/후속) 판정 근거다.
         # **대상 선별이 news_count(카운트 게이트=텔레그램)가 아니라 텍스트 코퍼스 기준이다** —
-        # 예전엔 텔레그램 언급이 있는 종목만 판정해서 라벨 커버리지가 유니버스의 30% 였다.
+        # 텔레그램 언급이 있는 종목만 판정하면 라벨 커버리지가 유니버스의 3분의 1로 떨어진다.
         try:
             bundles = get_recent_news_by_stocks(codes, NEWS_JUDGE_LOOKBACK_DAYS)
         except Exception as e:
@@ -885,13 +883,11 @@ class ClosingBetStrategy:
             else:
                 logger.warning(f"veto rule 로드 실패 — veto 미적용: {e}")
 
-        # 등락률 하드컷 없음(2026-08-03 제거, 사용자 결정) — 음전 후보도 점수·rule 로 경쟁한다.
-        #   유지 근거였던 것: 실집행 라벨로 음전 자체는 무해(음전 +0.65% vs 양전 +0.55%)하고
-        #   컷이 이기는 메커니즘은 대체효과였다. 제거 근거: 슬롯이 안 차는 날(양전<TOP_N)은 폭락일이라
-        #   선물 게이트가 종목별 수량을 이미 깎는다(실측 미달일 keep 0.42~0.86).
-        #   ⚠️ 감시 항목 — 컷이 막아온 '수급 좋은 음전 ↔ 수급 나쁜 양전' 교체는 6/26~7/31 반사실에서
-        #   13건/9일·exec_leg_ret -1.64%p 로 지는 교환이었다(음전 -1.32% vs 밀려난 양전 +0.32%).
-        #   총 시드는 미달일에도 축소되지 않는다(레짐/거시 게이트는 그날 시장을 보지 않음).
+        # 등락률 하드컷 없음 — 음전 후보도 점수·rule 로 그대로 경쟁한다. 슬롯이 안 차는 날
+        #   (양전<TOP_N)은 폭락일이라 선물 게이트가 종목별 수량을 이미 깎는다.
+        #   ⚠️ 감시 항목: 컷이 막아온 '수급 좋은 음전 ↔ 수급 나쁜 양전' 교체는 반사실 검정에서 지는
+        #   교환이었다. 총 시드는 미달일에도 축소되지 않는다(레짐/거시 게이트는 그날 시장을 보지
+        #   않음). 제거 판정·반사실 수치: docs/history/selection-scoring.md
         selection_reports = [{**r, "rank_no": i} for i, r in enumerate(reports, 1)]
         negative_pool = sum(1 for r in reports if (r.get("change_pct") or 0) < 0)
 
@@ -914,8 +910,8 @@ class ClosingBetStrategy:
         sel_set = set(selected_codes)
         for r in reports:
             r["selected"] = 1 if r["stock_code"] in sel_set else 0
-            # 선정 근거를 리포트 행에도 태깅한다(sql/43) — 예전엔 trading DB 의 trade_signal 에만
-            # 남아서, hybrid 가 점수 62위 종목을 뽑아도 종목 탭은 그 이유를 알 수 없었다.
+            # 선정 근거를 리포트 행에도 태깅한다(sql/43) — trading DB 의 trade_signal 에만 남기면
+            # hybrid 가 점수 62위 종목을 뽑아도 종목 탭이 그 이유를 알 수 없다.
             # selected 와 같은 루프에서 정해야 둘이 어긋나지 않는다.
             r["rule_names"] = rule_names_by_code.get(r["stock_code"])
 

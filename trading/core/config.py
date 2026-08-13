@@ -64,8 +64,8 @@ STOP_BUFFER_PCT = float(os.getenv('STOP_BUFFER_PCT', '0.5'))
 # 끌어올린다(단조 증가, 절대 내리지 않음): stop = max(기존 stop, 현재가*(1 - TRAIL_PCT/100)).
 # 고점 대비 TRAIL_PCT% 빠지면 트레일링 스탑에 걸려 잔량을 매도해 상승분을 최대한 확보한다.
 # 값이 작을수록 고점 가까이에서 청산(잦은 조기 청산), 클수록 더 들고 간다(되돌림 손실↑).
-# 0.75: 2026-07-18 분봉 백테스트(라운드트립 95건, 6/18~7/16) — 1.0 대비 +0.079%p(t=3.43,
-# 악화 0건), 0.5 이하는 15초 폴링 노이즈 털림이 1분봉 시뮬에 과소반영돼 비채택.
+# 0.75 는 15초 폴링 주기에 맞춰 분봉으로 튜닝된 값이다(0.5 이하는 폴링 노이즈 털림이 1분봉
+# 시뮬에 과소반영돼 비채택). 튜닝 근거: docs/history/execution-exit.md
 TRAIL_PCT = float(os.getenv('TRAIL_PCT', '0.75'))
 
 # ── 하드 손절(칼손절) ──
@@ -76,35 +76,33 @@ HARD_STOP_LOSS_PCT = float(os.getenv('HARD_STOP_LOSS_PCT', '2.0'))
 
 # ── 시드 배분기 튜닝 (core.seed_allocator) ──
 # 종목당 최대 투입 비율 — 시드 대비(고정금액 아님). 1.0 이상이면 사실상 무제한.
-# 2026-07-10 0.5→0.25: HLB 하한가 사건 — 그리디 재투입이 저가주 한 종목에 시드 35%를
-# 몰아줘 하한가 1방이 포트 -8%로 직결됐다. 하한가에선 손절이 불가하므로 노출 크기로만
-# 봉쇄 가능. 최악 단일 종목 하한가 손실을 시드의 -7.5%(0.25×-30%) 수준으로 제한한다.
+# 0.25 = 최악의 단일 종목 하한가 손실을 시드의 -7.5%(0.25×-30%) 수준으로 묶는 값.
+# 하한가에선 손절이 물리적으로 불가하므로 **노출 크기로만** 봉쇄된다.
+# 사건 경위: docs/history/gates-sizing.md
 SEED_MAX_NAME_PCT = float(os.getenv('SEED_MAX_NAME_PCT', '0.25'))
 # 확신도(선정 근거 수) 가중 상한 — 여러 근거에 동시 매칭된 종목의 목표금액 배수 상한.
 # 표 = 매칭 selector rule 수 + legacy 점수 1표(점수 top-N 포함 시). 1표=1 등가중 단위.
 # 3.0: 실제 표 분포가 1~3(룰 1~2개 + 점수)이라 상한이 사실상 안 걸리게 두되, 룰이 늘어
 #   과집중이 생기면 여기서 눌러준다. 종목당 SEED_MAX_NAME_PCT 캡은 별개로 그대로 적용된다.
-# ⚠️ "근거가 많으면 기대값이 높다"는 통설이고 백테스트 미검증이다(2026-08-03 도입).
+# ⚠️ "근거가 많으면 기대값이 높다"는 통설이고 **검증되지 않았다**.
 #   audit_log('seed_conviction') 로 표 수를 남겨 사후 채점한다. 1.0 = 확신도 가중 off(등가중).
 SEED_CONVICTION_MAX_MULT = float(os.getenv('SEED_CONVICTION_MAX_MULT', '3.0'))
 
 # ── 롤링 엣지 게이트 (core.regime_gate) — 최근 선정 종목의 점수 판별력으로 총 시드 축소 ──
-# 근거: 엣지가 레짐 의존적이라(봄엔 고점수 우세, 6월엔 역전) 역전 구간엔 자본을 덜 싣는다.
-# 2026-07-23 기본 OFF 전환: 임계 0은 점수가 양의 엣지를 갖던 구로직(전체 스프레드 +1.13%p)에 맞춘 값인데,
-#   스코어/선정 로직 변경 후(6/26 −1.14%p, 7/07 −1.55%p)로는 스프레드가 상시 음수 = "역전"이 평상시 기본값이다.
-#   이는 등가중 전환의 근거(점수가 익일 손익 예측 못 함/역상관)와 같은 횡단면 현상으로, 이미 등가중이 처리했다.
-#   즉 게이트는 손익 레짐이 아니라 점수-순위 역상관을 재고 있어, 수익 나는 날에도 상시 30% 컷을 낸다
-#   (7/23 첫 실발동: 역전일들 실현수익 7/09 +1.73%·7/21 +5.78%). 7/14 평가도 승격 미달 candidate 였음.
-#   → 관찰용 audit 로그는 signal_executor 에서 계속 남기되(사후 채점용), live 감액은 중단. 재개하려면 env=1.
+# 착안: 엣지가 레짐 의존적이라 역전 구간엔 자본을 덜 싣는다는 가설.
+# **기본 OFF** — 현행 스코어/선정 로직에서는 점수 스프레드가 상시 음수라 "역전"이 평상시 기본값이
+#   되고, 게이트가 손익 레짐이 아니라 점수-순위 역상관을 재게 된다(수익 나는 날에도 상시 30% 컷).
+#   그 횡단면 현상은 이미 등가중 배분이 처리한다.
+#   → 관찰용 audit 로그는 signal_executor 에서 계속 남기되(사후 채점용), live 감액은 중단.
+#   재개하려면 env=1. OFF 판정 근거: docs/history/gates-sizing.md
 REGIME_GATE_ENABLED = os.getenv('REGIME_GATE_ENABLED', '0') == '1'
 REGIME_WINDOW_DAYS = int(os.getenv('REGIME_WINDOW_DAYS', '10'))     # 최근 몇 거래일 표본
 # 최소 거래일 수 — 미만이면 게이트 미개입(1.0). 종목-일 표본은 같은 날 시장 무브로 상관되어
-# 거래일 수가 실효 표본이다(edge_policy PROMO_MIN_DAYS 와 같은 논리). 종목-일 30개 기준이던
-# 구 REGIME_MIN_SAMPLES 는 신로직 전환 직후 실효 4거래일로 최대 축소가 나가는 문제로 대체(2026-07-14).
+# 거래일 수가 실효 표본이다(edge_policy PROMO_MIN_DAYS 와 같은 논리).
 REGIME_MIN_DAYS = int(os.getenv('REGIME_MIN_DAYS', '10'))
 # 이진 배수: split(점수 상위½−하위½ 익일시가수익, %p) < INVERT_THRESHOLD 면 역전 → MIN_MULT, 아니면 1.0.
-# 근거: 4/9~7/10 백테스트에서 역전 '깊이'는 다음날 성적과 무상관(강한 역전일이 오히려 나음) —
-# 부호만 유효해 선형 램프(±0.5→0.3~1.0)를 이진으로 대체(2026-07-14).
+# 이진인 이유: 역전의 '깊이'는 다음날 성적과 무상관이고 **부호만** 유효하다(선형 램프 대비).
+# 근거: docs/history/gates-sizing.md
 REGIME_INVERT_THRESHOLD = float(os.getenv('REGIME_INVERT_THRESHOLD', '0.0'))
 REGIME_MIN_MULT = float(os.getenv('REGIME_MIN_MULT', '0.3'))       # 역전 시 시드 배수(30%)
 # 표본 하한 날짜(YYYY-MM-DD, inclusive) — 이 날짜 이전 report_date 는 레짐 표본에서 제외.
@@ -179,17 +177,15 @@ US_STOP_MIN_PCT = float(os.getenv('US_STOP_MIN_PCT', '1.0'))          # 강화 �
 # ── 거시 이벤트 게이트 (core.macro_gate) — 보유 창의 '예정 이벤트'(FOMC·CPI·고용)로 총 시드 축소 ──
 # 선물 게이트가 '이미 실현된 방향'을 재는 것과 달리, 이건 '아직 실현 안 된 이진 이벤트 리스크'를 잰다
 # (발표 전엔 선물이 보합이라 futures_gate 가 못 잡음). jongalab DB macro_event(수동 시드 캘린더) 조회.
-# 근거: 2026-07-15 백테스트(4/9~7/10 63거래일) — severity 3(FOMC/CPI/고용) 이벤트 밤 선정종목
-#   일평균 -0.74% vs 평일 +1.04%(Welch t=-2.27, 혼재일 제외 t=-2.13, 음수일 62% vs 25%).
-#   PPI(severity 2)는 +3.6%로 감액 근거 없음 → 관찰 전용(진단 기록만).
+# 근거: severity 3(FOMC/CPI/고용) 이벤트 밤은 보유 성적이 유의하게 나쁘다. severity 2(PPI)는
+#   감액 근거가 없어 관찰 전용(진단 기록만)이다. 표본·검정값: docs/history/gates-sizing.md
 MACRO_GATE_ENABLED = os.getenv('MACRO_GATE_ENABLED', '1') == '1'
 MACRO_EVENT_KEEP = float(os.getenv('MACRO_EVENT_KEEP', '0.5'))   # sev3 이벤트 밤 시드 keep(≤1.0)
 # 관찰 전용 프록시 축(지정학 쇼크 대비: VIX 레벨 / WTI·원달러 급등) — keep 을 계산해 진단에만 남기고
 # 감액엔 미적용. 강도는 futures_gate 와 같은 선형 램프(LO=0~HI=1).
-# ⛔ 2026-08-03 백테스트(4/9~7/31 75거래일): VIX 축은 부호가 반대(VIX 높을수록 익일 성적 좋음,
-#   t=+2.87 — 지금 램프대로 켜면 담아야 할 때 깎는다. 단 월별 불안정해 역방향도 근거 없음),
-#   WTI 축은 기각(보유 밤 실변동조차 t=+0.42, 갭 경로는 NQ 선물). **아래 임계를 감액에 연결 금지** —
-#   상세·재검정 조건은 core/macro_gate.py docstring. 원값은 audit 진단에 계속 남는다.
+# ⛔ **아래 임계를 감액에 연결 금지** — VIX 축은 실측 부호가 이 램프와 반대이고(켜면 담아야 할 때
+#   깎는다. 역방향으로 뒤집을 근거도 없다), WTI 축은 기각됐다. 원값은 audit 진단에 계속 남는다.
+#   상세·재검정 조건은 core/macro_gate.py docstring, 검정 결과는 docs/history/gates-sizing.md.
 MACRO_VIX_LO = float(os.getenv('MACRO_VIX_LO', '25'))            # VIX 레벨 — 강도 0 시작점
 MACRO_VIX_HI = float(os.getenv('MACRO_VIX_HI', '35'))            # 강도 1 도달점
 MACRO_WTI_BAND = float(os.getenv('MACRO_WTI_BAND', '3.0'))       # WTI 급등 %p — 강도 0 시작점
@@ -208,8 +204,8 @@ NEWS_VETO_CACHE_SEC = int(os.getenv('NEWS_VETO_CACHE_SEC', '60'))  # 15초 폴�
 # ── 실시간 WebSocket 피드 (core.realtime_feed + workers/monitor.py) ──
 # 키움 WS(0B 주식체결 · 00 주문체결통보)를 구독해 손절 판정을 틱 즉시로 올리고 REST 폴링을 없앤다.
 # 근거: 15초 폴링은 노이즈 필터가 아니라 무작위 샘플링이다 — 진짜 하락이면 손절선보다 낮게 팔리고
-#   (확실한 손실), 순간 급락이면 운에 맡긴다. 2026-07-18 백테스트에서 '확인틱'(지연 추가)이 현행보다
-#   나빴던 것과 같은 방향이고, 그 백테스트는 1분봉이라 15초/1초를 애초에 구분할 수 없었다.
+#   (확실한 손실), 순간 급락이면 운에 맡긴다. '확인틱'(지연 추가)이 더 나빴던 검정과 같은 방향이다.
+#   근거: docs/history/execution-exit.md
 # ⚠️ 항상 옵셔널 — 연결 실패·틱 없음·TTL 초과면 기존 REST 경로로 폴백한다(WS 사망 = 현행 동작).
 REALTIME_FEED_ENABLED = os.getenv('REALTIME_FEED_ENABLED', '1') == '1'
 KIWOOM_WS_URL = os.getenv('KIWOOM_WS_URL', 'wss://api.kiwoom.com:10000/api/dostk/websocket')
@@ -220,18 +216,17 @@ REALTIME_TTL_SEC = float(os.getenv('REALTIME_TTL_SEC', '5'))
 # 틱 대기 상한(초) — 틱이 없어도 최소 이 주기로는 판정한다(하한가 등 체결 없는 종목 백스톱).
 MONITOR_TICK_WAIT_SEC = float(os.getenv('MONITOR_TICK_WAIT_SEC', '1.0'))
 # 종목별 매도 재시도 쿨다운(초). 판정은 틱마다지만 **주문 전송은 이 간격 이하로 반복하지 않는다**.
-# 근거: 2026-07-10 HLB 하한가 때 15초 주기로도 매도 거부가 238건 쌓였다. 판정 주기를 그대로
-#   주문에 물리면 시간당 수천 건이 되어 키움 유량 제한에 걸리고, 하한가가 풀리는 순간 정작
-#   주문이 막힌다. 재시도 자체는 하한가 풀림 포착을 위해 유지(백오프 기각, 2026-07-10)하되
-#   간격만 현행 폴링 주기로 고정한다.
+# 근거: 하한가 종목은 15초 주기로도 매도 거부가 수백 건 쌓인다. 판정 주기를 그대로 주문에 물리면
+#   키움 유량 제한에 걸려 하한가가 풀리는 순간 정작 주문이 막힌다. 재시도 자체는 하한가 풀림
+#   포착을 위해 유지하되(지수 백오프는 기각) 간격만 폴링 주기로 고정한다.
+#   사례: docs/history/execution-exit.md
 SELL_RETRY_COOLDOWN_SEC = float(os.getenv('SELL_RETRY_COOLDOWN_SEC', '15'))
 # '죽은 주문' 판정 최소 경과시간(초) — 전송 후 이 시간이 지나지 않은 주문은 정리 대상에서 제외한다.
-# 근거: 2026-08-05 레인보우로보틱스 — 08:03:12 매도 IOC 가 **전량체결**됐는데, 1초 뒤 폴링의
-#   reconcile_dead_sent 가 canceled 로 마감해 체결·실현손익이 누락되고 유령 포지션이 남았다.
-#   판정 기준('미체결 목록에 없음 + 체결 0')은 소멸과 **전량체결 직후**를 구분하지 못한다 —
+# 근거: 판정 기준('미체결 목록에 없음 + 체결 0')은 주문 소멸과 **전량체결 직후**를 구분하지 못한다 —
 #   체결된 주문도 미체결(ka10075) 목록엔 없고, 체결내역(ka10076) 반영은 몇 초 늦을 수 있다.
 #   이 가드는 그 지연 구간을 지나서만 판정하게 한다. 대가는 재매도가 최대 이 시간만큼 늦어지는
 #   것뿐이고(그 사이 스탑/하드손절 판정은 정상 진행), 체결을 잃는 쪽이 훨씬 비싸다.
+#   사고 경위(전량체결이 canceled 로 마감돼 유령 포지션이 남은 건): docs/history/execution-exit.md
 DEAD_ORDER_MIN_AGE_SEC = int(os.getenv('DEAD_ORDER_MIN_AGE_SEC', '60'))
 
 # ── 실시간 수급 관측 (2026-08-03, Phase 1 = 수집 전용) ──

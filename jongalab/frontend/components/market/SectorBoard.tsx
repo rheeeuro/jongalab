@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Flame, Layers, TrendingDown, TrendingUp } from "lucide-react";
 import { MentionStats, SectorReport } from "@/types";
 
-/** 섹터 랭킹 — 예전 `/sectors` 탭의 본문. 지수·일정과 같은 '시장 배경' 정보라
+/** 섹터 랭킹 — 지수·일정과 같은 '시장 배경' 정보라
  * 별도 목적지 대신 시장 탭 안의 섹션으로 둔다. */
 export function SectorBoard({
   sectors,

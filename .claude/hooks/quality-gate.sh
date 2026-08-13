@@ -27,11 +27,12 @@ case "$FILE" in
     ;;
   *.py)
     # 파일이 속한 서브프로젝트(jongalab/kiwoom/trading)에서 컴파일한다(루트는 더 이상 uv 프로젝트 아님).
-    # 주의: 리포지토리 루트 디렉터리명이 'jongalab' 이므로 trading/kiwoom 을 먼저 매칭해야 한다.
+    # 리포지토리 루트 디렉터리명도 'jongalab' 이라, 루트 기준 절대경로 접두사로만 판별한다
+    # (`*/jongalab/*` 글롭은 루트 직속 파일 `.claude/hooks/*.py` 까지 삼킨다).
     case "$FILE" in
-      */trading/*) SUB="trading";  REL="${FILE##*/trading/}" ;;
-      */kiwoom/*)  SUB="kiwoom";   REL="${FILE##*/kiwoom/}" ;;
-      */jongalab/*) SUB="jongalab"; REL="${FILE##*/jongalab/}" ;;
+      "$ROOT"/trading/*)  SUB="trading";  REL="${FILE#"$ROOT"/trading/}" ;;
+      "$ROOT"/kiwoom/*)   SUB="kiwoom";   REL="${FILE#"$ROOT"/kiwoom/}" ;;
+      "$ROOT"/jongalab/*) SUB="jongalab"; REL="${FILE#"$ROOT"/jongalab/}" ;;
       *) exit 0 ;;
     esac
     OUT=$(uv run --directory "$ROOT/$SUB" python -m py_compile "$REL" 2>&1)

@@ -70,7 +70,7 @@ def _resolve_ic_methods(filings: list[dict]) -> dict[str, str]:
 
 EX_RIGHTS_TRIGGERS = ("무상증자", "권리락")
 # 권리락 공시가 트리거일 때 결정 공시를 얼마나 거슬러 찾을지(일). 무상증자 결정 → 권리락은
-# 보통 2~3주라 넉넉히 잡는다(실측: 알테오젠 결정 7/20 → 권리락 8/5 = 16일).
+# 보통 2~3주(실측 16일 사례)라 넉넉히 잡는다.
 EX_RIGHTS_LOOKBACK_DAYS = 120
 
 

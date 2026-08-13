@@ -92,9 +92,9 @@ class StrategyConfig:
     SCORE_EXTRA_SUPPLY_DAY_BONUS = 3  # 5일 초과 장기 연속 수급 1일당 가점
     SCORE_PROGRAM_BUY_BONUS = 0.0     # 프로그램 양매수 가점 — 2026-07-03 실증 역효과(해당 종목 갭 승률 9.1%, n=33) → 0 (표시·튜닝 전용)
     SCORE_NEWS_BONUS = 0.0            # 뉴스 재료 가점 — 기본 0(표시·튜닝 전용). 주간 튜너가 성과 따라 상향 가능
-    # 당일 등락률 항 (2026-07-03 실증: 5~10% 상승 구간 승률 최고, 15%+ 과열은 감점)
-    #  음전은 밴드 가점 미부여로만 반영된다 — closing_bet 의 음전 하드컷은 2026-08-03 제거됐다
-    #  (실집행 라벨로는 음전 +0.65% vs 양전 +0.55% 로 무해했고, 컷이 이겼던 건 대체효과였다)
+    # 당일 등락률 항 — 5~10% 상승 구간의 승률이 가장 높고 15%+ 과열은 감점이다.
+    #  음전은 밴드 가점 미부여로만 반영된다(closing_bet 에 음전 하드컷은 없다).
+    #  실증 근거: docs/history/selection-scoring.md
     SCORE_CHANGE_BAND_BONUS = 10.0    # 등락률 스윗스팟(2~12%) 가점
     SCORE_OVERHEAT_PENALTY = 10.0     # 과열(15%+) 감점 — 감점 항이라 max_possible 에는 미포함
     CHANGE_BAND_MIN_PCT = 2.0         # 스윗스팟 하한(%) — 비튜닝 상수
@@ -577,8 +577,8 @@ class AnalysisEngine:
             logger.warning(f"장중투자자 조회 실패 [{stk_cd}]: {e}")
 
         # (c) 기관외국인 연속매매현황 (ka10131) — 코스피+코스닥 캐시 맵에서 조회.
-        #     (구 구현 버그: 응답 stk_cd 의 "_AL" 접미사 미제거 + 코스피만 조회로 항상 0,
-        #      순매도 연속(음수)도 abs 로 집계될 위험 — 2026-07-03 수정)
+        #     ⚠️ 응답 stk_cd 의 "_AL" 접미사를 떼고 코스피·코스닥을 **둘 다** 조회해야 한다
+        #        (한쪽만 조회하면 값이 항상 0). 순매도 연속(음수)을 abs 로 집계하지 않는다.
         result["supply_days"] = self._consecutive_buy_days().get(stk_cd.split("_")[0], 0)
 
         # (d) 거래원 체크 (ka10002) — 외국계 증권사 매수 우위
@@ -606,8 +606,8 @@ class AnalysisEngine:
         #     외국계 거래원 매수 우위(foreign_brokers_buying)는 5일 점수에 직접
         #     반영되지 않으므로, 점수가 임계값 직전(35~40, 50~55, 65~70, 80~85)일 때
         #     한 단계 격상해 외국계 자금 시그널을 보정한다.
-        #     (프로그램 순매수 트리거는 2026-07-03 실증 역효과(갭 승률 9.1%, n=33)로
-        #      SCORE_PROGRAM_BUY_BONUS=0 과 함께 2026-07-09 제거)
+        #     (프로그램 순매수 트리거는 쓰지 않는다 — 실증에서 역효과였고
+        #      SCORE_PROGRAM_BUY_BONUS 도 0 이다. 근거: docs/history/selection-scoring.md)
         score = self.calculate_supply_score(result["supply_history"])
         result["supply_score"] = score
 
@@ -669,7 +669,7 @@ class AnalysisEngine:
         if c.is_theme_stock:
             raw += self.cfg.THEME_STOCK_BONUS
 
-        # 당일 등락률 — 스윗스팟(2~12%) 가점, 과열(15%+) 감점 (2026-07-03 실증 반영)
+        # 당일 등락률 — 스윗스팟(2~12%) 가점, 과열(15%+) 감점
         if self.cfg.CHANGE_BAND_MIN_PCT <= c.change_pct < self.cfg.CHANGE_BAND_MAX_PCT:
             raw += self.cfg.SCORE_CHANGE_BAND_BONUS
         elif c.change_pct >= self.cfg.OVERHEAT_CHANGE_PCT:

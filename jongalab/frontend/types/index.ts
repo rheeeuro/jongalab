@@ -412,7 +412,7 @@ export interface EdgeRuleStats {
   ci_low: number | null;        // 단측 95% 신뢰구간 하한 — 승격 게이트(>0, strict 정책)
   mean_net_days?: number | null; // 일 등가중 평균(%) — 매칭 많은 날 쏠림을 드러냄
   t_days?: number | null;        // 일 클러스터 t — 승격 게이트(>=거래일 자유도 t 임계값)
-  // ── 유니버스 자기제외 초과 계열 — **게이트 미사용, 룰 상세 화면 표기 전용**(2026-08-04) ──
+  // ── 유니버스 자기제외 초과 계열 — **게이트 미사용, 룰 상세 화면 표기 전용** ──
   // "평균보다 수익이 크지 않더라도 안정적으로 수익이 나면 그만"이라 판정에서 빼고 참고값으로만 둔다.
   n_exc?: number;                // 초과 표본 수(기준선을 구할 수 있었던 종목-일)
   mean_exc?: number | null;      // 그날 유니버스(자기 제외) 대비 초과수익(%)
@@ -429,7 +429,7 @@ export interface EdgeRuleStats {
   // 프론트는 이 값을 렌더링만 한다(조건을 프론트에서 재계산하지 않음 — 단일 소스).
   promo_eligible?: boolean;
   // 게이트를 막고 있는 항목의 짧은 라벨 + 적용 중인 정책. 프론트가 min_sample 등으로 조건을
-  // 재추정하다 게이트 변경과 어긋나는 것을 막기 위해 서버가 직접 내려준다(2026-07-28).
+  // 재추정하다 게이트 변경과 어긋나는 것을 막기 위해 서버가 직접 내려준다.
   promo_blockers?: string[];
   promo_policy?: 'strict' | 'experimental';
   decision_stage?: 'discovery' | 'confirming' | 'decided';
@@ -441,13 +441,13 @@ export interface PredicateCond {
   value?: unknown;
 }
 
-// 판정 기록(sql/39) — 매일 재평가(오탐 22%)를 막기 위해 판정을 사전 시점 1회로 묶은 결과.
+// 판정 기록(sql/39) — 매일 재평가로 오탐이 불어나는 것을 막으려 판정을 사전 시점 1회로 묶은 결과.
 // 발견(누적 거래일 1~10) → 확인창(11~20, 발견에 쓰지 않은 새 표본) → 종결.
 export interface EdgeRuleDecisionStep {
   at: string;
   n_days: number | null;
   pass: boolean;
-  // 판정에 쓴 값 — selector 는 mean_net>0, veto 는 mean_net<0(부호만 반대, 2026-08-04 통일).
+  // 판정에 쓴 값 — selector 는 mean_net>0, veto 는 mean_net<0(자는 같고 부호만 반대).
   mean_net?: number | null;
   t_days?: number | null;
   // 아래 초과 계열은 참고 기록(판정 무관).

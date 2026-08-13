@@ -8,7 +8,7 @@ export function EdgeSummaryStrip({ rules }: { rules: EdgeRule[] }) {
   const pipeline = rules.filter((r) => !isMeasurementOnly(r));
   const live = pipeline.filter((r) => r.status === "live").length;
   // 판정이 끝난 candidate 는 '검증 중'도 '검증 통과'도 아니다 — 더 심사하지 않으므로 따로 센다
-  // (2026-08-04: 종결 rule 이 게이트를 통과한 상태로 남아 '검증 통과' 숫자를 부풀리고 있었다).
+  // (종결된 rule 이 게이트를 통과한 상태로 남아 '검증 통과' 숫자를 부풀리는 것을 막는다).
   const decided = pipeline.filter(isDecided).length;
   const candidate = pipeline.filter((r) => r.status === "candidate" && !isDecided(r)).length;
   const retired = pipeline.filter((r) => r.status === "retired").length;

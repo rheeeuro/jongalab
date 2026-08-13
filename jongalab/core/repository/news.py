@@ -35,11 +35,9 @@ def _normalize_headline(headline: str) -> str:
     return _NON_WORD_RE.sub("", text).lower()
 
 
-# news_first_today 의 '첫 등장' 판정 창(일). **보존 기간과 분리해 명시한다** —
-# 예전엔 하한이 없어서 사실상 cleanup_content 의 보존일(14)이 창이었다. 2026-07-31 에 네이버
-# 병행 검증을 위해 보존을 30일로 늘리면서, 그대로 두면 라벨 뜻이 "14일 내 첫 등장"에서
-# "30일 내"로 조용히 바뀌어 candidate rule `f1_fresh_news_unpriced` 의 입력이 흔들렸다.
-# 값은 종전과 같은 14 이므로 지금 라벨값은 변하지 않는다(보존 14일 하에선 결과 동일).
+# news_first_today 의 '첫 등장' 판정 창(일). **보존 기간(NEWS_RETENTION_DAYS)과 분리해 명시한다** —
+# 하한이 없으면 보존일이 곧 창이 되어, 보존일을 늘리는 순간 라벨 뜻이 "14일 내 첫 등장"에서
+# "30일 내"로 조용히 바뀌고 `f1_fresh_news_unpriced` 같은 rule 의 입력이 흔들린다.
 _FIRST_TODAY_LOOKBACK_DAYS = 14
 
 

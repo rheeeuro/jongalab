@@ -53,7 +53,7 @@ NEWS_JUDGE_LOOKBACK_DAYS 일치를 날짜와 함께 묶어 넣는다.
 
 돈이 걸린 판정이 아니라 연구 라벨이지만, 하루 16종목 전건 판정에는 처리량이 필요해
 로컬 Ollama(건당 100~300초, 하루 5행 상한이 이 병목이었다) 대신 OpenAI 를 쓴다.
-**이 모듈이 예전 `core/news_summary.py`(Ollama 단건 요약)를 대체한다** — 같은 컬럼
+이 모듈이 뉴스 라벨 경로의 **단일 진입점**이다 — 같은 컬럼
 (news_summary/news_sentiment/news_catalyst)을 채우므로 두 경로를 남기면 어느 쪽이 라벨을
 만들었는지 알 수 없어 그 파일은 삭제했다.
 프롬프트는 가드 파일(core/prompts.py)이 아니라 여기 둔다(news_veto_judge 선례).
@@ -96,7 +96,7 @@ DURABILITY_VERSION = 2
 # 시세보도 헤드라인 판별 — '재료'가 아니라 그날 가격 움직임을 옮긴 기사다.
 # 후속 재료 실현 채점(count_followup_days)에서 제외해야 한다: 갭상승이 "XX 급등" 기사를 만드는
 # 역인과라, 이걸 후속 재료로 세면 "재료가 이어졌다"가 "어제 올랐다"의 동어반복이 된다
-# (실측 2026-07-14~27 익일 아침 헤드라인 449건 중 95건 = 21% 가 이 부류).
+# (실측상 익일 아침 헤드라인의 약 5분의 1이 이 부류다 — docs/history/news-pipeline.md).
 # 평범한 '상승/하락'은 넣지 않는다 — "수출 상승" 같은 재료 기사까지 배제된다.
 _PRICE_REPORT_RE = re.compile(
     r"급등|급락|상한가|하한가|강세|약세|치솟|폭등|폭락|↑|↓|신고가|신저가|장중|특징주|시황"
@@ -213,11 +213,10 @@ def select_headlines(items: list[dict], limit: int, lookback_days: int) -> list[
     per_day = max(1, limit // max(1, min(lookback_days, len(by_day))))
     picked_ids: set[int] = set()
     for day in sorted(by_day):
-        # 같은 날짜 예산 안에서는 **리드문이 있는 기사를 먼저** 넣는다(2026-08-05).
+        # 같은 날짜 예산 안에서는 **리드문이 있는 기사를 먼저** 넣는다.
         # 시점(milestone_horizon)·금액 축은 제목에 거의 안 실려 리드문이 유일한 근거인데,
-        # 최신순으로만 자르면 리드문 없는 텔레그램 헤드라인이 예산을 먹는다 — 실측: 리드문이
-        # 8종목분만 있던 실행에서 horizon 이 17/17 전부 '불명' 이었고, 리드문이 붙은 코퍼스로
-        # 같은 프롬프트를 돌리자 불명 14·그이후 6·1개월내 2 로 축이 살아났다.
+        # 최신순으로만 자르면 리드문 없는 텔레그램 헤드라인이 예산을 먹어 그 축이 전건 '불명'으로
+        # 나온다(실측: docs/history/news-pipeline.md).
         # 정렬은 안정(stable)하므로 리드문 유무가 같으면 원래의 최신순이 유지된다.
         day_items = sorted(by_day[day], key=lambda it: bool(it.get("body_preview")))
         for it in day_items[-per_day:]:
@@ -357,8 +356,8 @@ def _clean(item: dict) -> dict | None:
 
     # 재료 금액 — **억원** 단위 정수만 받는다. 문자열("1200억")·음수·비현실적 값은 버린다(None).
     # 상한 1,000만 억원(=1,000조): 시총 최대(삼성전자 ~1,450조)에 준하는 선으로, 자릿수 착오를
-    # 걸러내면서 실제 합병·국책사업 규모는 통과시킨다. 원 단위로 물었을 때 "5,219억"을 5.219조로
-    # 뽑는 10배 착오가 실측돼 단위를 억원으로 바꿨다(edge_features.material_size_ratio 주석).
+    # 걸러내면서 실제 합병·국책사업 규모는 통과시킨다. 원 단위로 물으면 "5,219억"을 5.219조로
+    # 뽑는 10배 착오가 나므로 **억원으로 받는다**(edge_features.material_size_ratio 주석).
     size = item.get("material_size_eok")
     if isinstance(size, bool) or not isinstance(size, (int, float)):
         size = None

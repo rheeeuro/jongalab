@@ -178,9 +178,9 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
     std = (sum((x - mean_net) ** 2 for x in nets) / (n - 1)) ** 0.5 if n >= 2 else 0.0
     ci_low = mean_net - _CI_Z * std / math.sqrt(n)
 
-    # 강등 감시용 최근 창 — 최근 _RECENT_DAYS 거래일의 표본. 종목-일 30개 창은 광역 rule
-    # (일 10종목 매칭)에서 거래일 3일에 불과해, 하루 시장 무브가 평균을 통째로 뒤집는
-    # 오탐 강등 알림을 냈다(2026-07-20 control_legacy_top10 사례).
+    # 강등 감시용 최근 창 — 최근 _RECENT_DAYS 거래일의 표본. 창을 종목-일 개수로 잡으면 광역
+    # rule(일 10종목 매칭)에서 실효 3거래일밖에 안 돼 하루 시장 무브가 평균을 통째로 뒤집는다
+    # (오탐 강등 사례: docs/history/edge-ledger.md).
     recent_dates = set(sorted({d for d, _ in dated})[-_RECENT_DAYS:])
     recent = [net for d, net in dated if d in recent_dates]
     recent_mean = sum(recent) / len(recent) if recent else None
@@ -195,12 +195,11 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
         if _recent_by_day else None
     )
 
-    # ── 일 클러스터 통계 (2026-07-28) — 위 ci_low 는 종목-일 iid 가정이라 같은 날 종목들이
-    # 시장 무브로 상관된 만큼 유의성을 과신한다. 거래일을 관측 단위로 묶어(하루 1표본) 다시 재면
-    # 실효 유의성이 나온다. 두 selector 후보가 이 차이로 뒤집혔다:
-    #   f5_prog_persistent(7/27) iid t=1.82 → 일 t=0.47 / f4_sector_follower(7/28) 1.99 → 0.37.
+    # ── 일 클러스터 통계 — 위 ci_low 는 종목-일 iid 가정이라 같은 날 종목들이 시장 무브로
+    # 상관된 만큼 유의성을 과신한다. 거래일을 관측 단위로 묶어(하루 1표본) 다시 재면 실효
+    # 유의성이 나온다(이 차이로 뒤집힌 후보 사례: docs/history/edge-ledger.md).
     # mean_net_days(일 등가중 평균)는 mean_net(종목-일 가중)과 다르다 — 매칭 수가 많은 날에
-    # 쏠린 평균을 드러낸다(f4: mean_net +1.19% vs 일 등가중 +0.45%).
+    # 쏠린 평균을 드러낸다.
     def _by_day(pairs):
         acc = {}
         for d, v in pairs:
@@ -209,7 +208,7 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
 
     mean_days, t_days = _day_cluster_t(_by_day(dated))
 
-    # 초과 계열 — **표기·수동 검토용 진단값**(2026-08-04 게이트에서 제외). 표본 없으면 None.
+    # 초과 계열 — **표기·수동 검토용 진단값**(게이트에서는 쓰지 않는다). 표본 없으면 None.
     n_exc = len(dated_exc)
     if n_exc:
         exc = [v for _, v in dated_exc]
@@ -376,8 +375,8 @@ def run():
             stats["promo_eligible"] = gate["eligible"]
             stats["decision_stage"] = decision_stage(rule)
             # 화면이 게이트를 **재추정하지 않도록** 막고 있는 항목과 적용 정책을 함께 저장한다.
-            # (프론트가 min_sample 로 진행률을 그리다 2026-07-28 min_sample 이 게이트에서 빠지자
-            #  '게이지는 꽉 찼는데 검증 중'이 되는 불일치가 생겼다 — 조건은 백엔드만 안다.)
+            # (프론트가 조건을 따로 계산하면 게이트가 바뀔 때마다 '게이지는 꽉 찼는데 검증 중'
+            #  같은 불일치가 난다 — 조건은 백엔드만 안다. 사례: docs/history/frontend-ui.md)
             # 사유 문자열의 콜론 앞부분만 잘라 짧은 라벨로 만든다(문구가 바뀌어도 자동 동기화).
             stats["promo_blockers"] = [
                 r.split(":")[0].strip() for r in (gate["stat_reasons"] + gate["exec_reasons"])
@@ -387,8 +386,8 @@ def run():
                 "name": rule["name"], "family": rule["family"], "role": rule_role(rule),
                 "n": stats["n"], "mean_net": stats["mean_net"], "ci_low": stats["ci_low"],
             }
-            # ── 판정 일정 (2026-07-28) — 게이트를 '매일' 검사하면 무기한 재시험이 되어
-            # 오탐이 명목 5% → 22% 가 된다. 판정은 사전에 정한 시점에 1회만 하고 기록한다.
+            # ── 판정 일정 — 게이트를 '매일' 검사하면 무기한 재시험이 되어 오탐률이 몇 배로 뛴다.
+            # 판정은 사전에 정한 시점에 1회만 하고 기록한다.
             # benchmark 는 실탄이 아니라 기준선이므로 일정 밖(알림 대상도 아님).
             due = decision_due(rule, stats.get("n_days") or 0) if rule_role(rule) != "benchmark" else None
             if due == "discovery":

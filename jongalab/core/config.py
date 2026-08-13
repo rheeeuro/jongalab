@@ -42,11 +42,9 @@ OLLAMA_TIMEOUT = int(os.getenv('OLLAMA_TIMEOUT', '480'))
 
 # OpenAI 설정 (일간 리포트용)
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-# 기본 모델 = gpt-5.6-luna (2026-08-05 gpt-5.4-nano 에서 교체). 같은 입력 단가($0.20/1M)에
-# 출력이 더 싸고($1.20 vs $1.25) 세대가 새롭다 — 실측 동일 프롬프트 1배치 비용 nano $0.00620 →
-# luna(effort=none) $0.00588. 라벨 품질도 올라간다: nano 는 stage/milestone_horizon 을 '불명'
-# 으로 흘려 news_durability 가 미판정(NULL)으로 남는 비율이 높았는데(실측 12종목 중 5건),
-# luna 는 같은 코퍼스에서 전건 판정하고 sentiment 도 42~79 로 퍼진다(nano 는 50~58 에 뭉친다).
+# 기본 모델 = gpt-5.6-luna (입력 $0.20/1M · 출력 $1.20/1M). 재료 라벨 판정에서 stage·
+# milestone_horizon 을 '불명'으로 흘리지 않아 news_durability 미판정(NULL) 비율이 낮고,
+# sentiment 도 좁은 구간에 뭉치지 않는다. 모델 비교 근거: docs/history/news-pipeline.md
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5.6-luna')
 # gpt-5.6 계열은 추론 모델이라 temperature/top_p 를 받지 않고(400) reasoning_effort 로 조절한다.
 # 기본 'none'(추론 토큰 0) — 'low' 는 nano 와 같은 비용($0.00616)이지만 같은 프롬프트 2회
@@ -72,21 +70,20 @@ NEWS_JUDGE_MAX_HEADLINES = int(os.getenv('NEWS_JUDGE_MAX_HEADLINES', '20'))   # 
 # 후속 재료 실현 채점 창(거래일 아닌 달력일) — outcome_backfill 이 news_followup_days 를 채운다.
 # news_mention 보존(NEWS_RETENTION_DAYS)보다 창 + 백필 지연이 크면 표본이 잘린다.
 NEWS_FOLLOWUP_WINDOW_DAYS = int(os.getenv('NEWS_FOLLOWUP_WINDOW_DAYS', '10'))
-# news_mention 원자료 보존일(cleanup_content 가 사용). 14 → 30 상향(2026-07-31): 네이버 수집
-# 병행 검증이 "같은 날 텔레그램만 vs 네이버 포함" 을 원자료에서 소급 재계산하는 방식이라,
-# 14일이면 검증 창이 앞에서 잘린다. 승격 판정이 끝나면 14로 되돌려도 된다.
+# news_mention 원자료 보존일(cleanup_content 가 사용). 30 은 소스 병행 검증("같은 날 텔레그램만
+# vs 네이버 포함"을 원자료에서 소급 재계산)의 창이 앞에서 잘리지 않게 잡은 값이다. 승격 판정이
+# 끝나면 14로 되돌려도 된다. 근거: docs/history/news-pipeline.md
 NEWS_RETENTION_DAYS = int(os.getenv('NEWS_RETENTION_DAYS', '30'))
 
-# ── 뉴스 소스 게이트 (news_mention.source) — **용도별로 둘로 쪼갠다** (2026-08-05) ──
-# 원자료는 늘 전 소스를 적재하고, **소비**만 게이트로 막아 관측 전용 기간을 둔다. 게이트를 소스
-# 단위 하나로 두던 것을 '카운트 소비'와 '텍스트 소비'로 분리한 이유:
+# ── 뉴스 소스 게이트 (news_mention.source) — **용도별로 둘로 쪼갠다** ──
+# 원자료는 늘 전 소스를 적재하고, **소비**만 게이트로 막아 관측 전용 기간을 둔다.
+# '카운트 소비'와 '텍스트 소비'를 가른 이유:
 #   · 소스를 늘리면 계단식으로 튀는 건 **카운트 계열**이다(news_count·news_prior_avg·
-#     news_unique_count). 실측 네이버 2,800행/일 vs 텔레그램 500행/일이고 헤드라인 중복은
-#     2%뿐이라 상쇄 없이 순증한다. 그 표본을 `veto_bad_news`(live=자금 경로)가 쓰므로 동결한다.
-#   · **재료 지속성은 카운트가 아니라 헤드라인 텍스트에서 나오는 속성**이라 이 위험이 적용되지
-#     않는다. 그런데 같은 게이트에 묶여 있어서 지속성 라벨 커버리지가 유니버스의 30%에 머물렀다
-#     (실측 8/4: 유니버스 62 중 텔레그램 뉴스 보유 27 = 44%, 네이버는 60 = 97%).
-#     지속성을 선정의 1급 축으로 쓰려면 이 커버리지가 먼저 풀려야 한다.
+#     news_unique_count) — 소스 간 헤드라인 중복이 거의 없어 상쇄 없이 순증한다.
+#     그 표본을 `veto_bad_news`(live=자금 경로)가 쓰므로 동결한다.
+#   · **재료 지속성은 카운트가 아니라 헤드라인 텍스트에서 나오는 속성**이라 이 위험이 없다.
+#     같은 게이트에 묶어 두면 지속성 라벨 커버리지만 손해다.
+# 분리 근거·커버리지 실측: docs/history/news-pipeline.md
 # 값은 쉼표 구분(예: 'telegram,naver'). 순서는 무관.
 #
 # 카운트 소비 — news_count/news_unique_count/news_pm_count/news_first_today/news_prior_avg.
@@ -97,15 +94,14 @@ NEWS_COUNT_SOURCES = tuple(
     ).split(',') if s.strip()
 ) or ('telegram',)
 # 텍스트 소비 — 재료 지속성 판정(news_material_judge)·뉴스 베토 판정(news_guard)·화면 헤드라인.
-# 네이버를 포함한다: **지속성 라벨 커버리지 유니버스의 30% → 45%**(실측 2026-08-05).
-#   네이버 단독 종목 커버리지는 94% 지만 그 종목이 스쳐 언급된 기사까지 들어와, 판정 코퍼스는
-#   제목 귀속 확인(news_matcher.mentions_ticker)으로 좁힌다 — 그래서 45% 다. 필터를 빼면 대상은
-#   94% 로 늘지만 LLM 이 재료를 특정하지 못해 판정 성공률이 29% 로 떨어져 실효 커버리지가 더 낮다.
+# 네이버를 포함해 지속성 라벨 커버리지를 넓힌다. 다만 종목이 스쳐 언급된 기사까지 들어오므로
+#   판정 코퍼스는 제목 귀속 확인(news_matcher.mentions_ticker)으로 좁힌다 — 필터를 빼면 대상은
+#   늘지만 LLM 이 재료를 특정하지 못해 실효 커버리지가 오히려 낮아진다.
 #   ⚠️ `veto_bad_news`(live)의 `news_sentiment` 판정 근거가 같이 넓어진다. **발동 조건인
 #   news_unique_count>=2 는 카운트 게이트(텔레그램)에 남으므로 발동 범위는 그대로**이고 판정
 #   근거만 정확해진다. 네이버 코퍼스에 대량으로 섞인 시세보도("급락·약세")가 sentiment 를
 #   끌어내려 오탐을 만드는 경로는 판정 코퍼스 선별에서 is_price_report 로 막는다
-#   (news_material_judge.select_headlines).
+#   (news_material_judge.select_headlines). 커버리지 실측: docs/history/news-pipeline.md
 NEWS_TEXT_SOURCES = tuple(
     s.strip() for s in os.getenv('NEWS_TEXT_SOURCES', 'telegram,naver').split(',') if s.strip()
 ) or ('telegram',)
@@ -113,7 +109,7 @@ NEWS_TEXT_SOURCES = tuple(
 NEWS_ACTIVE_SOURCES = NEWS_COUNT_SOURCES
 
 # ── 네이버 증권 종목별 뉴스 수집 (workers/naver_news_collector.py) ──
-# 유니버스 종목의 재료 라벨 커버리지가 47%(2026-07-31 실측 18/38)뿐인 것을 메우기 위한 소스.
+# 유니버스 종목의 재료 라벨 커버리지 부족을 메우기 위한 소스(실측: docs/history/news-pipeline.md).
 # 종목코드로 조회하므로 사명 사전매칭이 필요 없다(텔레그램 경로의 no_match 55% 문제를 우회).
 NAVER_NEWS_ENABLED = os.getenv('NAVER_NEWS_ENABLED', '1') == '1'
 NAVER_NEWS_BASE_URL = os.getenv('NAVER_NEWS_BASE_URL', 'https://m.stock.naver.com')
@@ -165,32 +161,19 @@ EDGE_COST_PCT = float(os.getenv('EDGE_COST_PCT', '0.25'))
 # veto(감액·제외) rule 은 모드와 무관하게 선정 직전 적용. 롤백: 이 값을 legacy 로 되돌리면 즉시 원복.
 EDGE_SELECTION_MODE = os.getenv('EDGE_SELECTION_MODE', 'legacy')
 
-# 승격 게이트 정책 (2026-07-28 사용자 결정) — core.edge_policy.check_promotion 이 읽는다.
-#   strict       : 유의성 2종 요구(ci_low>0 + t_days≥t분포임계값) + 판정 일정(발견→확인창)
-#                  강제. 오탐 2.4% 이지만 **현재 44종 중 통과 0종**.
+# 승격 게이트 정책 — core.edge_policy.check_promotion 이 읽는다.
+#   strict       : 유의성 2종 요구(ci_low>0 + t_days≥t분포임계값) + 판정 일정(발견→확인창) 강제.
 #   experimental : **t_days·판정 일정만** 면제. 남는 조건은 거래일≥10 · 평균수익>0 ·
 #                  **ci_low>0**(안정성 하한) · 실행 가능성.
-# 2026-08-04(사용자 결정): 자를 **절대 평균수익(mean_net) 하나로 통일**하고 같은 날 상대 비교
-# 조건 2개(**초과수익·대조군 우위**)를 게이트에서 **제거**했다 — "평균보다 수익이 크지 않더라도
-# 안정적으로 수익이 나면 그만". 초과수익은 계속 계산해 룰 상세 화면에만 표기한다.
-# ⚠️ 그 결과 "그 기간 장이 오른 몫"을 걸러내는 자동 장치가 게이트에 없다(상승장에 등록된 rule 이
-# 유리). 남은 방어선: 평균수익>0 · 거래일≥10 · ci_low>0 · 강등 감시 · 승격 시 관리자 승인
-# (그때 상세 화면의 초과수익을 눈으로 확인).
-# 2026-08-05(사용자 결정): **월 승격 상한 폐지** — 게이트 통과 4종에 잔여 슬롯이 2 였던 날
-# 사람이 사후 재계산으로 통과 룰의 순위를 매기는 일이 벌어졌다. 상한이 지키던 것도 실측상
-# 거의 없었다(live selector 5종 +0.751%/일 vs 9종 +0.771%, 하이브리드는 슬롯 10개 고정).
-# → 규율은 "게이트를 통과하면 승격한다" 하나. 자세한 근거는 routers/edge_rule.py 상단.
-# 같은 날 후속 결정(2026-08-04): 그렇게 두면 실효 조건이 '10거래일+ 평균 양수'뿐이고 **무엣지 룰의
-# 통과 확률이 약 50%**라, 과적합 방어가 (당시 남아 있던) 월 상한 하나에 걸린다
-# → **ci_low>0(안정성 하한)을 experimental 면제에서 빼내 항상 요구**한다. 월 상한을 올리는 대안
-# 대신 이쪽을 택했고("안정적으로 수익이 나면 그만"을 게이트가 직접 묻게), 8/05 에 상한 쪽을 없앴다.
-# experimental 을 택한 근거: 현행 legacy(점수 top-N) 선정이 **무엣지가 아니라 실제로 나쁘다** —
-# 실측(14거래일) 무작위 10종목이 legacy 를 이긴 비율 82.8%, 유니버스 평균 +0.071% vs legacy
-# -0.150%, 점수 최하위 10종이 legacy 보다 +0.556%p. 챔피언이 마이너스면 도전자 오탐의 기대
-# 비용이 0 에 가까우므로, 통계적 확신을 기다리는 것보다 올려보고 강등하는 편이 낫다는 판단.
-# ⚠️ 대가: 사전등록 규율이 약해진다(탈락한 rule 을 기준 완화로 되살리는 셈). 강등 감지가
-# 안전망이므로 최근 창 성적을 반드시 함께 감시한다(edge_policy.check_demotion, 최소 5거래일).
+# 자는 양쪽 다 **절대 평균수익(mean_net)** 이다. 상대 비교(초과수익·대조군 우위)와 월 승격 상한은
+# 게이트에 없다 — 규율은 "게이트를 통과하면 승격한다" 하나이고, 초과수익은 계산만 해서 룰 상세
+# 화면에 표기한다("평균보다 크지 않아도 안정적으로 수익이 나면 그만").
+# ⚠️ 대가 둘: ① "그 기간 장이 오른 몫"을 걸러내는 자동 장치가 게이트에 없다(상승장에 등록된 rule 이
+# 유리) ② 사전등록 규율이 약해진다(탈락한 rule 을 기준 완화로 되살리는 셈).
+# 남은 방어선: 평균수익>0 · 거래일≥10 · ci_low>0 · 강등 감시(check_demotion, 최소 5거래일) ·
+# 승격 시 관리자 승인(그때 상세 화면의 초과수익을 눈으로 확인).
 # 롤백: 이 값을 strict 로 되돌리면 게이트가 즉시 원복된다(이미 live 인 rule 은 강등 API 로 별도 처리).
+# 정책 선택·조건 변경 경위와 실측 근거: docs/history/edge-ledger.md
 EDGE_PROMO_POLICY = os.getenv('EDGE_PROMO_POLICY', 'experimental')
 
 # 키움 데이터 서버 (별도 FastAPI, localhost) — core.kiwoom_client 가 호출

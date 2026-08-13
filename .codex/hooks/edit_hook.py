@@ -173,6 +173,14 @@ def post_edit(paths: list[Path], root: Path) -> int:
     if readmes:
         reminders.append("📄 주요 로직 변경입니다. 구조·흐름·안전장치가 바뀌었다면 " + ", ".join(sorted(readmes)) + "도 동기화하세요.")
 
+    # 이력성 주석 경고 — 판정 기준은 .claude/hooks/history-comment-check.py 가 단일 소스(Claude 와 공유).
+    history = subprocess.run(
+        ["/usr/bin/env", "python3", str(root / ".claude" / "hooks" / "history-comment-check.py"), *[str(p) for p in paths]],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    if history.returncode == 0 and history.stdout.strip():
+        reminders.append(history.stdout.strip())
+
     messages = failures + reminders
     if messages:
         message = "\n".join(messages)

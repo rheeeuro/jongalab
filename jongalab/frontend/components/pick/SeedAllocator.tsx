@@ -19,7 +19,7 @@ const PREVIEW_COUNT = 8;
 // 프론트는 trading .env 를 못 읽으므로 기본값으로 고정한다 — 실거래가 .env 로 튜닝돼 있으면
 // 그만큼 미리보기와 달라진다(이 미리보기는 '기본 설정에서의 수량'이다).
 const TOP_N = 10;
-// 종목당 최대 투입 비율(SEED_MAX_NAME_PCT). 2026-07-10 하한가 사건으로 0.5 → 0.25.
+// 종목당 최대 투입 비율(trading `SEED_MAX_NAME_PCT`) — 하한가 1방이 포트를 깨지 않게 묶는 값.
 const MAX_NAME_PCT = 0.25;
 // 확신도(선정 근거 표) 가중 상한(SEED_CONVICTION_MAX_MULT). 1.0 이면 순수 등가중.
 const CONVICTION_MAX_MULT = 3;
@@ -94,7 +94,7 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
       .slice(0, TOP_N);
 
     // 등가중의 단위는 '종목'이 아니라 **선정 근거 1표**다 — 목표금액 = seed × 표/Σ표.
-    // 점수 '크기' tilt 는 쓰지 않는다(익일 손익 예측 실패로 제거됨). 표가 전원 1이면 등가중.
+    // 점수 '크기' tilt 는 쓰지 않는다(점수는 익일 손익을 예측하지 못한다). 표가 전원 1이면 등가중.
     const items = ranked.map((r) => ({
       report: r,
       price: r.current_price,

@@ -75,9 +75,8 @@ def _run_open_stage(engine: ExecutionEngine, trade_date: str, *,
                     #   1원을 빼는 이유: 모니터 breach 판정이 `cur <= stop_price` 라 선을 시초가
                     #   그대로 두면 하락 없이 같은 값에서도 발동한다. 호가단위와 무관하게 실제
                     #   한 틱 하락은 1원 이상이라 항상 선 아래로 들어온다.
-                    # ⚠️ 2026-08-11 사용자 지시로 잔량 트레일링을 재도입했다. 실측은 반대
-                    #   방향이었다(2026-08-03 잔량 -0.49%·포지션 -0.45%p/건 t=3.35 —
-                    #   docs/history/execution-exit.md).
+                    # ⚠️ 잔량 트레일링은 **사용자 지시로 유지**한다 — 실측은 반대 방향이었다
+                    #   (docs/history/execution-exit.md).
                     stop_price = open_px - 1
                 else:
                     # 갭하락 저가이탈선 = 시초가에서 STOP_BUFFER_PCT% 아래(버퍼, 현행 유지).

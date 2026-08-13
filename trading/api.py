@@ -328,7 +328,7 @@ def buy_preview(date: str | None = None):
     signals = signal_repo.get_pending_signals(trade_date)
     block = blocklist_repo.get_codes()
     # 권리락 스킵도 executor 와 같이 반영한다 — 신호는 19:30 집행 전까지 pending 으로 남아 있어서
-    # 여기서 빼지 않으면 "안 살 종목이 매수 예정에 뜬다"(2026-08-04 알테오젠).
+    # 여기서 빼지 않으면 "안 살 종목이 매수 예정에 뜬다"(권리락 종목 사례).
     ex_rights = get_next_session_ex_rights()
     # 레버리지 대체매수 — 대시보드는 실제 매수 대상인 ETF 로 미리보기 표시(executor 와 동일 치환).
     lev_map = (leverage_map_repo.get_active_map()

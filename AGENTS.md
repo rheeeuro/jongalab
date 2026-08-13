@@ -13,7 +13,7 @@
 > `README.md`가 있다. 이 절은 개요이고, **상세는 각 README 가 소스 오브 트루스**다(변경 시 함께 갱신).
 
 루트는 **`jongalab/`(메인 앱)** · **`trading/`(자동매매 집행 서버)** · **`kiwoom/`(키움 데이터 전용 서버)** 로
-분리된다. 판정·변경 이력은 **`docs/history/`** 에 축별로 모은다(위 "문서 두 계층" 참고).
+분리된다. 판정·변경 이력은 **`docs/history/`** 에 축별로 모은다(아래 "문서 세 계층" 참고).
 공통 인프라는 각자 최소 복제하고, **같은 MariaDB 서버에 DB(스키마)를 분리**해 쓴다 —
 jongalab 은 `jongalab` DB(분석/리포트/소스 등), kiwoom 은 전용 `kiwoom` DB(`kiwoom_token`).
 DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(`DB_HOST`/`DB_USER`/`DB_PASSWORD`/`DB_PORT` 는 공유).
@@ -79,8 +79,22 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
 4. **사용자가 가장 덜 헷갈리는 흐름은 무엇인가?** — UI/API 흐름은 최소 놀람 원칙을 따른다.
 5. **어떤 방식이 더 유지보수하기 쉬운가?** — 영리함보다 다음 사람이 읽기 쉬운 쪽을 택한다.
 
-## 문서 두 계층 — README(현재 상태) / docs/history(이력)
+## 문서 세 계층 — 코드 주석(현재 동작) / README(현재 상태) / docs/history(이력)
 **이 경계를 지키는 것이 문서 규칙의 핵심이다.**
+
+### 코드 주석 = 지금 이 코드가 무엇을 하는가
+주석은 **현재 동작과 그 이유 한 줄**만 담는다. 코드를 읽는 사람은 "지금 이게 뭘 하나"를 알고 싶지,
+"7월에 뭘 시도했다 기각했나"를 알고 싶은 게 아니다.
+- **주석에 쓰지 않는다**(→ `docs/history/<축>.md`):
+  ① 변경 서사("예전엔 X 였다", "2026-08-03 제거했다", "N차 실패", "되돌렸다")
+  ② 백테스트·실측 근거 덤프(표본 수·t값·승률·%p 비교)
+  ③ 사고 경위(무엇이 언제 잘못됐고 어떻게 고쳤나) ④ 기각된 대안과 그 이유
+- **주석에 남긴다**: 현재 규칙·불변식·⚠️ 안전장치 경고 + **결론 한 줄** + 필요하면 포인터
+  (예: `# 근거·경위: docs/history/execution-exit.md`). 도입 시점 태그(`(2026-07-19, sql/25)`)는
+  마이그레이션 추적용이라 그대로 둔다.
+- 판단 기준: **그 문장을 지워도 지금 코드를 이해·수정하는 데 지장이 없으면 이력이다.**
+- 편집 시 `.claude/hooks/history-comment-check.py`(Claude·Codex 공용)가 새로 들어간 이력성 주석을
+  감지해 경고한다(차단은 하지 않는다).
 
 ### `README.md` = 현재 구조와 상태
 각 주요 디렉터리(`jongalab/`, `trading/`, `kiwoom/`)의 `README.md`는 그 도메인의 **주요 로직·코드 구조 설명서**다.
@@ -148,6 +162,9 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
     또한 프론트 편집마다 **모바일 최우선** 가이드가 컨텍스트로 주입된다.
   - 백엔드 주요 로직(`*/core/**`·`*/routers/**`·`*/workers/**`·`*/api.py`) 편집마다
     해당 도메인 `README.md` 동기화 + 설계 5원칙 점검 가이드가 컨텍스트로 주입된다(track-changes.sh).
+  - 편집으로 **이력성 주석**(변경 서사·백테스트 수치·사고 경위)이 새로 들어가면 경고가 함께
+    주입된다 — 판정은 `.claude/hooks/history-comment-check.py`(Claude·Codex 공용, 차단은 안 함).
+    `sql/`·`tests/`·`docs/` 와 `docs/history/` 를 가리키는 포인터 줄은 검사에서 제외된다.
   - `jongalab/api.py`/`jongalab/routers/**`/`jongalab/core/**` → `jongalab-be` 재시작,
     `jongalab/core/**`·`telegram_listener.py` → `jongalab-telegram` 재시작,
     `jongalab/core/**`·`workers/scheduler.py` → `jongalab-scheduler` 재시작(잡 정의 반영).

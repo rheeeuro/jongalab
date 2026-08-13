@@ -40,7 +40,7 @@ export function EdgeRuleCard({
   const verdict = decisionLabel(rule);
   // 판정 사유는 **판정 당시(발견 창) 값**이라 지금 누적 성적과 다를 수 있다 — 실제로
   // f5_universe_new_entry 는 판정 시점 평균 -0.405% / 현재 누적 +0.18% 로 부호가 반대다.
-  // 날짜를 앞에 붙여야 카드에 나란히 뜬 '평균 수익'과 모순돼 보이지 않는다(2026-08-04).
+  // 날짜를 앞에 붙여야 카드에 나란히 뜬 '평균 수익'과 모순돼 보이지 않는다.
   // 채점은 종결 후에도 매일 계속되므로(rule_evaluator 가 retired 까지 채점) 성적은 계속 움직인다.
   const decidedReason = (() => {
     const step = rule.decision?.confirm ?? rule.decision?.discovery;
