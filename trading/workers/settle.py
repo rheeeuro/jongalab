@@ -81,7 +81,7 @@ def _run_open_stage(engine: ExecutionEngine, trade_date: str, *,
                 else:
                     # 갭하락 저가이탈선 = 시초가에서 STOP_BUFFER_PCT% 아래(버퍼, 현행 유지).
                     # 시초가를 그대로 잡으면 한 틱만 눌려도 잔량이 즉시 털리므로 회복 대기를
-                    # 위한 버퍼를 둔다(버퍼 후 대기가 즉시 전량 대비 +0.78%p 유리, n=26).
+                    # 위한 버퍼를 둔다(즉시 전량 청산보다 유리 — docs/history/execution-exit.md).
                     stop_price = round(open_px * (1 - STOP_BUFFER_PCT / 100))
                 plan_repo.upsert_plan(trade_date, stk_cd, gap_dir, avg, open_px,
                                       stop_price=stop_price, note=f"{stage_tag} half={half}")

@@ -137,9 +137,10 @@ FUTURES_SD_K200_DAY = float(os.getenv('FUTURES_SD_K200_DAY', '6.3'))  # 코스�
 FUTURES_SD_K200_NIGHT = float(os.getenv('FUTURES_SD_K200_NIGHT', '1.6'))  # 야간선물 σ(NXT 축)
 FUTURES_SD_US_EXT = float(os.getenv('FUTURES_SD_US_EXT', '3.0'))      # US 프리마켓 확장 등락 σ
 # 축(axis)당 최대 감액률 — 해당 축이 하락이고 섹터 민감도=1.0 일 때 깎는 비율. keep = ∏(1 − MAX_CUT×민감도).
-# NQ 축이 코스피 축보다 낮은 이유: 매수 시점 NQ '레벨'은 익일 성적 예측력이 실측되지 않았다
-#   (21거래일 t=-0.13). 예측력이 있던 건 보유 밤 NQ '실변동'(t=+3.69)인데 매수 시점엔 알 수 없다.
-#   축 자체는 갭 경로로 맞아 관찰·감액을 유지하되, 권한을 US 확장 축과 같은 수준으로 낮춰 둔다.
+# NQ 축이 코스피 축보다 낮은 이유: 매수 시점의 NQ '레벨'은 익일 성적 예측력이 확인되지 않았다
+#   (예측력이 있던 건 보유 밤의 NQ '실변동'인데 매수 시점엔 알 수 없다). 축 자체는 갭 경로로
+#   맞아 관찰·감액은 유지하되, 권한을 US 확장 축과 같은 수준으로 낮춰 둔다.
+#   검정 결과: docs/history/gates-sizing.md
 FUTURES_NQ_MAX_CUT = float(os.getenv('FUTURES_NQ_MAX_CUT', '0.3'))    # NQ 축
 FUTURES_IDX_MAX_CUT = float(os.getenv('FUTURES_IDX_MAX_CUT', '0.5'))  # 코스피200 선물 축
 FUTURES_SECTOR_MIN_KEEP = float(os.getenv('FUTURES_SECTOR_MIN_KEEP', '0.25'))  # 종목당 keep 하한(과도 감액 방지)

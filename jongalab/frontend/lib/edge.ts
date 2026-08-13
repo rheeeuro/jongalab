@@ -188,7 +188,7 @@ export function fmtT(v: number | null | undefined): string {
 }
 
 // t 는 수익률이 아니라 신뢰도 점수 — 부호가 아니라 **문턱 통과 여부**로 색을 준다
-// (retTone 을 쓰면 t=0.37 이 '상승 빨강'으로 보여 통과한 것처럼 읽힌다).
+// (retTone 을 쓰면 문턱에 못 미친 양수 t 가 '상승 빨강'으로 보여 통과한 것처럼 읽힌다).
 export function dayTTone(v: number | null | undefined): Tone {
   if (v === null || v === undefined) return 'flat';
   return v >= PROMO_MIN_DAY_T ? 'up' : 'flat';
