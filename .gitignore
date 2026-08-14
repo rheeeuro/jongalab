@@ -34,3 +34,6 @@ stock_session.*
 # 핵심 로직
 jongalab/core/trading_engine.py
 jongalab/core/prompts.py
+
+# 변경사항 저널(자동 생성, 게시글 초안)
+docs/journal/

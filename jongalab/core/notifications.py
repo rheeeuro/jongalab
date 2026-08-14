@@ -118,6 +118,35 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
+def send_journal_post(text: str) -> int:
+    """변경사항 저널(workers/journal.py) 게시글 초안 — 관리자에게 평문으로 전송.
+
+    게시글에 그대로 복사해 쓰는 글이라 parse_mode 없이 보낸다(마크다운 기호가 400 을 만들거나
+    본문에서 사라지지 않게). 4096자 상한을 넘으면 줄 경계로 나눠 여러 통으로 보낸다.
+    전송 실패가 파일 생성을 무르게 하면 안 되므로 예외는 삼키고 로그만 남긴다.
+    """
+    sent = 0
+    try:
+        chat_ids = get_active_chat_ids(role="ADMIN")
+        chunks, buf = [], ""
+        for line in text.splitlines(keepends=True):
+            if len(buf) + len(line) > TELEGRAM_MAX_LEN - 96:
+                chunks.append(buf)
+                buf = ""
+            buf += line[:TELEGRAM_MAX_LEN - 96]
+        if buf.strip():
+            chunks.append(buf)
+        for chat_id in chat_ids:
+            for i, chunk in enumerate(chunks):
+                head = f"📝 ({i + 1}/{len(chunks)})\n" if len(chunks) > 1 else ""
+                _post(chat_id, head + chunk.strip(), parse_mode=None)
+                sent += 1
+        logging.info(f"📨 저널 전송: {len(chat_ids)}개 채팅방 x {len(chunks)}통")
+    except Exception as e:
+        logging.error(f"❌ 저널 전송 실패: {e}")
+    return sent
+
+
 def send_analysis_alert(
     channel: str,
     title: str,

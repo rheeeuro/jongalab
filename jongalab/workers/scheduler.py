@@ -140,6 +140,13 @@ JOBS = [
     Job("sector_news_labeler_pre_nxt",
         UV_RUN + ["workers/sector_news_labeler.py", "--newest-first", "--limit", "300"],
         timeout=900, grace=1200, minute="0", hour="19", day_of_week="mon-fri"),
+    # 매일 20:50 일간 변경사항 저널(GPT 요약 + 관리자 텔레그램). 집계 창이 날짜로 고정이라
+    # 지각 실행해도 내용이 같다 → 유예는 자정을 넘기지 않는 선(3h)에서 넉넉히.
+    Job("journal_daily", UV_RUN + ["workers/journal.py", "--mode", "daily"],
+        timeout=600, grace=10800, minute="50", hour="20"),
+    # 토요일 10:00 주간 저널 — 그 주 일간 파일(직전 토~금)을 재요약. 유예 6h.
+    Job("journal_weekly", UV_RUN + ["workers/journal.py", "--mode", "weekly"],
+        timeout=900, grace=21600, minute="0", hour="10", day_of_week="sat"),
 ]
 
 
