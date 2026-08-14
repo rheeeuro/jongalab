@@ -12,11 +12,16 @@ function parseLastModified(date?: string) {
   return Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
 }
 
-async function fetchJson<T>(path: string, fallback: T): Promise<T> {
+async function fetchJson<T>(
+  path: string,
+  fallback: T,
+  init?: RequestInit
+): Promise<T> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
-      next: { revalidate: REVALIDATE_SECONDS },
-    });
+    const res = await fetch(
+      `${API_BASE}${path}`,
+      init ?? { next: { revalidate: REVALIDATE_SECONDS } }
+    );
 
     if (!res.ok) return fallback;
 
@@ -82,16 +87,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   routes.push(...reportRoutes);
 
-  // 날짜별 종목 리포트 상세 페이지 (당일은 갭 데이터 미확정 → 카드 페이지 fetch 캐시 오염 방지로 제외)
+  // 날짜별 종목 리포트 상세 페이지. 당일 추천이 검색 가치가 가장 높으므로(종가베팅은 당일
+  // 장 마감 전에 사는 전략이라 하루 지나면 가치가 사라진다) 당일도 싣는다.
+  // 당일치만 no-store 로 읽어 갭 미확정 데이터가 Data Cache 에 남지 않게 한다.
   const todaySeoul = new Date().toLocaleDateString("en-CA", {
     timeZone: "Asia/Seoul",
   });
   const stockReportsByDate = await Promise.all(
-    uniqueDates
-      .filter((date) => date < todaySeoul)
-      .map((date) =>
-        fetchJson<StockReport[]>(`/api/stock-report/${encodeURIComponent(date)}`, [])
+    uniqueDates.map((date) =>
+      fetchJson<StockReport[]>(
+        `/api/stock-report/${encodeURIComponent(date)}`,
+        [],
+        date >= todaySeoul ? { cache: "no-store" } : undefined
       )
+    )
   );
 
   const stockReportRoutes: MetadataRoute.Sitemap = stockReportsByDate
@@ -101,7 +110,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         report.report_date
       )}/${encodeURIComponent(report.stock_code)}`,
       lastModified: parseLastModified(report.created_at ?? report.report_date),
-      changeFrequency: "never",
+      // 당일치는 다음날 아침 갭 결과가 채워지므로 재크롤 여지를 남긴다.
+      changeFrequency: report.report_date >= todaySeoul ? "daily" : "never",
       priority: 0.7,
     }));
 
