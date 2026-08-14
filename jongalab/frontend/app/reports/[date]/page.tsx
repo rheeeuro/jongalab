@@ -36,8 +36,10 @@ export async function generateMetadata({
     return { title: "리포트를 찾을 수 없습니다" };
   }
 
-  const title = `${resolvedParams.date} 추천 ${stockReports.length}종목`;
-  const description = `${topPick.stock_name} 등 ${stockReports.length}종목. 선정 근거와 다음날 아침 결과를 확인하세요.`;
+  // 제목 앞머리는 **검색 의도 키워드**, 날짜는 괄호로 뒤에 둔다 — 날짜를 앞세우면
+  // "종목명 날짜 종가" 같은 시세 조회 쿼리에만 걸린다. 근거: docs/plan/seo/search-visibility.md
+  const title = `종가베팅 추천 ${stockReports.length}종목 (${resolvedParams.date})`;
+  const description = `${topPick.stock_name} 외 ${stockReports.length}종목을 종가베팅 후보로 고른 근거 — 수급·기술·재료 점수와 다음날 아침 실제 결과까지 공개합니다.`;
 
   return {
     title,

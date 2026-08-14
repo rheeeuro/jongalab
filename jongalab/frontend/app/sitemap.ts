@@ -1,6 +1,6 @@
 import { MetadataRoute } from "next";
 import { API_BASE } from "@/lib/api";
-import { StockReport, TickerDictionary } from "@/types";
+import { StockReport } from "@/types";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://jongalab.com";
 const REVALIDATE_SECONDS = 3600;
@@ -107,17 +107,26 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   routes.push(...stockReportRoutes);
 
-  const tickers = await fetchJson<TickerDictionary[]>(
-    "/api/ticker-dictionary?status=ACTIVE",
-    []
-  );
+  // 종목 상시 페이지는 **리포트 이력이 있는 종목만** 싣는다. 티커 사전 전체를 실으면
+  // 대부분이 "수집된 데이터 없음" 화면이라 색인되지 않고 크롤 예산만 쓴다.
+  // 근거: docs/plan/seo/search-visibility.md
+  const latestReportByStock = new Map<string, string>();
+  for (const report of stockReportsByDate.flat()) {
+    const prev = latestReportByStock.get(report.stock_code);
+    if (!prev || report.report_date > prev) {
+      latestReportByStock.set(report.stock_code, report.report_date);
+    }
+  }
 
-  const stockRoutes: MetadataRoute.Sitemap = tickers.map((ticker) => ({
-    url: `${baseUrl}/stocks/${encodeURIComponent(ticker.ticker_symbol)}`,
-    lastModified: parseLastModified(ticker.updated_at),
-    changeFrequency: "daily",
-    priority: 0.7,
-  }));
+  const stockRoutes: MetadataRoute.Sitemap = Array.from(
+    latestReportByStock,
+    ([stockCode, latestDate]) => ({
+      url: `${baseUrl}/stocks/${encodeURIComponent(stockCode)}`,
+      lastModified: parseLastModified(latestDate),
+      changeFrequency: "daily" as const,
+      priority: 0.7,
+    })
+  );
 
   routes.push(...stockRoutes);
 

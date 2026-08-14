@@ -40,7 +40,9 @@ frontend/
   모든 화면이 1클릭이다. 새 화면이 필요하면 먼저 **어떤 화면과 합칠지**부터 정한다
   (계층을 얹으면 클릭과 크롬이 함께 는다 — `docs/history/frontend-ui.md` 참고).
 - 탭에서 내려간 화면은 경로가 살아 있다: `/reports/{date}`(날짜 이동·달력의 목적지),
-  `/stocks/{ticker}`(종목별 상시 페이지, sitemap 색인 대상).
+  `/stocks/{ticker}`(종목별 상시 페이지 — **리포트 이력이 있는 종목만** 색인 대상이다.
+  `app/sitemap.ts` 가 리포트에 등장한 종목만 싣고, 콘텐츠·리포트가 둘 다 없는 종목은
+  `generateMetadata` 가 `robots: { index: false }` 를 준다).
   인덱스 경로는 리다이렉트한다 — `/stocks`→`/`, `/sectors`→`/market?view=sector`,
   `/feed`→`/news?view=content`.
 - **화면 안에서 뷰를 가르는 건 `components/ViewSegment`**(`?view=` 쿼리)로 통일한다.
@@ -70,6 +72,11 @@ frontend/
   예외는 **루트 `app/page.tsx`** 하나다 — 루트 page 는 자기 layout 의 template 적용 대상이
   아니라서 `title: { absolute: "오늘의 추천 · 종가랩" }` 로 전체 문자열을 쓴다.
   관리 화면은 `app/admin/layout.tsx`(서버, 메타데이터 전용)가 `"관리"` + `noindex` 를 준다.
+- **리포트 페이지 제목은 검색 의도 키워드가 앞, 날짜는 괄호로 뒤에 둔다**
+  (`"종가베팅 추천 10종목 (2026-08-13)"` · `"삼성전자 추천 근거 (2026-08-13)"`).
+  날짜를 앞세우거나 description 에 순매수 금액을 나열하면 "종목명 날짜 종가" 류의
+  **시세 조회 쿼리**에만 걸리고 클릭으로 이어지지 않는다. description 은 수치 나열이 아니라
+  "왜 골랐나"를 쓴다. 근거: `docs/plan/seo/search-visibility.md`.
 - 새 카드 컴포넌트는 `/new-card` 스캐폴드를 사용한다.
 - 타입은 `types/index.ts` 에 정의하고 백엔드 응답과 어긋나지 않게 유지한다.
 - admin 변경(POST)은 클라이언트에서 직접 백엔드를 부르지 않고 **로컬 라우트 핸들러**(`app/api/*`)를

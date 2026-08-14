@@ -73,8 +73,11 @@ export async function generateMetadata({
   }
 
   const r = data.report;
-  const title = `${r.stock_name} · ${resolvedParams.date} 리포트`;
-  const description = `수급 ${r.supply_grade}(${r.supply_score?.toFixed(1) ?? 0}점) | 종합 ${r.score}점 | 기관 ${formatBillion(r.inst_net_buy)}억 | 외인 ${formatBillion(r.frgn_net_buy)}억`;
+  // 제목 앞머리는 **검색 의도 키워드**, 날짜는 괄호로 뒤에 둔다. description 도 순매수 금액
+  // 나열 대신 "왜 골랐나"를 쓴다 — 금액을 적으면 "종목명 날짜 외국인 순매수" 같은 시세 조회
+  // 쿼리에만 걸리고 클릭으로 이어지지 않는다. 근거: docs/plan/seo/search-visibility.md
+  const title = `${r.stock_name} 추천 근거 (${resolvedParams.date})`;
+  const description = `${r.stock_name} 종목을 종가베팅 후보로 고른 근거 — 수급 ${r.supply_grade}등급(${r.supply_score?.toFixed(1) ?? 0}점), 종합 ${r.score}점. 다음날 아침 실제 결과까지 공개합니다.`;
 
   return {
     title,
@@ -90,11 +93,6 @@ export async function generateMetadata({
       type: "article",
     },
   };
-}
-
-function formatBillion(val: number): string {
-  const b = val / 1e8;
-  return b >= 0 ? `+${b.toLocaleString("ko-KR", { maximumFractionDigits: 0 })}` : b.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
 }
 
 function formatTradingValue(val: number): string {

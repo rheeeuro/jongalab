@@ -16,11 +16,20 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const resolvedParams = await Promise.resolve(params);
   const decodedTicker = decodeURIComponent(resolvedParams.ticker).toUpperCase();
-  const stockName = await getStockName(decodedTicker);
+  const [stockName, contents, stockReports] = await Promise.all([
+    getStockName(decodedTicker),
+    getTickerContents(decodedTicker),
+    getStockReports(decodedTicker),
+  ]);
+
+  // 수집 콘텐츠도 리포트 이력도 없으면 화면이 "데이터가 없습니다" 한 줄뿐이라 색인에서 뺀다
+  // (사이트맵도 같은 기준으로 리포트 있는 종목만 싣는다). 근거: docs/plan/seo/search-visibility.md
+  const hasContent = contents.length > 0 || stockReports.length > 0;
 
   return {
     title: `${stockName} 종목 분석`,
     alternates: { canonical: `/stocks/${decodedTicker}` },
+    ...(hasContent ? {} : { robots: { index: false, follow: true } }),
   };
 }
 
