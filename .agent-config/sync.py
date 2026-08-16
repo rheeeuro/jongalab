@@ -116,7 +116,12 @@ def claude_settings(manifest: dict) -> dict:
                 ]
             }
         ]
-    return {"permissions": manifest["claude_permissions"], "hooks": hooks}
+    # claude_settings: settings.json 최상위 키 그대로 통과 (예: includeCoAuthoredBy)
+    return {
+        "permissions": manifest["claude_permissions"],
+        "hooks": hooks,
+        **manifest.get("claude_settings", {}),
+    }
 
 
 def codex_hooks(manifest: dict) -> dict:

@@ -38,6 +38,9 @@
 
 - `manifest.json`의 권한 확대는 최소 범위의 정확한 명령 prefix만 허용한다. `bash`, `sh`, `python3`, `curl`,
   `git`, `rm`처럼 광범위한 실행을 통째로 허용하지 않는다.
+- `manifest.json`의 `claude_settings`는 `.claude/settings.json` 최상위 키로 그대로 통과한다
+  (현재 `includeCoAuthoredBy: false` — 커밋·PR 에 Co-Authored-By 트레일러를 붙이지 않는다).
+  개인·기기별 값은 여기 넣지 말고 `.claude/settings.local.json` 에 둔다.
 - Claude allow 항목과 Codex rule은 표현 방식이 다르므로 한쪽 문자열을 다른 쪽에 그대로 복사하지 않는다.
   양쪽에서 실제로 필요한 최소 동작만 각각 선언한다.
 - `.env`, `*.session`, `mariadb_data/`, `ollama_data/` 보호와 민감 거래 로직 가드는 제거하거나 완화하지 않는다.

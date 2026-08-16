@@ -7,6 +7,9 @@
     "quality_after_edit": true,
     "deploy_on_stop": true
   },
+  "claude_settings": {
+    "includeCoAuthoredBy": false
+  },
   "claude_permissions": {
     "allow": [
       "Bash(uv run :*)",
