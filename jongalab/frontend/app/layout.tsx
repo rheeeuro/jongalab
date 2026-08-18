@@ -23,11 +23,11 @@ export const metadata: Metadata = {
   // 변형이 원본으로 통합되도록 각 페이지는 metadataBase 기준 canonical을 선언한다.
   metadataBase: new URL(SITE_URL),
   // 페이지 타이틀 단일 규칙: 각 페이지는 **화면 h1 과 같은 짧은 이름**만 선언하고
-  // 브랜드 접미사는 여기서 붙인다(`추천 성적 · 종가랩`). 페이지에서 " — 종가랩" 을
+  // 브랜드 접미사는 여기서 붙인다(`추천 성적 | 종가랩`). 페이지에서 "| 종가랩" 을
   // 직접 붙이지 말 것 — 접미사가 두 번 붙거나 구분자가 화면마다 달라진다.
   title: {
     default: "종가랩 — 종가 전략 연구소",
-    template: "%s · 종가랩",
+    template: "%s | 종가랩",
   },
   description: "AI가 분석해주는 매일의 주식 시장 요약",
   // 파비콘은 `app/icon.png`(192²) · `app/apple-icon.png`(180²) 파일 규약으로 낸다 —

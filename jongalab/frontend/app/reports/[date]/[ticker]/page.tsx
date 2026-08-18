@@ -73,10 +73,11 @@ export async function generateMetadata({
   }
 
   const r = data.report;
-  // 제목 앞머리는 **검색 의도 키워드**, 날짜는 괄호로 뒤에 둔다. description 도 순매수 금액
-  // 나열 대신 "왜 골랐나"를 쓴다 — 금액을 적으면 "종목명 날짜 외국인 순매수" 같은 시세 조회
-  // 쿼리에만 걸리고 클릭으로 이어지지 않는다. 근거: docs/plan/seo/search-visibility.md
-  const title = `${r.stock_name} 추천 근거 (${resolvedParams.date})`;
+  // 제목은 `{종목명} 투자분석 - {YYYY.MM.DD}` — 앞머리에 **실제로 검색되는 키워드**를 두고
+  // 날짜는 뒤로 뺀다. 날짜를 앞세우면 "종목명 날짜 종가" 같은 시세 조회 쿼리에만 걸리고,
+  // "추천 근거"는 그 자체가 검색되는 말이 아니다. description 도 순매수 금액 나열 대신
+  // "왜 골랐나"를 쓴다. 근거: docs/plan/seo/search-visibility.md
+  const title = `${r.stock_name} 투자분석 - ${resolvedParams.date.replace(/-/g, ".")}`;
   const description = `${r.stock_name} 종목을 종가베팅 후보로 고른 근거 — 수급 ${r.supply_grade}등급(${r.supply_score?.toFixed(1) ?? 0}점), 종합 ${r.score}점. 다음날 아침 실제 결과까지 공개합니다.`;
 
   return {

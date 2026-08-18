@@ -29,7 +29,7 @@ import { NewsDigest } from "@/components/home/NewsDigest";
 export const metadata: Metadata = {
   // 루트 page 는 루트 layout 의 title.template 적용 대상이 아니라(자식 세그먼트만 해당)
   // 접미사가 붙지 않는다 — 다른 화면과 형태를 맞추려면 여기서만 전체 문자열을 쓴다.
-  title: { absolute: "오늘의 추천 · 종가랩" },
+  title: { absolute: "오늘의 추천 | 종가랩" },
   description:
     "수급·기술·재료 데이터로 매 거래일 자동 선정한 추천 종목과 선정 근거, 그리고 지난 추천의 실제 성적.",
   alternates: { canonical: "/" },
