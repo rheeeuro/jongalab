@@ -211,6 +211,11 @@ frontend/
 - ⚠️ 평균 실체결(`exec_leg_ret`)은 매매 경로 가동 이후 구간에만 있어 갭과 **창이 다르다**.
   `exec_days !== days` 면 실체결 자신의 구간(`exec_from_date~exec_to_date`)을 부제에 찍는다 —
   두 평균을 같은 창인 것처럼 나란히 놓으면 성적이 부풀려 읽힌다.
+- `pick/RecordNarrative` — 같은 숫자를 **문장**으로 서술한다(집계 구간·승패·평균 수익률·최고/최악일).
+  문장 빌더는 `lib/record.ts` 에 있고 **성적을 새로 계산하지 않는다** — `RecordSummary` 값만 끼운다.
+  메타 description(`generateMetadata`)도 같은 빌더(`recordMetaDescription`)를 쓴다.
+  타일만 있으면 "종가베팅 승률" 류 검색 질의에 답이 될 본문이 화면에 없다
+  (근거: `docs/plan/seo/search-visibility.md`).
 - 아래는 `ReportCalendarGrid` (날짜별 승패·대표 종목·테마·매크로·휴장). 셀 → `/reports/{date}`.
 - 데이터: `/api/stock-report/record-summary?days=` · `gap-stats` · `top-picks` ·
   `sector-report/top-themes` · `market-holidays` · `macro-events`.
@@ -286,6 +291,10 @@ frontend/
 - 카드 높이 통일: 검증 상태 슬롯(상태·진행바·설명 3줄)은 **항상** 렌더한다(설명 없으면 공백 한 줄).
 - 카드를 누르면 `/lab/[name]` 상세(일별 막대차트·선정 조건·최근 매칭). 매칭 종목명은 **그 날짜의
   리포트 상세**로 링크하고, 반대 방향은 '룰 선정' 배지가 `/lab/[name]` 으로 되돌린다.
+- 색인: `app/sitemap.ts` 가 **검증 거래일이 `PROMO_MIN_DAYS`(10일) 이상 쌓인 룰만** `/lab/[name]` 으로
+  싣는다(그 아래는 성적표가 몇 줄뿐이라 색인 가치가 없다 — `/stocks/` 와 같은 기준).
+  상세 description 은 **역할(매수/위험 회피/측정용)을 앞에 붙이고 성적을 룰 설명보다 먼저** 쓴다 —
+  역할을 빼면 제외 규칙 성적이 매수 수익률처럼 읽히고, 성적을 뒤로 밀면 스니펫에서 잘린다.
 - 컴포넌트: `EdgeSummaryStrip` · `EdgeRuleCard` · `EdgeRuleDetailContent`.
 
 ### `/admin/edge-rules` — 전략 관리 (admin)

@@ -6,6 +6,8 @@ import { EdgeBoard } from "@/components/EdgeBoard";
 
 export const metadata: Metadata = {
   title: "전략 실험실",
+  description:
+    "종가베팅 종목 선정에 쓰는 전략을 실제 시장 데이터로 검증한 성적. 전략별 성공률·평균 수익과 검증 상태를 공개합니다.",
   alternates: { canonical: "/lab" },
 };
 

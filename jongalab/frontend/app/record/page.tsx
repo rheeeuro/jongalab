@@ -4,13 +4,8 @@ import { apiFetch, getRecordSummary } from "@/lib/api";
 import Link from "next/link";
 import { Trophy, ChevronLeft, ChevronRight } from "lucide-react";
 import { RecordSummaryPanel } from "@/components/pick/RecordSummaryPanel";
-
-export const metadata: Metadata = {
-  title: "추천 성적",
-  description:
-    "종가랩이 매 거래일 선정한 종목의 실제 성적. 날짜별 승패와 누적 승률·평균 수익률을 그대로 공개합니다.",
-  alternates: { canonical: "/record" },
-};
+import { RecordNarrative } from "@/components/pick/RecordNarrative";
+import { recordMetaDescription } from "@/lib/record";
 import {
   ReportCalendarGrid,
   CalendarCellData,
@@ -82,6 +77,19 @@ async function getMacroEventsByDate(
 }
 
 export const dynamic = "force-dynamic";
+
+// description 에 실제 승률·평균 수익률을 싣는다 — 검색 결과에서 이 화면이 무엇을 담는지
+// 숫자로 드러나야 "종가베팅 승률" 류 질의의 답으로 읽힌다.
+// 페이지 본문과 같은 URL 을 부르므로 렌더 중 요청은 한 번으로 합쳐진다.
+export async function generateMetadata(): Promise<Metadata> {
+  const dates = await getReportDates();
+  const summary = await getRecordSummary(dates.length || 20);
+  return {
+    title: "추천 성적",
+    description: recordMetaDescription(summary),
+    alternates: { canonical: "/record" },
+  };
+}
 
 function formatMonth(monthStr: string): string {
   const [y, m] = monthStr.split("-");
@@ -215,6 +223,8 @@ export default async function ReportsArchivePage({
         </header>
 
         <RecordSummaryPanel summary={recordSummary} />
+
+        <RecordNarrative summary={recordSummary} />
 
         <section>
           {/* 월 이동 네비게이션 */}

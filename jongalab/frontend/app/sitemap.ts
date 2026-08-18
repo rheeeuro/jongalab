@@ -1,6 +1,7 @@
 import { MetadataRoute } from "next";
 import { API_BASE } from "@/lib/api";
-import { StockReport } from "@/types";
+import { PROMO_MIN_DAYS } from "@/lib/edge";
+import { EdgeRule, StockReport } from "@/types";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://jongalab.com";
 const REVALIDATE_SECONDS = 3600;
@@ -139,6 +140,24 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   );
 
   routes.push(...stockRoutes);
+
+  // 전략 상세(`/lab/{name}`) — 검증 거래일이 심사 문턱(PROMO_MIN_DAYS)만큼 쌓인 룰만 싣는다.
+  // 그 아래는 성적표가 몇 줄뿐이라 색인 가치가 없다(`/stocks/` 와 같은 기준).
+  const edgeRules = await fetchJson<EdgeRule[]>("/api/edge-rules", []);
+
+  const labRoutes: MetadataRoute.Sitemap = edgeRules
+    .filter((rule) => (rule.stats?.n_days ?? 0) >= PROMO_MIN_DAYS)
+    .map((rule) => ({
+      url: `${baseUrl}/lab/${encodeURIComponent(rule.name)}`,
+      lastModified: parseLastModified(
+        rule.stats?.updated_through ?? rule.registered_at
+      ),
+      // 성적이 매일 갱신되는 건 실전 적용 중인 룰뿐이다(종료된 룰은 채점이 멈춰 있다).
+      changeFrequency: rule.status === "live" ? "daily" : "weekly",
+      priority: rule.status === "live" ? 0.7 : 0.5,
+    }));
+
+  routes.push(...labRoutes);
 
   return routes;
 }
