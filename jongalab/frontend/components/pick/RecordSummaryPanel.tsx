@@ -1,5 +1,6 @@
 import { RecordSummary } from "@/types";
 import { formatReportDate } from "@/components/pick/DateStepper";
+import { recordSentence } from "@/lib/record";
 import Link from "next/link";
 
 function pctColor(pct: number): string {
@@ -43,6 +44,8 @@ export function RecordSummaryPanel({
         ? `${summary.exec_from_date} ~ ${summary.exec_to_date} · ${summary.exec_days}거래일 구간만`
         : "실제로 사고판 가격 기준(수수료·세금 빼기 전)";
 
+  const sentence = recordSentence(summary);
+
   return (
     <section className="rounded-3xl bg-white p-5 sm:p-6 dark:bg-slate-900/60">
       <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
@@ -63,11 +66,11 @@ export function RecordSummaryPanel({
         <Metric
           label="평균 갭 수익률"
           value={signed(summary.avg_gap_pct)}
-          sub="종가 매수 → 익일 시가"
+          sub="장 마감에 사서 다음 날 아침에 팔기"
           tone={pctColor(summary.avg_gap_pct)}
         />
         <Metric
-          label="평균 실체결 수익률"
+          label="실제 매매 수익률"
           value={
             summary.avg_exec_ret === null ? "—" : signed(summary.avg_exec_ret)
           }
@@ -84,9 +87,19 @@ export function RecordSummaryPanel({
         </div>
       </div>
 
-      <p className="mt-4 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
-        뽑은 종목 <b>전체</b>를 장 마감 가격에 사서 다음 거래일 아침 첫 가격에 팔았다고 가정한
-        지난 기록이에요. 잘된 것만 골라 담은 성적이 아니고, 앞으로도 그럴 거라는 보장은 없어요.
+      {/* 타일이 못 말해 주는 것(집계 구간·모수·매매 전제)을 한 문장으로 — 검색 질의
+          "종가베팅 승률" 의 답이 되는 본문도 이 문장이다(근거: docs/plan/seo/search-visibility.md).
+          숨기지 않고 보이게 둔다: 감춘 문단은 검색엔진 전용 텍스트가 된다. */}
+      {sentence && (
+        <p className="mt-4 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+          {sentence}
+        </p>
+      )}
+
+      {/* 면책 — 전제는 위 문장이 이미 말했으므로 여기서는 반복하지 않는다 */}
+      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
+        <b>일부만 골라 담은 성적이 아니에요</b> — 그날 뽑은 종목 전체를 넣어 계산해요. 지난
+        기록이라 앞으로도 그럴 거라는 보장은 없어요.
       </p>
     </section>
   );

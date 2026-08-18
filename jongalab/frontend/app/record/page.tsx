@@ -4,7 +4,6 @@ import { apiFetch, getRecordSummary } from "@/lib/api";
 import Link from "next/link";
 import { Trophy, ChevronLeft, ChevronRight } from "lucide-react";
 import { RecordSummaryPanel } from "@/components/pick/RecordSummaryPanel";
-import { RecordNarrative } from "@/components/pick/RecordNarrative";
 import { recordMetaDescription } from "@/lib/record";
 import {
   ReportCalendarGrid,
@@ -211,20 +210,19 @@ export default async function ReportsArchivePage({
         <header>
           <div className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
             <Trophy className="h-4 w-4 text-indigo-500" />
-            <span>추천 성적</span>
+            <span>지난 추천 기록</span>
           </div>
           <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 sm:text-4xl dark:text-slate-100">
             추천 성적
           </h1>
+          {/* 매매 전제(장 마감 매수 → 다음 날 아침 매도)는 숫자 옆인 요약 패널 각주가 갖는다 —
+              여기서 한 번 더 적으면 같은 문장이 한 화면에 세 번 나온다. */}
           <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
-            추천한 종목을 장 마감 가격에 사서 다음 거래일 아침 첫 가격에 팔았다면 어땠을지 그대로
-            공개해요. 날짜를 누르면 그날 추천 목록을 볼 수 있어요.
+            지난 추천이 실제로 어땠는지 그대로 공개해요. 날짜를 누르면 그날 추천 목록을 볼 수 있어요.
           </p>
         </header>
 
         <RecordSummaryPanel summary={recordSummary} />
-
-        <RecordNarrative summary={recordSummary} />
 
         <section>
           {/* 월 이동 네비게이션 */}

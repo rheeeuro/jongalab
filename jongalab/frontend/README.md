@@ -228,11 +228,15 @@ frontend/
 - ⚠️ 평균 실체결(`exec_leg_ret`)은 매매 경로 가동 이후 구간에만 있어 갭과 **창이 다르다**.
   `exec_days !== days` 면 실체결 자신의 구간(`exec_from_date~exec_to_date`)을 부제에 찍는다 —
   두 평균을 같은 창인 것처럼 나란히 놓으면 성적이 부풀려 읽힌다.
-- `pick/RecordNarrative` — 같은 숫자를 **문장**으로 서술한다(집계 구간·승패·평균 수익률·최고/최악일).
-  문장 빌더는 `lib/record.ts` 에 있고 **성적을 새로 계산하지 않는다** — `RecordSummary` 값만 끼운다.
-  메타 description(`generateMetadata`)도 같은 빌더(`recordMetaDescription`)를 쓴다.
-  타일만 있으면 "종가베팅 승률" 류 검색 질의에 답이 될 본문이 화면에 없다
-  (근거: `docs/plan/seo/search-visibility.md`).
+- 타일 아래 **본문 한 문장**(`lib/record.recordSentence`) — 집계 구간·모수·매매 전제를 문장으로
+  말한다. 타일 숫자만으로는 "종가베팅 승률" 류 검색 질의에 답이 될 본문이 없다
+  (근거: `docs/plan/seo/search-visibility.md`). 빌더는 **성적을 새로 계산하지 않고**
+  `RecordSummary` 값만 끼우며, 메타 description(`recordMetaDescription`)도 같은 파일에 있다.
+  - **한 문장이고 보이게 둔다.** 여러 문단을 쓰면 바로 위 타일과 중복이고, 접어서 감추면
+    검색엔진 전용 텍스트가 된다. 최고·최악일과 실체결 구간은 타일이 이미 갖는다.
+- **매매 전제(장 마감 매수 → 다음 날 아침 매도)는 이 문장 한 곳**에만 둔다. 헤더 설명·각주·본문이
+  각자 같은 전제를 적으면 한 화면에 같은 문장이 세 번 나온다. 그 아래 각주는 면책만 담고,
+  헤더 kicker 는 h1(`추천 성적`)과 다른 문구(`지난 추천 기록`)를 쓴다.
 - 아래는 `ReportCalendarGrid` (날짜별 승패·대표 종목·테마·매크로·휴장). 셀 → `/reports/{date}`.
 - 데이터: `/api/stock-report/record-summary?days=` · `gap-stats` · `top-picks` ·
   `sector-report/top-themes` · `market-holidays` · `macro-events`.
