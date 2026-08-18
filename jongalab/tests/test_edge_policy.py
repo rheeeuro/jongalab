@@ -308,27 +308,50 @@ def test_supply_band_as_benchmark_skips_selector_gates():
 
 
 # ── 강등 게이트 (check_demotion) ──
-# 역할별로 recent_mean_net 의 부호 의미가 반대다. 부호를 공유하면 잘 작동하는 veto 를 매일
-# 강등 후보로 올린다(2026-07-28 veto_bio_kosdaq recent_mean_net=-0.158 오탐 알림).
+# 자는 recent_alpha(시장 회귀 잔차)다. 역할별로 부호 의미가 반대이고, 부호를 공유하면 잘
+# 작동하는 veto 를 매일 강등 후보로 올린다(2026-07-28 veto_bio_kosdaq 오탐 알림).
 
-def _live(role, recent_mean_net, recent_n=29, recent_n_days=10, family="f7_risk"):
-    """live rule. 강등 게이트도 승격과 같은 가중(일 등가중)을 본다."""
+def _live(role, recent_alpha, recent_n=29, recent_n_days=10, family="f7_risk",
+          recent_mean_net=None, beta=0.9):
+    """live rule. 강등 게이트는 recent_alpha 만 본다(절대 recent_mean_net 은 표기용)."""
     return {"name": "r", "family": family, "role": role, "status": "live",
             "stats": {"recent_n": recent_n, "recent_n_days": recent_n_days,
+                      "recent_alpha": recent_alpha, "beta": beta,
                       "recent_mean_net": recent_mean_net,
                       "recent_mean_net_days": recent_mean_net}}
 
 
 def test_veto_demotion_sign_is_inverted_vs_selector():
-    # veto 의 mean_net 은 '제외한' 종목의 순수익 — 음수는 손실을 제대로 걸러낸 것(승격 조건과
-    # 같은 방향)이라 강등이 아니고, 양수여야 이기는 종목을 버리는 중 = 강등 검토.
+    # veto 의 alpha 는 '제외한' 종목의 시장 조정 수익 — 음수는 손실을 제대로 걸러낸 것(승격
+    # 조건과 같은 방향)이라 강등이 아니고, 양수여야 이기는 종목을 버리는 중 = 강등 검토.
     assert not check_demotion(_live("veto", -0.158))["demote_candidate"]
     assert check_demotion(_live("veto", 0.42))["demote_candidate"]
 
 
-def test_selector_demoted_on_negative_recent_mean():
+def test_selector_demoted_on_negative_recent_alpha():
     assert check_demotion(_live("selector", -0.5, family="f4_laggard"))["demote_candidate"]
     assert not check_demotion(_live("selector", 0.5, family="f4_laggard"))["demote_candidate"]
+
+
+def test_defensive_low_beta_rule_survives_a_bull_market():
+    """저beta 방어형 룰 보호 — 이 게이트가 초과수익(beta=1)이 아니라 alpha 를 쓰는 이유.
+
+    상승장에서 시장(+3%/일)을 덜 따라가 절대 +1%/일에 그친 beta=0.2 룰은 초과 기준으로
+    -2%/일이라 죽지만, 시장 몫을 beta 만큼만 빼면 alpha=+0.4%/일 로 살아 있다.
+    목표가 '잃지 않고 꾸준히'인 이상 이건 지켜야 할 룰이다.
+    """
+    rule = _live("selector", 0.4, family="f4_laggard", recent_mean_net=1.0, beta=0.2)
+    assert not check_demotion(rule)["demote_candidate"]
+
+
+def test_bull_market_does_not_hide_a_dead_rule():
+    """반대 방향 — 절대 수익이 플러스여도 시장 몫을 빼면 마이너스면 강등 후보다.
+
+    절대 자(recent_mean_net<0)로는 상승 구간에 어떤 룰도 걸리지 않아 강등 감시가 무력해졌다
+    (2026-08-04~08-14 실측 0/9). alpha 는 그 구간에도 작동한다.
+    """
+    rule = _live("selector", -0.8, family="f4_laggard", recent_mean_net=1.875, beta=1.5)
+    assert check_demotion(rule)["demote_candidate"]
 
 
 def test_benchmark_never_demote_candidate():
@@ -339,9 +362,17 @@ def test_benchmark_never_demote_candidate():
 def test_demotion_requires_min_sample_and_days():
     assert not check_demotion(_live("veto", 0.42, recent_n=19))["demote_candidate"]
     assert not check_demotion(_live("veto", 0.42, recent_n_days=4))["demote_candidate"]
-    assert not check_demotion(_live("veto", None))["demote_candidate"]
     assert not check_demotion({"name": "r", "family": "f7_risk", "role": "veto",
                                "status": "live", "stats": None})["demote_candidate"]
+
+
+def test_missing_alpha_is_fail_closed_not_demoted():
+    # 초과 기준선을 못 구하면 recent_alpha 가 None 이다. 강등은 사람이 승인하는 되돌리기
+    # 어려운 전이라, 판정 불가를 '문제 있음'으로 읽지 않는다.
+    assert not check_demotion(_live("veto", None))["demote_candidate"]
+    # 절대 수익이 아무리 나빠도 alpha 가 없으면 후보가 아니다(자를 바꾼 계약 고정).
+    assert not check_demotion(
+        _live("selector", None, family="f4_laggard", recent_mean_net=-5.0))["demote_candidate"]
 
 
 # ── 일 클러스터 t 게이트 (selector 전용, 2026-07-28) ──
@@ -541,14 +572,20 @@ def test_control_stats_never_change_the_verdict():
     assert check_promotion(rule, [])["eligible"]
 
 
-def test_demotion_uses_same_weighting_as_promotion():
-    # 승격은 종목-일, 강등은 일 등가중이면 두 문턱 사이에 모순 구간이 생긴다.
+def test_demotion_ignores_absolute_series_entirely():
+    """강등 자는 recent_alpha 하나다 — 절대 계열은 판정에 개입하지 않는다.
+
+    승격(절대 mean_net>0)과 강등(alpha)이 서로 다른 자를 쓰는 건 의도된 것이다: 승격은
+    "돈을 버는가", 강등은 "시장 덕이 아니라 실력으로 벌던 게 끊겼는가"를 묻는다.
+    절대 계열을 강등에 쓰면 시장과 동기화돼 하락 구간엔 전 룰이, 상승 구간엔 아무도 안 걸린다.
+    """
     r = {"name": "r", "family": "f4_laggard", "role": "selector", "status": "live",
-         "stats": {"recent_n": 29, "recent_n_days": 10,
-                   "recent_mean_net": 0.8, "recent_mean_net_days": -0.3}}
-    assert not check_demotion(r)["demote_candidate"]
-    r["stats"]["recent_mean_net"] = -0.2
-    assert check_demotion(r)["demote_candidate"]
+         "stats": {"recent_n": 29, "recent_n_days": 10, "recent_alpha": 0.3,
+                   "recent_mean_net": -9.0, "recent_mean_net_days": -9.0}}
+    assert not check_demotion(r)["demote_candidate"]     # 절대가 아무리 나빠도 alpha 양수면 유지
+    r["stats"]["recent_alpha"] = -0.05
+    r["stats"]["recent_mean_net"] = 9.0
+    assert check_demotion(r)["demote_candidate"]         # 절대가 아무리 좋아도 alpha 음수면 후보
 
 
 # ── 승격 게이트 정책 (2026-07-28: strict / experimental) ──

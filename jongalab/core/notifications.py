@@ -312,12 +312,14 @@ def send_edge_rule_alert(
                   면제되는 experimental 정책에서 발견 판정만으로 승격 가능해진 건이다.
     exec_pending: 집행 설계 필요 — 통계는 확증됐지만 선정 시점(13~15시) 실행 불가 피처를 써서
                   승격이 막힌 candidate(집행 시점 재설계 후보). 통계 탈락이 아니므로 종결이 아니다.
-    demotions:    강등 검토 — live rule 의 최근 창 성적. **역할별 부호가 반대**다
-                  (selector 는 매수 종목 mean_net<0, veto 는 제외 종목 mean_net>0).
+    demotions:    강등 검토 — live rule 의 최근 창 성적. 판정 자는 **시장 조정 alpha**
+                  (절대 수익은 시장과 동기화되고, 초과수익은 beta=1 을 강제해 저beta 방어형
+                  룰을 죽인다 — core.edge_policy.check_demotion). **역할별 부호가 반대**다
+                  (selector 는 매수 종목 alpha<0, veto 는 제외 종목 alpha>0).
                   승격과 달리 **판정 일정 밖이라 매 평일 재검사**된다 — 조건이 유지되는 동안
                   같은 알림이 반복된다(그 사실을 푸터에 명시).
     각 항목: {name, family, n, mean_net, ci_low[, stage, mean_net_days, confirm_mean_net,
-    mean_exc, reason]}.
+    mean_exc, reason, alpha, beta, down_day_mean, down_day_n]}.
     전부 비면 전송하지 않는다.
     """
     exec_pending = exec_pending or []
@@ -362,6 +364,14 @@ def send_edge_rule_alert(
             mn = r.get("mean_net")
             if mn is not None and (mn > 0) != (mnd > 0):
                 line += " ⚠️쏠림(부호 상충 — 대체효과·꼬리 재계산 필요)"
+        # 강등 게이트가 실제로 본 값 — 절대 수익이 아니라 **시장 조정 alpha** 다.
+        # beta 와 하락일 성적을 함께 찍어 "장이 나빠서인가 룰이 죽었나"를 줄에서 가른다.
+        if r.get("alpha") is not None:
+            line += f"\n  ↳ 판정값 alpha {_pct(r.get('alpha'))}"
+            if r.get("beta") is not None:
+                line += f" (beta {r['beta']:+.2f})"
+            if r.get("down_day_mean") is not None:
+                line += f", 하락일 {_pct(r.get('down_day_mean'))}(n={r.get('down_day_n')})"
         return line
 
     try:

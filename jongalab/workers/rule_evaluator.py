@@ -15,13 +15,16 @@
      (프론트 '승격후보' 배지가 이 값을 렌더링) → 텔레그램 알림:
        승격 후보(게이트 전체 충족) / 집행 설계 필요(통계는 충족, 선정 시점 실행 불가 피처) /
        강등 검토(core.edge_policy.check_demotion — live 비대조군, 최근 10거래일 창
-       n≥20·거래일≥5 + **역할별 부호**: selector 는 매수 종목 mean_net<0, veto 는 제외 종목
-       mean_net>0(이기는 종목을 버리는 중)일 때. benchmark 는 제외 — 실탄이 아닌 페이퍼
+       n≥20·거래일≥5 + **역할별 부호**: selector 는 매수 종목 recent_alpha<0, veto 는 제외 종목
+       recent_alpha>0(이기는 종목을 버리는 중)일 때. 자가 절대 수익이 아니라 **시장 회귀
+       잔차(alpha)** 인 이유는 절대 수익이 시장과 동기화돼 하락 구간엔 전 룰을 후보로 올리고
+       상승 구간엔 아무도 못 걸렀기 때문이다. benchmark 는 제외 — 실탄이 아닌 페이퍼
        기준선이라 유지 비용이 없다). 승격/집행설계는 판정일 1회이며 **어느 판정일인지는
        정책이 정한다** — strict 는 확인창 판정일, experimental 은 라우터 승격에서 판정 일정이
        면제되므로 발견 판정일에 알린다(두 경로가 어긋나면 화면만 '검증 통과'가 된다).
        **강등은 판정 일정(sql/39) 밖이라 매 평일 재검사**되어 조건이 유지되는 동안 반복된다 —
-       알림에 일 등가중 최근 평균을 병기해 쏠림(부호 상충)을 눈으로 걸러낸다.
+       알림에 판정값 alpha·beta·하락일 성적과 일 등가중 최근 평균을 병기해, 쏠림(부호 상충)과
+       "장이 나빠서인가 룰이 죽었나"를 눈으로 걸러낸다.
      실제 전이는 관리자 API 수동 승인.
 """
 import logging
@@ -62,6 +65,7 @@ _CI_Z = 1.64                     # 단측 95% 정규 근사
 _RECENT_DAYS = 10                # 강등 감시: 최근 창(거래일 수) — stats.recent_* 산출 폭
                                  # 강등 판정 문턱(표본·거래일·부호)은 core.edge_policy.check_demotion
 _LABEL_RETRY_DEADLINE_DAYS = 14  # 결과 라벨 미도래 재시도 마감 — 초과 시 n=0 sentinel 로 종결
+_FIT_MIN_DAYS = 5                # 시장 회귀(alpha·beta) 최소 거래일 — 미만이면 추정하지 않는다
 
 
 def _score_rule_date(rule: dict, rows: list[dict], market: dict | None) -> dict | None:
@@ -106,6 +110,35 @@ def _day_cluster_t(day_means: list[float]) -> tuple[float | None, float | None]:
     return mean_days, mean_days / (sd / math.sqrt(len(day_means)))
 
 
+def _market_fit(pairs: list[tuple[float, float]]) -> tuple:
+    """(그날 룰 수익, 그날 시장) 쌍을 회귀해 alpha·beta·t(alpha) 를 낸다.
+
+        룰 일수익 = alpha + beta x 시장 + eps
+
+    **초과수익(mean_exc)은 beta=1 을 강제한 특수케이스다.** 시장을 덜 따라가는(저beta) 룰은
+    상승장에서 초과가 구조적으로 음수로 찍히지만, beta 를 추정해 빼면 "상승장엔 덜 벌어도
+    하락장엔 버티는" 성질이 alpha 양수로 남는다. 강등 게이트가 이 alpha 를 쓴다.
+    시장은 그날 **자기제외 유니버스 평균**(초과 계열과 같은 기준선)이라 룰 자신이 기준선에
+    섞여 beta 가 부풀지 않는다. 비용은 룰 쪽에만 차감돼 alpha 가 흡수한다(순수익 기준 alpha).
+
+    표본 부족(<_FIT_MIN_DAYS 거래일)이나 시장 분산 0 이면 (None, None, None) — fail-closed.
+    근거·실측: docs/history/edge-ledger.md
+    """
+    n = len(pairs)
+    if n < _FIT_MIN_DAYS:
+        return None, None, None
+    mx = sum(x for _, x in pairs) / n
+    my = sum(y for y, _ in pairs) / n
+    sxx = sum((x - mx) ** 2 for _, x in pairs)
+    if sxx <= 0:
+        return None, None, None
+    beta = sum((y - my) * (x - mx) for y, x in pairs) / sxx
+    alpha = my - beta * mx
+    s2 = sum((y - (alpha + beta * x)) ** 2 for y, x in pairs) / (n - 2)
+    se_a = math.sqrt(s2 * (1 / n + mx * mx / sxx)) if s2 > 0 else 0.0
+    return alpha, beta, (alpha / se_a if se_a > 0 else None)
+
+
 def _slice_sample_days(daily_rows: list[dict], start: int, end: int | None) -> list[dict]:
     """표본이 있는 거래일만 세어 [start, end) 구간의 daily_rows 를 잘라낸다.
 
@@ -127,13 +160,16 @@ def _slice_sample_days(daily_rows: list[dict], start: int, end: int | None) -> l
 def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> dict:
     """registered_at 이후 채점 결과에서 누적 통계 재계산(비용 차감 후 순수익 기준).
 
-    두 계열을 함께 낸다 — 재는 자가 다르면 답도 다르기 때문에 이름으로 구분한다.
+    세 계열을 함께 낸다 — 재는 자가 다르면 답도 다르기 때문에 이름으로 구분한다.
       · 원시(mean_net·ci_low·t_days)     : 절대 순수익. **승격·확인창·강등 게이트가 전부 이
         계열만 쓴다**(2026-08-04 사용자 결정 — "평균보다 크지 않아도 안정적으로 수익이 나면
         그만"). 이전에는 유의성만 초과 계열로 쟀고 대조군 우위 조건이 따로 있었다(둘 다 제거).
       · 초과(mean_exc·ci_low_exc·t_days_exc): 그날 **유니버스 자기제외 평균** 대비 초과분.
         **게이트에 쓰지 않는다 — 룰 상세 화면 표기·수동 검토 전용 진단값**이다. 계산을 남겨두는
         이유는 "장 덕에 올랐나"를 사람이 눈으로 확인할 수단은 여전히 필요하기 때문이다.
+      · 시장 회귀(beta·alpha·t_alpha·recent_alpha·down_day_mean): 초과 계열이 beta=1 을 강제해
+        **저beta 방어형 룰을 상승장에서 부당하게 죽이는** 문제를 푼다. **강등 게이트는
+        recent_alpha 만** 쓰고 나머지는 표기용이다.
 
     왜 '자기제외'인가(2026-07-28): 대조군(=selected top10)을 기준선으로 쓰면 rule 매칭
     종목이 평균 54%(일부 100%) 그 안에 들어 있어 **자기 자신을 빼는** 꼴이 된다. 분산이
@@ -144,7 +180,7 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
 
     uni_totals: {report_date: (라벨 합계, 종목 수)} — 없으면 초과 계열은 None(표기만 '—' 가 된다).
     """
-    nets, lows, dated, dated_exc = [], [], [], []
+    nets, lows, dated, dated_exc, day_mkt = [], [], [], [], []
     updated_through = None
     for dr in daily_rows:
         updated_through = dr["report_date"]  # 오래된→최신 정렬이라 마지막이 최신
@@ -166,6 +202,9 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
                 base = (s - sum(m["ret"] for m in matched)) / rest_n
                 for m in matched:
                     dated_exc.append((d, m["ret"] - base))
+                # 시장 회귀용 (날짜, 그날 룰 일수익, 그날 시장) — alpha·beta 추정에 쓴다.
+                day_mkt.append(
+                    (d, sum(m["ret"] - EDGE_COST_PCT for m in matched) / len(matched), base))
 
     n = len(nets)
     if n == 0:
@@ -173,6 +212,8 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
                 "ci_low": None, "mean_net_days": None, "t_days": None,
                 "n_exc": 0, "mean_exc": None, "ci_low_exc": None,
                 "mean_exc_days": None, "t_days_exc": None,
+                "beta": None, "alpha": None, "t_alpha": None, "recent_alpha": None,
+                "down_day_n": 0, "down_day_mean": None,
                 "worst_low_ret": None, "updated_through": updated_through}
 
     mean_net = sum(nets) / n
@@ -186,8 +227,9 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
     recent_dates = set(sorted({d for d, _ in dated})[-_RECENT_DAYS:])
     recent = [net for d, net in dated if d in recent_dates]
     recent_mean = sum(recent) / len(recent) if recent else None
-    # 일 등가중 최근 평균 — 강등 게이트가 쓴다. 시드가 하루 총액 고정·종목 등분이라
-    # (seed_allocator: target=min(seed/n, cap)) 계좌 실현치는 종목-일 가중이 아니라 이 값이다.
+    # 일 등가중 최근 평균 — 알림 병기용 진단값(게이트는 recent_alpha 를 쓴다). 시드가 하루
+    # 총액 고정·종목 등분이라(seed_allocator: target=min(seed/n, cap)) 계좌 실현치는 종목-일
+    # 가중이 아니라 이 값이다. 종목-일 가중과 부호가 갈리면 쏠림 신호.
     _recent_by_day: dict = {}
     for d, net in dated:
         if d in recent_dates:
@@ -221,6 +263,24 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
     else:
         mean_exc = ci_low_exc = mean_exc_days = t_days_exc = None
 
+    # ── 시장 회귀 계열 (alpha·beta) — **강등 게이트가 recent_alpha 를 쓴다** ──
+    # 절대 recent_mean_net 은 시장과 동기화돼 하락 구간엔 멀쩡한 룰까지 한꺼번에 강등 후보로
+    # 올리고 상승 구간엔 아무도 못 걸렀다. 초과수익(beta=1 강제)은 반대로 저beta 방어형 룰을
+    # 상승장에서 부당하게 죽인다. beta 를 추정해 빼는 alpha 가 양쪽을 다 피한다.
+    alpha, beta, t_alpha = _market_fit([(y, x) for _, y, x in day_mkt])
+    # **beta 는 전체 표본, alpha 만 최근 창.** 최근 10거래일로 beta 까지 추정하면 se(beta)≈0.3
+    # 이라 판정이 불가능하다. beta 는 룰의 구조적 성질(롱온리 종가베팅이라 대개 0.5~1.5)이라
+    # 천천히 변하고, "엣지가 사라졌다"는 alpha 가 음수로 도는 것으로 나타난다.
+    recent_pairs = [(y, x) for d, y, x in day_mkt if d in recent_dates]
+    recent_alpha = None
+    if beta is not None and recent_pairs:
+        k = len(recent_pairs)
+        recent_alpha = (sum(y for y, _ in recent_pairs) / k
+                        - beta * (sum(x for _, x in recent_pairs) / k))
+    # 하락일 성적 — "상승장엔 덜 벌어도 하락장엔 안 잃는가"를 직접 재는 값(표기 전용).
+    # alpha 와 달리 모형 가정이 없어 사람이 눈으로 확인하기 쉽다.
+    down = [y for _, y, x in day_mkt if x < 0]
+
     return {
         "n": n,
         # 라벨 표본이 있는 서로 다른 거래일 수 — 같은 날 표본은 시장 무브로 상관되어
@@ -239,6 +299,15 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
         "ci_low_exc": round(ci_low_exc, 3) if ci_low_exc is not None else None,
         "mean_exc_days": round(mean_exc_days, 3) if mean_exc_days is not None else None,
         "t_days_exc": round(t_days_exc, 2) if t_days_exc is not None else None,
+        # ── 시장 회귀 계열 — beta·alpha·t_alpha 는 누적 표본, recent_alpha 는 최근 창 ──
+        # recent_alpha 만 게이트(check_demotion)가 쓰고 나머지는 화면·수동 검토용 진단값이다.
+        "beta": round(beta, 3) if beta is not None else None,
+        "alpha": round(alpha, 3) if alpha is not None else None,
+        "t_alpha": round(t_alpha, 2) if t_alpha is not None else None,
+        "recent_alpha": round(recent_alpha, 3) if recent_alpha is not None else None,
+        # 시장이 내린 날(자기제외 유니버스 평균<0)만 모은 성적 — 표기 전용.
+        "down_day_n": len(down),
+        "down_day_mean": round(sum(down) / len(down), 3) if down else None,
         "worst_low_ret": round(min(lows), 3) if lows else None,
         "updated_through": updated_through,
         "recent_n": len(recent),
@@ -326,7 +395,9 @@ def run():
         try:
             uni_totals_by_label[label] = get_universe_label_totals(label)
         except ValueError as e:
-            logger.warning(f"초과수익 기준선 로드 실패({label}): {e} — 해당 rule 은 원시 계열만 채점")
+            logger.warning(
+                f"초과수익 기준선 로드 실패({label}): {e} — 해당 rule 은 원시 계열만 채점되고, "
+                "recent_alpha 가 비어 **강등 감시가 멈춘다**(fail-closed)")
             uni_totals_by_label[label] = {}
 
     logger.info(f"평가 시작 — 활성 rule {len(rules)}개 × 후보 {len(all_dates)}일 (비용 {EDGE_COST_PCT}%)")
@@ -475,7 +546,11 @@ def run():
             if check_demotion(rule)["demote_candidate"]:
                 demotions.append({
                     "name": rule["name"], "family": rule["family"], "role": rule_role(rule),
-                    # 알림에도 게이트가 판단한 값(종목-일 가중)을 그대로 보여준다
+                    # 게이트가 판단한 값(시장 조정 alpha)과 그 재료(beta·하락일 성적)를 함께 —
+                    # alpha 만 보면 "장이 나빠서인가"를 사람이 되짚을 수 없다.
+                    "alpha": stats["recent_alpha"], "beta": stats["beta"],
+                    "down_day_mean": stats["down_day_mean"], "down_day_n": stats["down_day_n"],
+                    # 절대 수익(종목-일 가중)은 이제 판정 자가 아니라 참고값이다.
                     "n": stats["recent_n"], "mean_net": stats["recent_mean_net"],
                     # 일 등가중 최근 평균을 병기 — 두 가중의 부호가 갈리면 쏠림(몇 종목의
                     # 급등이 만든 평균)이라 강등 근거가 못 된다. 게이트 조건은 바꾸지 않고
@@ -487,7 +562,9 @@ def run():
         logger.info(
             f"[건강지표] {rule['name']} ({rule['family']}/{rule['status']}) — "
             f"신규 {rule.get('_new_scored', 0)}일, n={stats['n']}, 평균순수익={stats['mean_net']}, "
-            f"승률={stats['win_rate']}, CI하한={stats['ci_low']}, 최악저가={stats['worst_low_ret']}"
+            f"승률={stats['win_rate']}, CI하한={stats['ci_low']}, alpha={stats['alpha']}, "
+            f"beta={stats['beta']}, 최근alpha={stats['recent_alpha']}, "
+            f"최악저가={stats['worst_low_ret']}"
         )
 
     if promotions or demotions or exec_pending:

@@ -468,6 +468,7 @@ def check_confirmation(confirm_stats: dict | None, role: str = "selector") -> di
 # ── 강등 게이트 (live → retired) ──
 # 최근 창(rule_evaluator._RECENT_DAYS 거래일) 표본의 최소 요건. 종목-일 표본만 보면 하루
 # 시장 무브가 창을 통째로 뒤집는 오탐 강등이 난다(사례: docs/history/edge-ledger.md).
+# 판정 자는 recent_alpha(시장 회귀 잔차) — 이유는 check_demotion docstring.
 DEMOTE_MIN_N = 20
 DEMOTE_MIN_DAYS = 5
 
@@ -475,9 +476,21 @@ DEMOTE_MIN_DAYS = 5
 def check_demotion(rule: dict) -> dict:
     """강등 검토 대상 판정 — 평가기 알림이 쓰는 단일 게이트.
 
-    **역할별로 mean_net 의 부호 의미가 반대다**:
-      - selector: 매수한 종목의 순수익 → 음수면 돈을 잃는 중 = 강등 검토
-      - veto    : **제외한** 종목의 순수익 → 양수면 이기는 종목을 버리는 중 = 강등 검토
+    ── 자는 **시장 회귀 잔차 `recent_alpha`** 다(절대 수익도, 초과수익도 아니다) ──
+    강등이 물어야 하는 건 "엣지가 사라졌는가"이고, 그러려면 성적에서 **그 기간 장이 움직인
+    몫**을 빼야 한다. 후보였던 자 셋 중 앞 둘은 각각 반대 방향으로 틀린다:
+      · 절대 `recent_mean_net`: 시장과 동기화된다. 하락 구간엔 멀쩡한 룰까지 한꺼번에 후보로
+        올리고, 상승 구간엔 성적이 나쁜 룰도 하나도 못 거른다(강등 감시가 무력해진다).
+      · 초과 `mean_exc`: `룰 - 시장` 이라 **beta=1 을 강제**한다. 시장을 덜 따라가는(저beta)
+        방어형 룰 — 상승장엔 덜 벌어도 하락장엔 버티는 룰 — 이 상승장에서 구조적으로 음수가
+        되어 부당하게 죽는다. 목표가 "잃지 않고 꾸준히"인 이상 그건 지켜야 할 룰이다.
+    `alpha`(=`룰 - beta x 시장`)는 beta 를 추정해 빼므로 둘 다 피한다. 산출은
+    `workers/rule_evaluator._market_fit` — beta 는 누적 표본, alpha 만 최근 창에서 다시 잡는다.
+    근거·실측: docs/history/edge-ledger.md
+
+    **역할별로 alpha 의 부호 의미가 반대다**:
+      - selector: 매수한 종목의 시장 조정 수익 → 음수면 시장 몫을 빼고 나면 잃는 중 = 강등 검토
+      - veto    : **제외한** 종목의 시장 조정 수익 → 양수면 이기는 종목을 버리는 중 = 강등 검토
                   (음수는 veto 가 손실을 제대로 걸러냈다는 뜻 — check_promotion 의 승격 조건과
                   같은 방향이다. 부호를 selector 와 공유하면 잘 작동하는 veto 를 매일 강등
                   후보로 올린다: veto_bio_kosdaq 이 recent_mean_net=-0.158 로 오탐 알림.)
@@ -494,18 +507,19 @@ def check_demotion(rule: dict) -> dict:
     stats = rule.get("stats") or {}
     n = stats.get("recent_n") or 0
     n_days = stats.get("recent_n_days") or 0
-    # 승격 게이트와 같은 자(종목-일 가중) — 두 문턱이 어긋나면 승격 기준으론 흑자인데 강등
-    # 기준으론 적자인 구간이 생긴다. 시드 배분을 반영하지 않는 이유는 check_promotion 주석 참조
-    # (채점이 유니버스 전체 대상이고, 배분은 바뀌므로 측정을 집행과 분리한다).
-    mean_net = stats.get("recent_mean_net")
-    if n < DEMOTE_MIN_N or n_days < DEMOTE_MIN_DAYS or mean_net is None:
+    # ⚠️ recent_alpha 는 초과 기준선(유니버스 자기제외 평균)이 있어야 산출된다 — 없으면 None 이고
+    # 그때는 **강등 후보로 올리지 않는다**(fail-closed). 강등은 사람이 승인하는 되돌리기 어려운
+    # 전이라, 판정 불가를 '문제 있음'으로 읽는 쪽이 더 위험하다. 기준선 로드 실패는
+    # rule_evaluator 가 경고 로그로 남긴다.
+    alpha = stats.get("recent_alpha")
+    if n < DEMOTE_MIN_N or n_days < DEMOTE_MIN_DAYS or alpha is None:
         return {"demote_candidate": False, "reasons": []}
 
-    if role == "selector" and mean_net < 0:
+    if role == "selector" and alpha < 0:
         return {"demote_candidate": True,
-                "reasons": [f"최근 {n_days}거래일 매수 종목 평균순수익 {mean_net}% < 0"]}
-    if role == "veto" and mean_net > 0:
+                "reasons": [f"최근 {n_days}거래일 매수 종목 시장조정수익(alpha) {alpha}% < 0"]}
+    if role == "veto" and alpha > 0:
         return {"demote_candidate": True,
-                "reasons": [f"최근 {n_days}거래일 제외 종목 평균순수익 {mean_net}% > 0 — "
+                "reasons": [f"최근 {n_days}거래일 제외 종목 시장조정수익(alpha) {alpha}% > 0 — "
                             "veto 가 이기는 종목을 버리는 중"]}
     return {"demote_candidate": False, "reasons": []}

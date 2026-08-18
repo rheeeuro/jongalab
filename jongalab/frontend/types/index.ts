@@ -419,6 +419,15 @@ export interface EdgeRuleStats {
   ci_low_exc?: number | null;    // 초과 기준 CI 하한
   mean_exc_days?: number | null; // 초과 일 등가중 평균(%)
   t_days_exc?: number | null;    // 초과 일 클러스터 t
+  // ── 시장 회귀 계열 — 초과 계열이 beta=1 을 강제해 저beta 방어형 룰을 상승장에서 죽이는
+  // 문제를 푼다. **recent_alpha 만 강등 게이트가 쓰고**(core/edge_policy.check_demotion)
+  // 나머지는 화면·수동 검토용 진단값이다.
+  beta?: number | null;          // 시장 민감도 — 룰수익 = alpha + beta x 시장
+  alpha?: number | null;         // 시장 몫을 beta 만큼 뺀 잔차(%, 누적 표본)
+  t_alpha?: number | null;       // alpha 의 t
+  recent_alpha?: number | null;  // 최근 창 alpha — 강등 게이트(selector <0 / veto >0)
+  down_day_n?: number;           // 시장이 내린 날의 거래일 수
+  down_day_mean?: number | null; // 그 날들의 평균 순수익(%) — "하락장에도 버티는가"
   worst_low_ret: number | null; // 매칭 종목 익일 저가 최악값(꼬리)
   updated_through: string | null;
   recent_n?: number;            // 강등 감시 최근 창(최근 10거래일) 표본 수

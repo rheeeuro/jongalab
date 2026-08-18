@@ -33,8 +33,9 @@ def test_raw_series_subtracts_cost_and_counts_days():
 
 def test_empty_returns_none_shape_including_excess_keys():
     s = _recompute_stats([_day("2026-07-01", [])])
-    assert s["n"] == 0 and s["n_exc"] == 0
-    for k in ("mean_net", "ci_low", "t_days", "mean_exc", "ci_low_exc", "t_days_exc"):
+    assert s["n"] == 0 and s["n_exc"] == 0 and s["down_day_n"] == 0
+    for k in ("mean_net", "ci_low", "t_days", "mean_exc", "ci_low_exc", "t_days_exc",
+              "beta", "alpha", "t_alpha", "recent_alpha", "down_day_mean"):
         assert s[k] is None
 
 
@@ -134,3 +135,78 @@ def test_slice_is_stable_when_later_days_are_appended():
     base = [_day(f"d{i}", [_m("A", 1.0)]) for i in range(4)]
     grown = base + [_day("d9", [_m("A", 9.0)])]
     assert _slice_sample_days(base, 0, 3) == _slice_sample_days(grown, 0, 3)
+
+
+# ── 시장 회귀 계열(alpha·beta) — 강등 게이트가 recent_alpha 를 쓴다 ──
+# 초과수익(mean_exc)은 beta=1 을 강제해 저beta 방어형 룰을 상승장에서 죽인다. 그 문제를
+# 푸는 게 alpha 이고, 아래 두 테스트가 "초과로는 죽지만 alpha 로는 산다"를 못 박는다.
+
+def _mkt_days(pairs, code="A"):
+    """(시장 평균, 룰 종목 수익) 목록 → (daily_rows, uni_totals).
+
+    유니버스는 룰 매칭 1종목 + 나머지 2종목으로 만든다. 나머지 2종목 합을 조절해
+    자기제외 평균(= 그날 시장)이 원하는 값이 되게 한다.
+    """
+    rows, totals = [], {}
+    for i, (mkt, ret) in enumerate(pairs):
+        d = f"2026-07-{i + 1:02d}"
+        rows.append(_day(d, [_m(code, ret)]))
+        totals[d] = (ret + mkt * 2, 3)   # 자기제외: (합 - ret)/2 = mkt
+    return rows, totals
+
+
+def test_beta_and_alpha_recover_a_known_line():
+    # 룰수익 = 0.5 + 0.5 x 시장 을 정확히 따르는 표본 → beta 0.5, alpha 0.5 - 비용.
+    mkts = [-2.0, -1.0, 0.0, 1.0, 2.0, 3.0]
+    rows, totals = _mkt_days([(m, 0.5 + 0.5 * m) for m in mkts])
+    s = _recompute_stats(rows, totals)
+    assert s["beta"] == 0.5
+    # alpha 는 룰 쪽에만 비용이 차감되므로 그만큼 내려간다(순수익 기준 alpha).
+    assert s["alpha"] == round(0.5 - EDGE_COST_PCT, 3)
+
+
+def test_low_beta_defensive_rule_has_negative_excess_but_positive_alpha():
+    """사용자가 짚은 반례 — 상승장에서 시장보다 덜 벌지만 하락장엔 플러스인 룰.
+
+    시장이 대체로 강세(+3%)인 구간에서 이 룰은 +1% 에 그쳐 **초과수익은 음수**다.
+    beta 가 낮아서 그런 것이고 alpha 는 양수다 — 초과 기준 강등은 이 룰을 죽이고,
+    alpha 기준 강등은 살린다.
+    """
+    rows, totals = _mkt_days([(3.0, 1.0), (3.0, 1.0), (-2.0, 0.0),
+                              (3.0, 1.0), (-2.0, 0.0), (3.0, 1.0)])
+    s = _recompute_stats(rows, totals)
+    assert s["mean_exc"] < 0          # 초과 기준으로는 죽는다
+    assert s["beta"] < 0.5            # 시장을 덜 따라간다
+    assert s["alpha"] > 0             # 시장 몫을 beta 만큼만 빼면 양수
+    assert s["recent_alpha"] > 0      # 강등 게이트가 보는 값도 양수
+    # 하락일(시장<0) 성적이 손실이 아니다 — "잃지 않고" 를 직접 재는 표기값.
+    assert s["down_day_n"] == 2 and s["down_day_mean"] == round(-EDGE_COST_PCT, 3)
+
+
+def test_high_beta_rule_is_negative_alpha_even_while_absolute_is_positive():
+    # 상승장 덕에 절대 수익은 플러스지만 시장 몫을 빼면 마이너스인 고beta 룰.
+    # 절대 자(recent_mean_net<0)로는 상승 구간에 절대 안 걸리는 유형이다.
+    rows, totals = _mkt_days([(2.0, 2.0), (3.0, 3.2), (2.0, 1.8),
+                              (4.0, 4.5), (1.0, 0.5), (3.0, 3.0)])
+    s = _recompute_stats(rows, totals)
+    assert s["mean_net"] > 0          # 절대 수익은 플러스
+    assert s["beta"] > 1.0            # 시장을 증폭해서 탄다
+    assert s["alpha"] < 0 and s["recent_alpha"] < 0   # 시장 몫을 빼면 마이너스
+
+
+def test_market_fit_needs_min_days_and_variance():
+    # 거래일 4일(<_FIT_MIN_DAYS=5) → 추정하지 않는다(fail-closed).
+    rows, totals = _mkt_days([(1.0, 1.0), (2.0, 2.0), (3.0, 3.0), (4.0, 4.0)])
+    s = _recompute_stats(rows, totals)
+    assert s["beta"] is None and s["alpha"] is None and s["recent_alpha"] is None
+    # 시장 분산이 0 이면 기울기를 못 구한다.
+    rows, totals = _mkt_days([(1.0, 0.5), (1.0, 1.5), (1.0, 0.5), (1.0, 1.5), (1.0, 1.0)])
+    s = _recompute_stats(rows, totals)
+    assert s["beta"] is None and s["recent_alpha"] is None
+
+
+def test_market_fit_is_none_without_universe_totals():
+    # 초과 기준선이 없으면 시장 계열도 못 만든다 → 강등 게이트가 fail-closed 로 멈춘다.
+    rows = [_day(f"2026-07-{i:02d}", [_m("A", 1.0)]) for i in range(1, 7)]
+    s = _recompute_stats(rows)
+    assert s["beta"] is None and s["recent_alpha"] is None and s["down_day_n"] == 0

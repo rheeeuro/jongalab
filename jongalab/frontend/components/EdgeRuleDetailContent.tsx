@@ -13,7 +13,8 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
-import type { EdgeRuleMatchedDay, EdgeRuleWithDaily } from "@/types";
+import type { EdgeRuleMatchedDay, EdgeRuleStats, EdgeRuleWithDaily } from "@/types";
+import type { StatKey, Tone } from "@/lib/edge";
 import {
   familyMeta,
   roleMeta,
@@ -28,6 +29,7 @@ import {
   isMeasurementOnly,
   retireReason,
   STAT_META,
+  STAT_GROUPS,
   exitLabelText,
   condText,
   fmtT,
@@ -55,6 +57,63 @@ const ACCENT: Record<EdgeRuleWithDaily["status"], string> = {
   candidate: "border-l-slate-400",
   retired: "border-l-slate-300 dark:border-l-slate-600",
 };
+
+// 지표 묶음 머리글 — '누적 성적' 타일과 '지표 설명' 이 같은 컴포넌트를 써서 두 패널의
+// 묶음 이름·순서가 어긋나지 않게 한다(어긋나면 위에서 본 값의 설명을 아래서 못 찾는다).
+function GroupHeading({ group }: { group: (typeof STAT_GROUPS)[number] }) {
+  return (
+    <div className="mb-1.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+      <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300">{group.title}</p>
+      {group.reference && (
+        <span className="rounded bg-slate-200 px-1 py-px text-[9px] font-bold text-slate-500 dark:bg-slate-700 dark:text-slate-400">
+          참고
+        </span>
+      )}
+      <p className="text-[10px] text-slate-400">{group.question}</p>
+    </div>
+  );
+}
+
+// 지표 하나의 표시값. note 가 있으면 타일 밑줄이 STAT_META.short 대신 그걸 쓴다
+// (표본 수처럼 값마다 달라지는 단서는 고정 문구로 못 적는다).
+function statCell(k: StatKey, s: EdgeRuleStats): { v: string; tone?: Tone; note?: string } {
+  switch (k) {
+    case "n":
+      return { v: `${s.n}회` };
+    case "n_days":
+      return { v: s.n_days != null ? `${s.n_days}일` : "—" };
+    case "mean_net":
+      return { v: fmtPct(s.mean_net), tone: retTone(s.mean_net) };
+    case "win_rate":
+      return { v: s.win_rate !== null ? `${Math.round(s.win_rate * 100)}%` : "—" };
+    case "ci_low":
+      return { v: fmtPct(s.ci_low), tone: retTone(s.ci_low) };
+    case "worst_low_ret":
+      return { v: fmtPct(s.worst_low_ret), tone: retTone(s.worst_low_ret) };
+    case "t_days":
+      return { v: fmtT(s.t_days), tone: dayTTone(s.t_days) };
+    // 장 덕 뺀 수익(alpha)은 강등 판단에 쓰는 값이라 참고 계열과 달리 색을 준다.
+    case "alpha":
+      return { v: fmtPct(s.alpha), tone: retTone(s.alpha) };
+    // beta 는 수익률이 아니라 성질이라 색을 주지 않는다(1.5 가 '좋다'는 뜻이 아니다).
+    case "beta":
+      return { v: s.beta != null ? s.beta.toFixed(2) : "—" };
+    case "t_alpha":
+      return { v: fmtT(s.t_alpha) };
+    case "down_day_mean":
+      return {
+        v: fmtPct(s.down_day_mean),
+        tone: retTone(s.down_day_mean),
+        note: s.down_day_n ? `장 빠진 날 ${s.down_day_n}일 기준` : undefined,
+      };
+    case "mean_exc":
+      return { v: fmtPct(s.mean_exc), tone: retTone(s.mean_exc) };
+    case "ci_low_exc":
+      return { v: fmtPct(s.ci_low_exc), tone: retTone(s.ci_low_exc) };
+    case "t_days_exc":
+      return { v: fmtT(s.t_days_exc), tone: dayTTone(s.t_days_exc) };
+  }
+}
 
 function Panel({
   title,
@@ -254,24 +313,29 @@ export function EdgeRuleDetailContent({
         <aside className="space-y-5">
           <Panel title="누적 성적" icon={<Activity className="h-4 w-4" />}>
             {s && s.n > 0 ? (
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { l: STAT_META.n.label, v: `${s.n}회` },
-                  { l: STAT_META.n_days.label, v: s.n_days != null ? `${s.n_days}일` : "—" },
-                  { l: STAT_META.mean_net.label, v: fmtPct(s.mean_net), tone: retTone(s.mean_net) },
-                  { l: STAT_META.win_rate.label, v: s.win_rate !== null ? `${Math.round(s.win_rate * 100)}%` : "—" },
-                  { l: STAT_META.ci_low.label, v: fmtPct(s.ci_low), tone: retTone(s.ci_low) },
-                  { l: STAT_META.t_days.label, v: fmtT(s.t_days), tone: dayTTone(s.t_days) },
-                  // 초과 계열은 적용 조건이 아니라 참고값 — 상세 화면에서만 보여준다.
-                  { l: STAT_META.mean_exc.label, v: fmtPct(s.mean_exc), tone: retTone(s.mean_exc) },
-                  { l: STAT_META.ci_low_exc.label, v: fmtPct(s.ci_low_exc), tone: retTone(s.ci_low_exc) },
-                  { l: STAT_META.t_days_exc.label, v: fmtT(s.t_days_exc), tone: dayTTone(s.t_days_exc) },
-                ].map((x) => (
-                  <div key={x.l} className="rounded-xl bg-slate-50 p-3 dark:bg-[#202027]">
-                    <p className="text-[10px] font-bold text-slate-400">{x.l}</p>
-                    <p className={`mt-1 text-lg font-black tabular-nums ${x.tone ? TONE_TEXT[x.tone] : "text-slate-800 dark:text-slate-100"}`}>
-                      {x.v}
-                    </p>
+              <div className="space-y-4">
+                {STAT_GROUPS.map((g) => (
+                  <div key={g.key}>
+                    <GroupHeading group={g} />
+                    <div className="grid grid-cols-2 gap-2">
+                      {g.keys.map((k) => {
+                        const cell = statCell(k, s);
+                        return (
+                          <div
+                            key={k}
+                            className={`rounded-xl p-3 ${g.reference ? "bg-slate-50/70 dark:bg-[#202027]/60" : "bg-slate-50 dark:bg-[#202027]"}`}
+                          >
+                            <p className="text-[10px] font-bold text-slate-400">{STAT_META[k].label}</p>
+                            <p className={`mt-0.5 text-lg font-black tabular-nums ${cell.tone ? TONE_TEXT[cell.tone] : "text-slate-800 dark:text-slate-100"}`}>
+                              {cell.v}
+                            </p>
+                            <p className="mt-0.5 text-[10px] leading-tight text-slate-400 dark:text-slate-500">
+                              {cell.note ?? STAT_META[k].short}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -283,20 +347,27 @@ export function EdgeRuleDetailContent({
             {s && (
               <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
                 모든 수익률은 세금·수수료를 뺀 값이에요.
-                {s.worst_low_ret !== null && ` · ${STAT_META.worst_low_ret.label} ${fmtPct(s.worst_low_ret)}`}
               </p>
             )}
           </Panel>
 
           <Panel title="지표 설명" icon={<Target className="h-4 w-4" />}>
-            <dl className="space-y-2 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-              {(Object.keys(STAT_META) as (keyof typeof STAT_META)[]).map((k) => (
-                <div key={k}>
-                  <dt className="font-bold text-slate-700 dark:text-slate-200">{STAT_META[k].label}</dt>
-                  <dd>{STAT_META[k].help}</dd>
+            {/* 타일과 **같은 묶음·같은 순서**(STAT_GROUPS) — 위에서 본 자리 그대로 설명을 찾게 한다 */}
+            <div className="space-y-4">
+              {STAT_GROUPS.map((g) => (
+                <div key={g.key}>
+                  <GroupHeading group={g} />
+                  <dl className="space-y-2 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                    {g.keys.map((k) => (
+                      <div key={k}>
+                        <dt className="font-bold text-slate-700 dark:text-slate-200">{STAT_META[k].label}</dt>
+                        <dd>{STAT_META[k].help}</dd>
+                      </div>
+                    ))}
+                  </dl>
                 </div>
               ))}
-            </dl>
+            </div>
           </Panel>
 
           {/* 날짜별 매칭 기록(본문)이 있으면 요약 패널은 중복이라 숨긴다 */}
