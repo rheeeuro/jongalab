@@ -77,6 +77,10 @@ frontend/
   날짜를 앞세우거나 description 에 순매수 금액을 나열하면 "종목명 날짜 종가" 류의
   **시세 조회 쿼리**에만 걸리고 클릭으로 이어지지 않는다. description 은 수치 나열이 아니라
   "왜 골랐나"를 쓴다. 근거: `docs/plan/seo/search-visibility.md`.
+- **파비콘은 `app/icon.png`(192²) · `app/apple-icon.png`(180²) 파일 규약으로만 낸다.**
+  루트 `metadata.icons` 를 선언하지 않는다 — 규약 파일이 해시 URL·불변 캐시 헤더를 받는다.
+  크기는 **48의 배수인 정사각형**이어야 구글이 검색 결과에 쓴다. `public/logo.png`(2048²/935KB)를
+  파비콘으로 가리키면 매 페이지가 그 용량을 받는다(Navbar 로고는 next/image 가 24² 로 최적화).
 - 새 카드 컴포넌트는 `/new-card` 스캐폴드를 사용한다.
 - 타입은 `types/index.ts` 에 정의하고 백엔드 응답과 어긋나지 않게 유지한다.
 - admin 변경(POST)은 클라이언트에서 직접 백엔드를 부르지 않고 **로컬 라우트 핸들러**(`app/api/*`)를

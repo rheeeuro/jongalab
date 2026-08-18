@@ -30,10 +30,11 @@ export const metadata: Metadata = {
     template: "%s · 종가랩",
   },
   description: "AI가 분석해주는 매일의 주식 시장 요약",
-  icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
-  },
+  // 파비콘은 `app/icon.png`(192²) · `app/apple-icon.png`(180²) 파일 규약으로 낸다 —
+  // Next 가 해시 URL + 불변 캐시 헤더를 붙인다. 여기서 `icons` 를 선언하지 않는다.
+  // 구글은 파비콘이 **48의 배수인 정사각형**일 때만 검색 결과에 쓴다.
+  // (`public/logo.png` 2048²/935KB 를 그대로 가리키면 매 페이지가 그 용량을 받는다.
+  //  Navbar 로고는 next/image 가 24² 로 최적화하므로 원본을 그대로 둔다.)
   verification: {
     google: "7Mm6OvLkEKXRXU0eZZune2CuZoZwRdKikruNXDMMH6s",
     other: {
