@@ -17,7 +17,9 @@
        강등 검토(core.edge_policy.check_demotion — live 비대조군, 최근 10거래일 창
        n≥20·거래일≥5 + **역할별 부호**: selector 는 매수 종목 mean_net<0, veto 는 제외 종목
        mean_net>0(이기는 종목을 버리는 중)일 때. benchmark 는 제외 — 실탄이 아닌 페이퍼
-       기준선이라 유지 비용이 없다). 승격/집행설계는 판정일 1회지만
+       기준선이라 유지 비용이 없다). 승격/집행설계는 판정일 1회이며 **어느 판정일인지는
+       정책이 정한다** — strict 는 확인창 판정일, experimental 은 라우터 승격에서 판정 일정이
+       면제되므로 발견 판정일에 알린다(두 경로가 어긋나면 화면만 '검증 통과'가 된다).
        **강등은 판정 일정(sql/39) 밖이라 매 평일 재검사**되어 조건이 유지되는 동안 반복된다 —
        알림에 일 등가중 최근 평균을 병기해 쏠림(부호 상충)을 눈으로 걸러낸다.
      실제 전이는 관리자 API 수동 승인.
@@ -421,6 +423,17 @@ def run():
                     f" (거래일 {d_stats.get('n_days')}, 평균수익 {d_stats.get('mean_net')}%, "
                     f"t {d_stats.get('t_days')}, 참고 초과 {d_stats.get('mean_exc')}%)"
                 )
+                # experimental 은 라우터 승격에서 **판정 일정이 면제**되므로(routers/edge_rule.py)
+                # 발견 통과 시점에 이미 승격 가능하다. 확인창까지 기다려 알리면 화면은 '검증 통과'
+                # 인데 알림만 없는 구간이 최대 CONFIRM_DAYS 거래일 생긴다 → 두 경로를 맞춘다.
+                # strict 에서는 그대로 확인창 판정까지 알리지 않는다.
+                if d_pass and EDGE_PROMO_POLICY == "experimental":
+                    if d_gate["exec_reasons"]:
+                        exec_pending.append(
+                            {**row, "reason": d_gate["exec_reasons"][0], "stage": "discovery"})
+                    else:
+                        promotions.append(
+                            {**row, "mean_exc": d_stats.get("mean_exc"), "stage": "discovery"})
             elif due == "confirm":
                 c_stats = _recompute_stats(
                     _slice_sample_days(rule["_daily_rows"], DISCOVERY_DAYS,
@@ -447,12 +460,14 @@ def run():
                     # 확인창까지 통과 — 이때만 알린다. 실행 가능성은 여기서 다시 확인한다
                     # (통계는 확증됐는데 선정 시점 실행 불가면 '집행 설계 필요' 분기).
                     if gate["exec_reasons"]:
-                        exec_pending.append({**row, "reason": gate["exec_reasons"][0]})
+                        exec_pending.append(
+                            {**row, "reason": gate["exec_reasons"][0], "stage": "confirm"})
                     else:
                         promotions.append({
                             **row,
                             "confirm_mean_net": c_stats.get("mean_net"),   # 판정에 쓴 값
                             "mean_exc": c_stats.get("mean_exc"),           # 참고 표기
+                            "stage": "confirm",
                         })
         elif rule["status"] == "live":
             # 강등 게이트도 core.edge_policy 단일 소스 — 역할별 mean_net 부호가 반대다

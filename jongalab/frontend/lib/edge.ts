@@ -298,6 +298,9 @@ export function isPromotionCandidate(rule: EdgeRule): boolean {
 export const DECISION_LABEL: Record<string, { text: string; tone: 'wait' | 'pass' | 'fail' }> = {
   discovery: { text: '발견 단계', tone: 'wait' },
   confirming: { text: '확인창 진행', tone: 'wait' },
+  // experimental 은 승격에서 확인창이 면제된다(백엔드 routers/edge_rule.py) — 그 정책에서
+  // '확인창 진행'을 찍으면 아직 기다릴 게 남은 것처럼 읽힌다(실제론 바로 승격 가능).
+  discovery_passed: { text: '발견 통과', tone: 'pass' },
   confirmed: { text: '확증 완료', tone: 'pass' },
   discovery_failed: { text: '판정 탈락', tone: 'fail' },
   confirm_failed: { text: '재현 실패', tone: 'fail' },
@@ -315,7 +318,12 @@ export function decisionLabel(rule: EdgeRule): { text: string; tone: 'wait' | 'p
   if (rule.status !== 'candidate' || isMeasurementOnly(rule)) return null;
   const v = rule.decision?.verdict;
   if (v && DECISION_LABEL[v]) return DECISION_LABEL[v];
-  if (rule.decision?.discovery?.pass) return DECISION_LABEL.confirming;
+  if (rule.decision?.discovery?.pass) {
+    // 정책은 서버가 stats.promo_policy 로 내려준 값을 읽기만 한다(조건 재계산 아님).
+    return promoPolicy(rule) === 'experimental'
+      ? DECISION_LABEL.discovery_passed
+      : DECISION_LABEL.confirming;
+  }
   return null;   // 판정 기록 없음 = 아직 아무 판정도 안 된 상태(표기 없음)
 }
 

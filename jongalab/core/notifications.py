@@ -306,16 +306,18 @@ def send_edge_rule_alert(
 ):
     """Edge Ledger 상태 전이 알림 — 관리자(ADMIN)에게만. 실제 전이는 수동 승인이며 이건 알림뿐.
 
-    promotions:   승격 후보 — **확인창까지 통과해 확증된** candidate. 2026-07-28 판정 일정
-                  도입 후로는 매일 뜨지 않고 **판정일에 1회만** 온다(sql/39). 알림이 왔다는 것은
-                  발견 구간과 겹치지 않는 새 표본에서 평균수익이 재현됐다는 뜻이다.
+    promotions:   승격 후보 — 승격 게이트를 통과한 candidate. 매일 뜨지 않고 **판정일에 1회만**
+                  온다(sql/39). 어느 판정일인지는 `stage` 가 알려준다: `confirm` 은 발견 구간과
+                  겹치지 않는 새 표본에서 평균수익이 재현됐다는 뜻이고, `discovery` 는 확인창이
+                  면제되는 experimental 정책에서 발견 판정만으로 승격 가능해진 건이다.
     exec_pending: 집행 설계 필요 — 통계는 확증됐지만 선정 시점(13~15시) 실행 불가 피처를 써서
                   승격이 막힌 candidate(집행 시점 재설계 후보). 통계 탈락이 아니므로 종결이 아니다.
     demotions:    강등 검토 — live rule 의 최근 창 성적. **역할별 부호가 반대**다
                   (selector 는 매수 종목 mean_net<0, veto 는 제외 종목 mean_net>0).
                   승격과 달리 **판정 일정 밖이라 매 평일 재검사**된다 — 조건이 유지되는 동안
                   같은 알림이 반복된다(그 사실을 푸터에 명시).
-    각 항목: {name, family, n, mean_net, ci_low[, mean_net_days, confirm_mean_net, mean_exc, reason]}.
+    각 항목: {name, family, n, mean_net, ci_low[, stage, mean_net_days, confirm_mean_net,
+    mean_exc, reason]}.
     전부 비면 전송하지 않는다.
     """
     exec_pending = exec_pending or []
@@ -324,6 +326,11 @@ def send_edge_rule_alert(
 
     def _pct(v) -> str:
         return f"{v:+.2f}%" if v is not None else "—"  # 표본 0 등 미산출 값 방어
+
+    _PROMO_STAGE_TEXT = {
+        "confirm": "확인창 확증",
+        "discovery": "발견 통과 · 실험 적용(확인창 면제)",
+    }
 
     def _rule_line(r: dict, prefix: str = "평균순수익") -> str:
         # veto 는 mean_net 이 **제외한** 종목의 성적이라 음수가 정상(승격 조건과 같은 방향).
@@ -345,6 +352,10 @@ def send_edge_rule_alert(
         # 게이트 조건은 2026-07-28 결정(효과 크기는 종목-일)대로 두고 판단 재료만 노출한다.
         # 실례: veto_bio_kosdaq 2026-07-29 알림 +0.18%(종목-일) vs -0.20%(일 등가중) — 상위
         # 3건(HLB +10.7·펩트론 +7.8·디앤디파마텍 +3.9)을 빼면 -0.70%, 대체효과는 veto 이득 방향.
+        # 어느 판정일에 온 알림인지 — 확인창 확증과 발견 통과는 근거의 무게가 다르다.
+        stage = _PROMO_STAGE_TEXT.get(r.get("stage") or "")
+        if stage:
+            line += f" [{stage}]"
         mnd = r.get("mean_net_days")
         if mnd is not None:
             line += f", 일등가중 {_pct(mnd)}"
@@ -357,7 +368,7 @@ def send_edge_rule_alert(
         sections = []
         if promotions:
             sections.append(
-                "🟢 *승격 후보 (candidate→live 검토)* — 확인창 확증 완료\n"
+                "🟢 *승격 후보 (candidate→live 검토)* — 판정 근거는 각 줄의 [ ] 표기\n"
                 + "\n".join(_rule_line(r) for r in promotions)
             )
         if exec_pending:
