@@ -36,8 +36,10 @@ unique_count 는 소스를 늘리면 도입일에 계단식으로 튀고(네이�
 종료한다 — 막힌 상태로 60종목을 계속 두드리면 차단이 길어진다. 수집 공백은 관측 전용
 기간엔 무해하고, 승격 후에도 라벨 NULL = rule 미개입이다.
 
-[cron] 평일 08:45~20:45 매 30분(:15/:45) — closing_bet(:00/:30)·disclosure_collector(:20/:50)
-와 어긋나게 둔다.
+[cron] **매일** 08:45~20:45 매 30분(:15/:45) — closing_bet(:00/:30)·disclosure_collector(:20/:50)
+와 어긋나게 둔다. 휴장일에도 도는 이유는 연휴 중 터진 재료가 재개장일 선정 시점에 라벨을
+갖고 있어야 하기 때문이다(휴장일에도 종목 기사는 실재한다 — 근거: docs/history/news-pipeline.md).
+휴장일엔 오늘 유니버스가 없으므로 대상은 전거래일 유니버스 ∪ 보유 종목이 된다.
 단발 실행: uv run workers/naver_news_collector.py [--date YYYY-MM-DD] [--limit N] [--dry-run]
 """
 import argparse
@@ -185,10 +187,6 @@ def main() -> int:
 if __name__ == "__main__":
     import sys
 
-    from core.market_calendar import exit_if_not_trading_day
-
-    # 휴장일엔 종가베팅이 안 돌아 유니버스도 없고 종목 기사도 거의 없다.
-    # --date 로 수동 점검할 땐 거래일 가드를 건너뛴다(disclosure_collector 선례).
-    if "--date" not in sys.argv:
-        exit_if_not_trading_day()
+    # 거래일 가드 없음 — 휴장일 기사도 재개장일 선정 시점의 재료라 그날 안에 수집해야 한다
+    # (당일 기사만 적재하는 구조라 다음 날 회차가 소급해 주지 않는다).
     sys.exit(main())
