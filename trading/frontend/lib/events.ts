@@ -37,6 +37,7 @@ const EVENT_META: Record<string, EventMeta> = {
   sell_filled_paper: { label: "매도 체결", tone: SELL },
   sell_filled_live: { label: "매도 체결", tone: SELL },
   // 시드 축소 게이트 (왜 시드가 줄었는지)
+  // regime_gate 는 더 이상 기록되지 않는다 — 과거 audit 행 렌더링용으로만 남긴다.
   regime_gate: { label: "시드축소·레짐", tone: GATE },
   futures_gate: { label: "선물 게이트", tone: GATE },
   macro_gate: { label: "거시 게이트", tone: GATE },
@@ -96,7 +97,7 @@ export function eventDetail(event: string, payload: any): string {
     case "sell_filled_live":
       return `${num(p.qty)}주 @${num(p.price)} 체결 · 실현 ${num(p.realized)}원 (수수료 ${num(p.cmsn)}·세금 ${num(p.tax)})`;
     case "regime_gate": {
-      // 매 판단 기록(미개입 포함). 축소 시에만 시드 변화를 보여준다.
+      // 과거 audit 행 전용 — 이 게이트는 없어져 새로 기록되지 않는다.
       if (!p.gated) return `판단 보류(${p.reason ?? "?"}) · 시드 유지`;
       const sample = `스프레드 ${pct(p.split)}%p · ${p.n_days ?? "?"}거래일 ${p.n ?? "?"}표본`;
       if (p.multiplier >= 1) return `점수 판별력 정상(${sample}) · 시드 유지`;

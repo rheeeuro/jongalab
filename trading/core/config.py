@@ -88,29 +88,6 @@ SEED_MAX_NAME_PCT = float(os.getenv('SEED_MAX_NAME_PCT', '0.25'))
 #   audit_log('seed_conviction') 로 표 수를 남겨 사후 채점한다. 1.0 = 확신도 가중 off(등가중).
 SEED_CONVICTION_MAX_MULT = float(os.getenv('SEED_CONVICTION_MAX_MULT', '3.0'))
 
-# ── 롤링 엣지 게이트 (core.regime_gate) — 최근 선정 종목의 점수 판별력으로 총 시드 축소 ──
-# 착안: 엣지가 레짐 의존적이라 역전 구간엔 자본을 덜 싣는다는 가설.
-# **기본 OFF** — 현행 스코어/선정 로직에서는 점수 스프레드가 상시 음수라 "역전"이 평상시 기본값이
-#   되고, 게이트가 손익 레짐이 아니라 점수-순위 역상관을 재게 된다(수익 나는 날에도 상시 30% 컷).
-#   그 횡단면 현상은 이미 등가중 배분이 처리한다.
-#   → 관찰용 audit 로그는 signal_executor 에서 계속 남기되(사후 채점용), live 감액은 중단.
-#   재개하려면 env=1. OFF 판정 근거: docs/history/gates-sizing.md
-REGIME_GATE_ENABLED = os.getenv('REGIME_GATE_ENABLED', '0') == '1'
-REGIME_WINDOW_DAYS = int(os.getenv('REGIME_WINDOW_DAYS', '10'))     # 최근 몇 거래일 표본
-# 최소 거래일 수 — 미만이면 게이트 미개입(1.0). 종목-일 표본은 같은 날 시장 무브로 상관되어
-# 거래일 수가 실효 표본이다(edge_policy PROMO_MIN_DAYS 와 같은 논리).
-REGIME_MIN_DAYS = int(os.getenv('REGIME_MIN_DAYS', '10'))
-# 이진 배수: split(점수 상위½−하위½ 익일시가수익, %p) < INVERT_THRESHOLD 면 역전 → MIN_MULT, 아니면 1.0.
-# 이진인 이유: 역전의 '깊이'는 다음날 성적과 무상관이고 **부호만** 유효하다(선형 램프 대비).
-# 근거: docs/history/gates-sizing.md
-REGIME_INVERT_THRESHOLD = float(os.getenv('REGIME_INVERT_THRESHOLD', '0.0'))
-REGIME_MIN_MULT = float(os.getenv('REGIME_MIN_MULT', '0.3'))       # 역전 시 시드 배수(30%)
-# 표본 하한 날짜(YYYY-MM-DD, inclusive) — 이 날짜 이전 report_date 는 레짐 표본에서 제외.
-# 근거: 선정/스코어 로직 변경 이전 표본은 익일수익 판별력 비교가 무의미(=구로직). 최신 변경일부터만 사용.
-# 창(REGIME_WINDOW_DAYS)이 이 날짜를 넘어 충분히 지나면 자연히 무의미해지는 자기소멸 가드.
-# 2026-07-07: jongalab 선정 로직 변경(거래대금 후보 풀 50 + 테마 유동성 조건, SCORE_LOGIC_MIN_DATE 와 동기).
-REGIME_MIN_DATE = os.getenv('REGIME_MIN_DATE', '2026-07-07')
-
 # ── 선물 환경 게이트 (core.futures_gate) — 매수 시점 선물 방향으로 총 시드 축소(NXT 전용) ──
 # 근거: 종가베팅 손익은 익일 갭에 좌우된다. NQ(미국기술주)+코스피200 야간선물이 둘 다 하락이면
 # 갭하락 리스크가 커 노출을 줄인다(reduce-only, ≤1.0 — 상승이어도 베팅을 키우지 않는다).
@@ -144,9 +121,9 @@ FUTURES_SD_US_EXT = float(os.getenv('FUTURES_SD_US_EXT', '3.0'))      # US 프�
 FUTURES_NQ_MAX_CUT = float(os.getenv('FUTURES_NQ_MAX_CUT', '0.3'))    # NQ 축
 FUTURES_IDX_MAX_CUT = float(os.getenv('FUTURES_IDX_MAX_CUT', '0.5'))  # 코스피200 선물 축
 FUTURES_SECTOR_MIN_KEEP = float(os.getenv('FUTURES_SECTOR_MIN_KEEP', '0.25'))  # 종목당 keep 하한(과도 감액 방지)
-# 결합 하한 — 레짐(총시드)×선물(종목별 keep)이 곱해져 과도 축소되는 걸 막는다. 한 종목의 최종 배수가
-# base 등가중의 이 값 밑으로는 안 내려가게 종목 keep 을 클램프(effective_keep). 보장이 성립하려면
-# REGIME_MIN_MULT >= 이 값 이어야 한다(레짐 단독 축소도 이 하한 이상 — 기본 둘 다 0.3).
+# 결합 하한 — 선물(섹터별)×거시(공통) keep 이 곱해져 과도 축소되는 걸 막는다. 한 종목의 최종
+# 배수가 base 배분의 이 값 밑으로는 안 내려가게 keep 을 클램프한다(effective_keep).
+# 종목당 하한 FUTURES_SECTOR_MIN_KEEP(0.25)보다 강해, 두 게이트가 겹쳐도 최소 30% 는 산다.
 SEED_COMBINED_MIN_MULT = float(os.getenv('SEED_COMBINED_MIN_MULT', '0.3'))
 FUTURES_STALE_SEC = int(os.getenv('FUTURES_STALE_SEC', '900'))    # 야간선물 신선도 한계(초). 넘으면 게이트 미개입
 # NQ 등락률 취득용 — jongalab market-indices 엔드포인트(야간선물은 jongalab DB 직접 조회)

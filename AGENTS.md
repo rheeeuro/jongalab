@@ -33,7 +33,7 @@ DB명은 `.env` 의 `JONGALAB_DB_NAME`/`KIWOOM_DB_NAME` 로 각각 주입한다(
 ### `trading/` — 자동매매 집행 서버 (FastAPI, :8002 + 자체 프론트 :3001)
 - jongalab 이 만든 `trade_signal` 을 읽어 **집행·포지션·리스크**를 담당한다. **주문 권한은 이 도메인만** 갖는다.
 - `core/` — `risk_engine.py`·`execution_engine.py`(⚠️민감/가드), `seed_allocator.py`,
-  감액 게이트 3종(`regime_gate`·`futures_gate`·`macro_gate`), `realtime_feed.py`, `repository/`
+  감액 게이트 2종(`futures_gate`·`macro_gate`), `realtime_feed.py`, `repository/`
 - `workers/` — `signal_executor`(매수) · `settle`(시초가 청산) · `monitor`(손절·트레일링) ·
   `fills_sync` · `reconcile` · `watchdog`. 전부 PM2 cron
 - `tests/` — 자금 경로 단위 테스트(DB/네트워크 없이). 상세는 `trading/README.md`

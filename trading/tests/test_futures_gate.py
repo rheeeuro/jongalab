@@ -112,16 +112,14 @@ def test_cyclical_cut_more_than_tech_when_only_index_down():
 
 def test_effective_keep_combined_floor():
     floor = fg.SEED_COMBINED_MIN_MULT
-    # 레짐 정상(1.0): raw 그대로, 단 결합 하한 밑이면 끌어올림
-    assert fg.effective_keep(0.375, 1.0) == 0.375
-    assert fg.effective_keep(0.2, 1.0) == floor          # raw<floor → floor 로
-    # 레짐이 하한과 같으면(0.3): 추가 감액 불가 → 1.0 (결합이 이미 하한)
-    assert fg.effective_keep(0.375, floor) == 1.0
-    # 레짐 mild(0.6): 결합이 하한 밑으로 안 가게 clamp → 0.6×keep>=floor
-    k = fg.effective_keep(0.375, 0.6)
-    assert round(0.6 * k, 3) >= floor and k <= 1.0
-    # 상승(raw=1.0)이면 감액 없음
-    assert fg.effective_keep(1.0, 0.6) == 1.0
+    # 하한 위면 선물×거시 곱 그대로
+    assert fg.effective_keep(0.375) == 0.375
+    # 하한 밑으로는 안 내려간다(두 게이트가 겹쳐도 최소 floor 는 산다)
+    assert fg.effective_keep(0.2) == floor
+    assert fg.effective_keep(0.0) == floor
+    # 상승·보합(1.0 이상)이면 감액 없음
+    assert fg.effective_keep(1.0) == 1.0
+    assert fg.effective_keep(1.5) == 1.0
 
 
 def test_keep_factors_venue_not_targeted(monkeypatch):

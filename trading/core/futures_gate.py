@@ -29,7 +29,7 @@
   seed_allocator 배분 뒤 종목 수량에 keep 을 곱해 감액한다(총 노출↓, 배분 로직 자체는 불변).
 
 [안전] 두 지표 중 하나라도 취득 실패(NXT 야간선물은 신선도 FUTURES_STALE_SEC 초과 포함)면 미개입(감액 없음).
-  regime_gate 와 동일하게 '불확실하면 축소하지 않는다'.
+  '불확실하면 축소하지 않는다' — 지표를 못 읽은 것이 하락 신호는 아니다.
 
 ⚠️ 섹터별 민감도(_SECTOR_SENSITIVITY)는 **통설 기반 미검증 가정**이다(시점별 선물 이력 부재·손익 표본
   부족). 매 적용을 audit_log('futures_gate') 에 선물값+섹터별 keep 으로 남겨, 추후 stk_cd→섹터 조인으로
@@ -255,15 +255,13 @@ def gated_shares(shares: int, keep: float) -> int:
     return int(shares * keep + 0.5)
 
 
-def effective_keep(keep: float, regime_mult: float) -> float:
-    """레짐×선물 결합 배수 하한(SEED_COMBINED_MIN_MULT)을 반영한 실제 적용 keep(≤1.0).
+def effective_keep(keep: float) -> float:
+    """결합 하한(SEED_COMBINED_MIN_MULT)을 반영한 실제 적용 keep(≤1.0).
 
-    한 종목의 최종 배수 = regime_mult × keep. 이게 하한 밑으로 내려가지 않게 keep 을 끌어올린다
-    (keep 은 감액만 하므로 결과는 항상 ≤1.0). regime_mult >= 하한이면 결합 배수 >= 하한이 보장된다.
+    호출부가 넘기는 keep 은 선물(섹터별)×거시(공통) 곱이다. 두 게이트가 겹쳐도 한 종목의 배수가
+    하한 밑으로 내려가지 않게 끌어올린다(keep 은 감액만 하므로 결과는 항상 ≤1.0).
     """
-    if regime_mult and regime_mult > 0:
-        keep = max(keep, SEED_COMBINED_MIN_MULT / regime_mult)
-    return round(min(1.0, keep), 3)
+    return round(min(1.0, max(keep, SEED_COMBINED_MIN_MULT)), 3)
 
 
 def _sectors_for(stk_cds: list[str]) -> dict[str, str | None]:

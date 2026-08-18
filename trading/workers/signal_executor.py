@@ -26,7 +26,6 @@ from datetime import datetime, timedelta
 from core.logging_setup import setup_logging
 from core.execution_engine import ExecutionEngine
 from core.seed_allocator import allocate, conviction_from_signal
-from core.regime_gate import seed_multiplier
 from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
 from core.macro_gate import macro_keep
 from core.config import SEED_COMBINED_MIN_MULT, REALTIME_FEED_ENABLED
@@ -478,26 +477,13 @@ def main() -> int:
     logger.info("가용현금 %d × (거래소점수 %.0f / 전체 %.0f) → 시드 %d원, 후보 %d종목",
                 cash, venue_score, total_score, seed, len(venue_items))
 
-    # 최초 시드 배율(대시보드 설정) — base 시드에 곱해 레짐/거시/선물 게이트 감액보다 먼저 적용.
+    # 최초 시드 배율(대시보드 설정) — base 시드에 곱해 거시/선물 게이트 감액보다 먼저 적용.
     #   0.0~1.0 축소 전용. 기본 1.0 이면 현행 동작 그대로. 게이트와 독립(곱셈 순서만 앞).
+    seed_base = seed
     seed_init_mult = risk_config_repo.get_risk_config().get("SEED_INIT_MULT", 1.0)
     if seed_init_mult < 1.0:
-        before_init = seed
         seed = int(seed * seed_init_mult)
-        logger.info("최초 시드 배율 적용: 시드 %d → %d원 (배율 %.3f)", before_init, seed, seed_init_mult)
-
-    # 롤링 엣지 게이트 — 최근 선정 종목의 점수 판별력이 역전된 레짐이면 총 시드를 축소.
-    #   등가중 사이징이라 조절 대상은 개별 비중이 아니라 총 노출(seed). 배분 로직은 불변.
-    mult, regime = seed_multiplier()
-    before = seed
-    if mult < 1.0:
-        seed = int(seed * mult)
-        logger.info("레짐 게이트 적용: 시드 %d → %d원 (배수 %.3f, 스프레드 %s)",
-                    before, seed, mult, regime.get("split"))
-    # 미개입(1.0)이어도 매 판단을 기록 — 게이트 성적을 사후 채점(백테스트)할 관찰 로그.
-    audit_log.append("regime_gate", None,
-                     {"venue": args.venue, "multiplier": mult, "seed_init_mult": seed_init_mult,
-                      "seed_before": before, "seed_after": seed, **regime})
+        logger.info("최초 시드 배율 적용: 시드 %d → %d원 (배율 %.3f)", seed_base, seed, seed_init_mult)
 
     # 3) 윈도우 시작 시점 현재가로 시드 배분 → 종목별 매수 수량 확정 (이후 수량 고정)
     cands: list[dict] = [
@@ -523,6 +509,7 @@ def main() -> int:
 
     # 확신도 표 수와 그 결과 수량을 전건 기록 — "근거가 많을수록 성적이 좋은가"를 사후 채점한다
     # (미검증 가정이라 관찰 로그가 필수. 되돌리려면 .env SEED_CONVICTION_MAX_MULT=1.0).
+    # 이 이벤트가 **그날 시드의 기록처**다 — 배율 전(seed_base)·배율(seed_init_mult)·적용 시드(seed).
     conv = {c["stk_cd"]: {"conviction": c["conviction"], "shares": c["shares"],
                           "rule_names": c["sig"].get("rule_names") or None,
                           "rank_no": c["sig"].get("rank_no")}
@@ -530,13 +517,13 @@ def main() -> int:
     logger.info("확신도 사이징(점수 top-N=%s): %s", score_top_n,
                 {k: v["conviction"] for k, v in conv.items()})
     audit_log.append("seed_conviction", None, {
-        "venue": args.venue, "seed": seed, "score_top_n": score_top_n, "stocks": conv})
+        "venue": args.venue, "seed": seed, "seed_base": seed_base,
+        "seed_init_mult": seed_init_mult, "score_top_n": score_top_n, "stocks": conv})
 
     # 거시 이벤트 게이트 — 보유 창(매수→익일 시가)에 sev3 예정 이벤트(FOMC·CPI·고용)가 걸려 있으면
     #   총 노출 축소. 프록시(VIX·WTI·환율)는 관찰 전용으로 진단만 기록. 미개입 포함 매 판단을 audit.
     m_keep, macro = macro_keep(args.venue)
-    audit_log.append("macro_gate", None,
-                     {"seed": seed, "regime_mult": mult, **macro})
+    audit_log.append("macro_gate", None, {"seed": seed, **macro})
 
     # 선물 환경 게이트(섹터 차등, NXT 전용) — 배분 뒤 섹터별 keep-factor 로 수량 감액(reduce-only).
     #   NQ·야간선물 하락 시 고베타 섹터(반도체·IT)를 더, 방어주(통신·음식료)를 덜 깎는다.
@@ -545,8 +532,8 @@ def main() -> int:
     detail = futures.get("detail") or {}
     for c in cands:
         raw = factors.get(c["stk_cd"], 1.0)
-        # 선물(섹터별) × 거시(공통) 곱에 레짐 결합 하한(SEED_COMBINED_MIN_MULT) 반영
-        keep = effective_keep(raw * m_keep, mult)
+        # 선물(섹터별) × 거시(공통) 곱에 결합 하한(SEED_COMBINED_MIN_MULT) 반영
+        keep = effective_keep(raw * m_keep)
         if keep < 1.0:
             before_sh = c["shares"]
             c["shares"] = gated_shares(c["shares"], keep)  # 반올림 감액(mild 컷이 1주를 0으로 안 만듦)
@@ -559,8 +546,7 @@ def main() -> int:
             detail[c["stk_cd"]]["keep"] = keep
     if futures.get("gated"):
         audit_log.append("futures_gate", None,
-                         {"seed": seed, "regime_mult": mult,
-                          "combined_min_mult": SEED_COMBINED_MIN_MULT, **futures})
+                         {"seed": seed, "combined_min_mult": SEED_COMBINED_MIN_MULT, **futures})
 
     # 배분 0주는 즉시 스킵 처리
     for c in cands:

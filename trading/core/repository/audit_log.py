@@ -160,7 +160,8 @@ def last_heartbeat():
 _ACTIVITY_EVENTS = (
     "monitor_start", "monitor_trail", "monitor_stop", "monitor_hardstop", "monitor_newsveto",
     "buy_start", "buy_exec", "buy_skip",
-    "regime_gate", "futures_gate",  # 시드 축소 사유(레짐 역전 / 선물 하락 섹터 감액)
+    "futures_gate",   # 시드 축소 사유(선물 하락 섹터 감액)
+    "regime_gate",    # 과거 행 전용(게이트 제거됨) — 지난 날짜 로그를 그대로 보여주려고 남긴다
 )
 
 

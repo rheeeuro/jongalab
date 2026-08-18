@@ -166,23 +166,11 @@ export interface FuturesGateDiag {
   kospi_note?: string;
 }
 
-// 롤링 엣지 게이트(레짐) 진단
-export interface RegimeGateDiag {
-  multiplier: number; // 총 시드 배수 (이진: 역전이면 REGIME_MIN_MULT, 아니면 1.0)
-  gated: boolean;
-  split?: number; // 점수 스프레드(%p)
-  inverted?: boolean;
-  n?: number; // 종목-일 표본 수
-  n_days?: number; // 거래일 수 (판단 기준: REGIME_MIN_DAYS 이상)
-  reason?: string;
-}
-
 export interface BuyPreviewVenue {
   exchange: "KRX" | "NXT";
   window: string; // 매수 윈도우 (예: "15:00~15:20")
   closed: boolean; // 데드라인 경과 = 오늘 집행 없음 (수량·시드 0, 남은 종목은 매수 대상 아님)
-  seed_base: number; // 게이트 전 시드 (가용현금 × 점수비율)
-  seed: number; // 레짐 게이트 반영 후 시드
+  seed: number; // 배분 시드 (가용현금 × 점수비율 × SEED_INIT_MULT)
   invested: number; // 예상 매수금액 합계 (선물 게이트 반영 후)
   count: number; // 실제 매수 예정 종목 수 (1주 이상)
   futures: FuturesGateDiag | null; // 선물 섹터 게이트 상태 (NXT만, KRX는 null)
@@ -216,7 +204,6 @@ export interface BuyPreview {
   trade_date: string;
   cash: number; // 가용현금 (현금주문가능금액)
   total_score: number;
-  regime: RegimeGateDiag; // 레짐 게이트(두 거래소 공통)
   macro: MacroGateDiag; // 거시 이벤트 게이트(두 거래소 공통)
   venues: BuyPreviewVenue[];
 }

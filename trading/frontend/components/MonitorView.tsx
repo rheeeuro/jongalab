@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import type {
-  MonitorState, MonitorPosition, NameMap, BuyPreview, BuyPreviewVenue, RegimeGateDiag,
+  MonitorState, MonitorPosition, NameMap, BuyPreview, BuyPreviewVenue,
   LiveFeedStats, LivePrice, PriceStreamMsg,
 } from "@/types";
 import { won, wonExact, pnlClass, ago, hhmmss } from "@/lib/format";
@@ -574,16 +574,9 @@ function PositionGauge({ p }: { p: MonitorPosition }) {
   );
 }
 
-// 매수 예정 목록의 시드 축소 사유(레짐·선물 게이트) — 왜 시드/수량이 줄었는지 한 줄로.
-function GateNotes({ regime, venue }: { regime: RegimeGateDiag; venue: BuyPreviewVenue }) {
+// 매수 예정 목록의 수량 감액 사유(선물 게이트) — 왜 수량이 줄었는지 한 줄로.
+function GateNotes({ venue }: { venue: BuyPreviewVenue }) {
   const sp = (v?: number) => (typeof v === "number" ? `${v >= 0 ? "+" : ""}${v}` : "-");
-
-  const regimeLine =
-    regime && regime.multiplier < 1
-      ? `레짐 ×${regime.multiplier} · 점수 판별력 역전 → 시드 ${wonExact(
-          venue.seed_base,
-        )}→${wonExact(venue.seed)}`
-      : null;
 
   let futuresLine: string | null = null;
   const f = venue.futures;
@@ -599,11 +592,10 @@ function GateNotes({ regime, venue }: { regime: RegimeGateDiag; venue: BuyPrevie
         : "선물 게이트 · 지표 대기 (집행 시 반영)";
   }
 
-  if (!regimeLine && !futuresLine) return null;
+  if (!futuresLine) return null;
   return (
     <div className="mb-2 space-y-0.5">
-      {regimeLine && <p className="text-[11px] leading-tight text-amber-600 dark:text-amber-400">{regimeLine}</p>}
-      {futuresLine && <p className="text-[11px] leading-tight text-amber-600 dark:text-amber-400">{futuresLine}</p>}
+      <p className="text-[11px] leading-tight text-amber-600 dark:text-amber-400">{futuresLine}</p>
     </div>
   );
 }
@@ -644,7 +636,7 @@ function BuyPreviewSection({
           {venue.window} · 시드 {wonExact(venue.seed)}
         </p>
       ) : null}
-      {venue && preview ? <GateNotes regime={preview.regime} venue={venue} /> : null}
+      {venue ? <GateNotes venue={venue} /> : null}
       {!preview ? (
         <p className="py-6 text-center text-sm text-slate-400">매수 예정 종목을 불러오는 중…</p>
       ) : stocks.length === 0 ? (

@@ -123,6 +123,33 @@ legacy 점수 1표(그날 점수 top-N 에도 들었으면). 목표금액 = `see
 수익 나는 날에도 상시 30% 컷이 걸린다(7/23 첫 실발동).
 → live 감액 중단, audit 관찰 로그만 유지. 재개는 env=1.
 
+### 2026-08-18 — 코드 제거 (기능 삭제)
+
+7/23 OFF 이후 26일(거래일 기준 ~19일) 동안 live 개입 0회. 남겨둔 두 근거가 모두 성립하지 않아 걷어냈다.
+
+1. **"env 하나로 재개 가능한 레버"가 아니다.** OFF 사유(임계 0이 구 스코어 로직에 맞춰진 값)는
+   일시적 상황이 아니라 구조적이다 — 지금 `REGIME_GATE_ENABLED=1` 로 되돌리면 7/23 과 똑같이
+   수익일 포함 상시 30% 컷이 재발한다. 재개 조건이 "env 를 켠다"가 아니라 "게이트를 재설계한다"면
+   그건 남겨둘 코드가 아니라 다시 쓸 설계다.
+2. **"관찰 로그"가 실제로 안 쌓였다.** 비활성 분기가 표본 조회 없이 즉시 리턴해
+   `{"gated": false, "reason": "disabled"}` 만 남겼다. 7/23 이후 기록된 split 값은 0건이라
+   사후 채점용 표본이 존재하지 않는다(문서엔 "관찰 로그만 유지"로 적혀 있어 코드와 어긋나 있었다).
+
+**대체 없음** — 총 노출 조절은 수동 레버(`SEED_INIT_MULT`)와 선물·거시 게이트가 담당한다.
+점수 판별력 축은 등가중·확신도 사이징이 이미 처리하는 횡단면 현상이라 별도 게이트를 두지 않는다.
+
+**제거 범위**: `core/regime_gate.py`·`tests/test_regime_gate.py` 삭제, `config.py` 의 `REGIME_*` 6개,
+`signal_executor`/`api.py`(`/buy-preview`) 호출부, 응답 필드 `regime`·`venues[].seed_base`,
+프론트 레짐 배너·`GateNotes` 레짐 줄·`RegimeGateDiag` 타입.
+`effective_keep(keep, regime_mult)` → `effective_keep(keep)` 로 단순화(선물×거시 곱에 `SEED_COMBINED_MIN_MULT`
+하한만 적용 — regime_mult=1.0 이던 현행과 **동작 동일**, 테스트로 고정). 200 tests pass.
+
+**시드 기록처 이동**: 그날 시드 스냅샷(`seed_before`·`seed_init_mult`)은 `audit_log('regime_gate')` 에만
+있었다 → `audit_log('seed_conviction')` 에 `seed_base`(배율 전)·`seed_init_mult`·`seed`(적용) 로 옮겼다.
+**과거 분석 시 주의**: 2026-08-18 이전 시드 추적은 `regime_gate.seed_before`, 이후는 `seed_conviction.seed_base`
+/`seed`를 봐야 한다. 과거 `regime_gate` 행은 append-only 로 남아 있고 대시보드 로그도 계속 렌더링한다
+(`_ACTIVITY_EVENTS`·`lib/events.ts` 에 과거 행 전용으로 존치).
+
 ### 2026-08-07 — 축별 강도 눈금을 σ 기준으로 정규화 + NQ 레벨 축 강등
 
 **문제**: `FUTURES_FLAT_BAND`(0.1) / `FUTURES_FULL_CUT_PCT`(2.0) 한 쌍을 세 축이 공유했는데

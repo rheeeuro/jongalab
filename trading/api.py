@@ -35,7 +35,6 @@ from core.kiwoom_data_client import KiwoomDataClient, to_int
 from core.kiwoom_order_client import KiwoomOrderClient
 from core.seed_allocator import allocate, conviction_from_signal
 from core.ex_rights import get_next_session_ex_rights
-from core.regime_gate import seed_multiplier
 from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
 from core.macro_gate import macro_keep, month_events
 from core.price_stream import get_price_stream
@@ -316,7 +315,7 @@ _AXIS_LABELS = {"nq": "나스닥선물", "us_semis": "미 프리마켓 반도체
 
 
 def _keep_reason(stk_cd: str, futures_diag: dict | None, macro_diag: dict, m_keep: float,
-                 regime_mult: float, pre_shares: int, shares: int) -> str:
+                 pre_shares: int, shares: int) -> str:
     """감액 keep(<1.0)이 어떤 축에서 왔는지 한 줄 설명 — 대시보드 hover/펼침 표시용.
 
     '게이트 감액'이라는 라벨만으로는 어느 게이트·어느 축이 얼마나 깎았는지 알 수 없어서,
@@ -338,8 +337,6 @@ def _keep_reason(stk_cd: str, futures_diag: dict | None, macro_diag: dict, m_kee
         sev3 = "·".join(e["name"] for e in (macro_diag.get("events") or [])
                         if (e.get("severity") or 0) >= 3)
         parts.append(f"거시 이벤트 게이트 keep {m_keep}" + (f" ← {sev3}" if sev3 else ""))
-    if regime_mult < 1.0:
-        parts.append(f"레짐 게이트 시드 ×{regime_mult}")
     if not parts:
         return ""
     parts.append("배분 0주 — 단가가 배분액보다 커서(게이트 무관)" if pre_shares < 1
@@ -417,14 +414,12 @@ def buy_preview(date: str | None = None):
 
     # 최초 시드 배율 — base 시드에 곱해 게이트 감액보다 먼저 적용(executor 와 동일, 대시보드 설정).
     seed_init_mult = risk_config_repo.get_risk_config().get("SEED_INIT_MULT", 1.0)
-    # 롤링 엣지 게이트(레짐) 배수 — 두 거래소 시드에 공통 적용(executor 와 동일).
-    regime_mult, regime_diag = seed_multiplier()
 
     # 거시 이벤트 게이트 — 보유 창의 sev3 예정 이벤트(FOMC·CPI·고용) keep. 두 거래소 공통(executor 와 동일).
     m_keep, macro_diag = macro_keep("preview")
 
-    # 2) 거래소별 시드 = 가용현금 × (거래소 점수합 / 전체 점수합), 그 안에서 점수가중 배분
-    #    executor 와 동일하게 게이트를 반영한다: regime 은 총 시드 축소, futures(NXT)는 배분 뒤 섹터별 수량 감액.
+    # 2) 거래소별 시드 = 가용현금 × (거래소 점수합 / 전체 점수합), 그 안에서 확신도 비례 배분
+    #    executor 와 동일하게 게이트를 반영한다: 배분 뒤 선물(섹터별)×거시(공통) keep 으로 수량 감액.
     #    가격·현금·야간선물은 호출 시점 실시간값이라 실제 집행과 다를 수 있다(미리보기).
     venues = []
     now = datetime.now()
@@ -435,10 +430,9 @@ def buy_preview(date: str | None = None):
                                                                        minute=deadline[1])
         items = [c for c in classified if c["is_nxt"] == want_nxt]
         venue_score = sum(c["score"] for c in items)
-        seed_base = int(cash * venue_score / total_score) if total_score > 0 else 0
+        seed = int(cash * venue_score / total_score) if total_score > 0 else 0
         if seed_init_mult < 1.0:
-            seed_base = int(seed_base * seed_init_mult)  # 최초 시드 배율(게이트 감액보다 먼저)
-        seed = int(seed_base * regime_mult) if regime_mult < 1.0 else seed_base
+            seed = int(seed * seed_init_mult)  # 최초 시드 배율(게이트 감액보다 먼저)
         cands = [{"stk_cd": c["sig"]["stk_cd"], "score": c["score"], "price": c["price"],
                   "conviction": c["conviction"]} for c in items]
         factors, futures_diag = {}, None
@@ -454,9 +448,8 @@ def buy_preview(date: str | None = None):
             sig = c["sig"]
             shares, cost = a.get("shares", 0), a.get("cost", 0)
             pre_shares = shares  # 게이트 전 배분 수량 — 0주의 원인이 게이트인지 시드인지 구분용
-            # 선물(섹터별) × 거시(공통) 곱에 레짐 결합 하한 반영 (executor 와 동일)
-            keep = 1.0 if closed else effective_keep(factors.get(sig["stk_cd"], 1.0) * m_keep,
-                                                     regime_mult)
+            # 선물(섹터별) × 거시(공통) 곱에 결합 하한 반영 (executor 와 동일)
+            keep = 1.0 if closed else effective_keep(factors.get(sig["stk_cd"], 1.0) * m_keep)
             if keep < 1.0:
                 shares = gated_shares(shares, keep)  # 반올림 감액(mild 컷이 1주를 0으로 안 만듦)
                 cost = shares * c["price"]
@@ -481,7 +474,7 @@ def buy_preview(date: str | None = None):
                 "keep": round(keep, 3) if keep < 1.0 else None,
                 # 감액 keep 의 출처(하락 축·섹터 keep·수량 변화) — 대시보드가 hover/펼침으로 보여준다.
                 "keep_reason": (_keep_reason(sig["stk_cd"], futures_diag, macro_diag, m_keep,
-                                             regime_mult, pre_shares, shares) or None)
+                                             pre_shares, shares) or None)
                 if keep < 1.0 else None,
                 "note": note,
             })
@@ -491,7 +484,6 @@ def buy_preview(date: str | None = None):
             "window": window,
             # 이 거래소 데드라인이 지났다 = 오늘 집행 없음(수량 0). 남은 pending 은 다음 회차에 정리된다.
             "closed": closed,
-            "seed_base": 0 if closed else seed_base,
             "seed": 0 if closed else seed,
             "invested": sum(s["cost"] for s in stocks),
             "count": sum(1 for s in stocks if s["shares"] >= 1),
@@ -499,10 +491,9 @@ def buy_preview(date: str | None = None):
             "stocks": stocks,
         })
 
-    regime = {"multiplier": regime_mult, **regime_diag}
     macro = {"keep": m_keep, **macro_diag}
     return {"trade_date": trade_date, "cash": cash, "total_score": total_score,
-            "regime": regime, "macro": macro, "venues": venues}
+            "macro": macro, "venues": venues}
 
 
 def _attach_reason(rows: list[dict]) -> list[dict]:

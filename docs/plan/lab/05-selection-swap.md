@@ -50,16 +50,15 @@ ALTER TABLE trade_signal
 | `core/edge_selection.py` (신규) | 모드별 선정 함수 — 순수 로직으로 분리해 pytest 대상化: `select(mode, candidates, live_rules, veto_rules, top_n) -> (selected_codes, rule_names_by_code, veto_log)` |
 | `jongalab/tests/test_edge_selection.py` | 모드 3종 × veto × 상한 초과 × 매칭 0 케이스 |
 
-## 3. 사이징과 regime_gate 의 관계
+## 3. 사이징과 시드 게이트의 관계
 
 - 시드 배분은 현행 trading 의 등가중 그대로 둔다(메모리: 점수 사이징은 반증됨). rule 단위
   차등(승격 초기 0.5 가중 등)은 **trade_signal 의 rank_no 를 rule 기대값 순으로 부여**하는
   것으로 근사한다 — seed_allocator 가 "점수순 상위 선정·등가중"이므로 rank 만으로 개입 가능,
   trading 수정 불필요.
-- `regime_gate`(점수 판별력 기반 시드 축소)는 rules 모드에서 논리적 전제가 사라진다.
-  전환 시점에 함께 검토(대체: live rule 들의 최근 rolling mean_net 기반 게이트) — 단
-  regime_gate 수정은 trading 도메인이므로 **별도 승인 후 진행**. 그 전까지는 hybrid 모드로
-  공존(점수가 계속 계산되므로 게이트도 계속 동작).
+- 점수 판별력 기반 시드 축소(`regime_gate`)는 **제거됐다** — rules 모드에서 논리적 전제가
+  사라지는 것과 같은 이유다(근거: `docs/history/gates-sizing.md`). 총 노출 게이트가 다시
+  필요해지면 점수가 아니라 **live rule 들의 최근 rolling mean_net** 기반으로 새로 설계한다.
 
 ## 4. 롤백
 

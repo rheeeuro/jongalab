@@ -111,12 +111,7 @@ export default async function TodayPage() {
             <p className="-mt-1 text-xs text-slate-400 tabular-nums">
               가용현금 {wonExact(preview?.cash ?? 0)} 기준 예상 배분
             </p>
-            {/* 게이트 상태 — 시드가 왜 줄었는지(레짐/거시), 감액 없어도 오늘 밤 이벤트는 안내 */}
-            {(preview?.regime?.multiplier ?? 1) < 1 && (
-              <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
-                레짐 게이트: 최근 점수 판별력 역전 — 시드 ×{preview!.regime.multiplier}
-              </p>
-            )}
+            {/* 게이트 상태 — 시드가 왜 줄었는지(거시), 감액 없어도 오늘 밤 이벤트는 안내 */}
             {(preview?.macro?.events?.length ?? 0) > 0 &&
               ((preview?.macro?.keep ?? 1) < 1 ? (
                 <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">

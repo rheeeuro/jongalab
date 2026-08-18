@@ -41,7 +41,6 @@ trading/
 │   ├── risk_engine.py          # ⚠️ 게이트키핑: 킬스위치·일일한도·서킷브레이커
 │   ├── execution_engine.py     # ⚠️ 주문 사이징·집행·멱등키
 │   ├── seed_allocator.py       # 시드 배분(거래소별): 확신도(선정 근거 표) 비례 · 표 대비 최소투입 우선 그리디 · 종목당 캡
-│   ├── regime_gate.py          # 롤링 엣지 게이트(점수 판별력 역전 시 총 시드 축소) — 기본 OFF, 관찰 로그만
 │   ├── futures_gate.py         # 선물 환경 게이트(KRX·NXT): NQ+코스피선물 하락 시 섹터별 차등 감액
 │   ├── macro_gate.py           # 거시 이벤트 게이트: 보유 창 sev3 이벤트 시 시드 keep 축소 + 프록시 관찰
 │   ├── ex_rights.py            # 권리락 스킵 조회(jongalab ex_rights_schedule 읽기 전용)
@@ -80,7 +79,7 @@ trading/
         │
 signal_executor (KRX 15:00 / NXT 19:30 창 시작)
   · 블록리스트 제외 → 권리락 제외 → (레버리지 토글 on 이면 ETF 치환) → 거래소 분류 → 시드 산정
-    → 최초 시드 배율(risk_config SEED_INIT_MULT, 게이트보다 먼저) → regime_gate(기본 OFF)
+    → 최초 시드 배율(risk_config SEED_INIT_MULT, 게이트보다 먼저)
     → 확신도 산정 → seed_allocator 표 비례 배분 → futures_gate × macro_gate(수량·시드 감액)
     → 데드라인 종가 매수. NXT 는 그 직전에 집행 레이어 rule(NXT_GAP_FILTER_ENABLED)이 한 번 더 가른다
   · **종가 단일 매수** — 윈도우 시작에 수량을 확정하고 데드라인(15:20 KRX 동시호가 / 19:50 NXT 최유리IOC)에
@@ -163,8 +162,8 @@ watchdog 은 **jongalab 통합 스케줄러의 dead-man's switch 도 겸한다**
 | 종목당 시드 캡 | `seed_allocator.py` + `SEED_MAX_NAME_PCT`(0.25) | 하한가에선 손절이 물리적으로 불가하므로 **단일 종목 최악 손실은 이 캡으로만 봉쇄된다**. 고가주 첫 1주만 캡×2 이내 예외. 확신도와 무관하게 항상 적용 |
 | 확신도 사이징 | `seed_allocator.conviction_from_signal`, `signal_executor.py`, `/buy-preview` + `SEED_CONVICTION_MAX_MULT`(3.0) | 표 = 매칭 selector rule 수(`rule_names`) + legacy 점수 1표(그날 점수 top-N 판정 N 은 `edge_rule.get_selected_count` — 집행 레이어 rule 의 `in_scope` 와 같은 기준). 목표금액 = `seed × 표/Σ표`. 표 없음/조회 실패 → 전원 1표 = **등가중과 완전 동일**. ⚠️ **점수 '크기' tilt 는 금지**(쓰는 건 근거의 중복 매칭 개수뿐). ⚠️ 미검증 통설 — `audit_log('seed_conviction')` 로 사후 채점, 롤백은 값 1.0 |
 | 배분 대상 컷(TOP_N=10) | `seed_allocator.allocate` | 유효가 후보를 **표 수 내림차순 → 점수 내림차순**으로 정렬해 상위 10개만 배분한다. 사이징이 표 비례라 컷도 같은 자를 쓴다 — 표 많은 종목을 컷에서 떨어뜨리면 두 단계가 상충한다. 정렬 키가 클램프된 표 수라 `SEED_CONVICTION_MAX_MULT=1.0` 이면 전원 1.0 → **종전 점수순 컷으로 정확히 롤백**된다 |
-| 롤링 엣지 게이트 | `regime_gate.py`, `signal_executor.py` | **기본 OFF(`REGIME_GATE_ENABLED=0`) — live 감액 없음, audit 관찰 로그만.** 재개 시 동작: 최근 `REGIME_WINDOW_DAYS` 선정종목의 점수 판별력이 역전(< `REGIME_INVERT_THRESHOLD`)이면 총 시드에 **이진 배수** `REGIME_MIN_MULT`(0.3), 아니면 1.0. 거래일 < `REGIME_MIN_DAYS`(10)면 미개입. `report_date >= REGIME_MIN_DATE` 표본만 사용 |
-| 선물 환경 게이트 | `futures_gate.py`, `signal_executor.py` | **KRX·NXT(`FUTURES_GATE_VENUES`).** 매수시점 NQ 선물 + **그 시각 살아있는 코스피 선물**(KRX=주간 K200DF / NXT=야간 K200NF, 신선도 `FUTURES_STALE_SEC` 초과 시 미개입) 방향으로 배분 뒤 **종목 섹터별 keep-factor(≤1.0)** 로 수량 감액. `keep=∏_axis(1−MAX_CUT×민감도×하락강도)`, 하한 `FUTURES_SECTOR_MIN_KEEP`(0.25). 상승/보합이면 감액 없음(reduce-only). **하락강도는 축의 σ 로 정규화한 z 기준**(`FUTURES_FLAT_Z`=0.25 에서 0 ~ `FUTURES_FULL_Z`=2.0 에서 1) — 축별 σ 는 `FUTURES_SD_NQ`(0.9)·`FUTURES_SD_K200_DAY`(6.3)·`FUTURES_SD_K200_NIGHT`(1.6)·`FUTURES_SD_US_EXT`(3.0)로, 같은 %p 가 축마다 다른 사건이라 절대 %p 눈금 하나를 공유하면 주간선물 축은 하락일에 상시 최대컷이 된다. σ 는 `market_snapshot` 표준편차로 재측정해 갱신하는 값이다. 수량 적용은 `gated_shares()` 로 **반올림**(mild 컷이 1주를 0주로 없애지 않게). **결합 하한**: 레짐×선물 곱을 `SEED_COMBINED_MIN_MULT`(0.3)로 `effective_keep()` 클램프. **US 프리마켓 축은 NXT 전용**(`FUTURES_US_EXT_ENABLED`) — KRX 매수 시점엔 미국장이 폐장이라 stale. 전건 `audit_log('futures_gate')` 에 축별 σ·강도(`axes`)를 남긴다. 섹터는 jongalab `ticker_dictionary` 에서 **종목당 `MAX(NULLIF(sector,''))` 로 하나만 고른다** — 같은 종목에 별칭 행이 여러 개이고 대부분 sector 가 NULL 이라, 행 순서에 맡기면 대형주가 neutral 로 떨어져 tech 민감도·US 반도체 축이 빠진다. ⚠️ 섹터 민감도·US 축은 **통설 기반 미검증**(reduce-only)이고, NQ 축은 매수시점 레벨의 예측력이 실측되지 않아 `FUTURES_NQ_MAX_CUT`(0.3)이 코스피 축(0.5)보다 낮다 |
+| 최초 시드 배율 | `signal_executor.py` + risk_config `SEED_INIT_MULT` | 대시보드에서 사람이 총 노출을 줄이는 **유일한 수동 레버**(0.0~1.0 축소 전용). 게이트보다 먼저 곱하고, 데드라인 직전에 한 번 더 읽어 낮아졌으면 확정 수량을 그 비율로 축소한다. 그날 시드 기록처는 `audit_log('seed_conviction')`(`seed_base`·`seed_init_mult`·`seed`) |
+| 선물 환경 게이트 | `futures_gate.py`, `signal_executor.py` | **KRX·NXT(`FUTURES_GATE_VENUES`).** 매수시점 NQ 선물 + **그 시각 살아있는 코스피 선물**(KRX=주간 K200DF / NXT=야간 K200NF, 신선도 `FUTURES_STALE_SEC` 초과 시 미개입) 방향으로 배분 뒤 **종목 섹터별 keep-factor(≤1.0)** 로 수량 감액. `keep=∏_axis(1−MAX_CUT×민감도×하락강도)`, 하한 `FUTURES_SECTOR_MIN_KEEP`(0.25). 상승/보합이면 감액 없음(reduce-only). **하락강도는 축의 σ 로 정규화한 z 기준**(`FUTURES_FLAT_Z`=0.25 에서 0 ~ `FUTURES_FULL_Z`=2.0 에서 1) — 축별 σ 는 `FUTURES_SD_NQ`(0.9)·`FUTURES_SD_K200_DAY`(6.3)·`FUTURES_SD_K200_NIGHT`(1.6)·`FUTURES_SD_US_EXT`(3.0)로, 같은 %p 가 축마다 다른 사건이라 절대 %p 눈금 하나를 공유하면 주간선물 축은 하락일에 상시 최대컷이 된다. σ 는 `market_snapshot` 표준편차로 재측정해 갱신하는 값이다. 수량 적용은 `gated_shares()` 로 **반올림**(mild 컷이 1주를 0주로 없애지 않게). **결합 하한**: 선물×거시 곱을 `SEED_COMBINED_MIN_MULT`(0.3)로 `effective_keep()` 클램프(종목당 하한 0.25 보다 강하다). **US 프리마켓 축은 NXT 전용**(`FUTURES_US_EXT_ENABLED`) — KRX 매수 시점엔 미국장이 폐장이라 stale. 전건 `audit_log('futures_gate')` 에 축별 σ·강도(`axes`)를 남긴다. 섹터는 jongalab `ticker_dictionary` 에서 **종목당 `MAX(NULLIF(sector,''))` 로 하나만 고른다** — 같은 종목에 별칭 행이 여러 개이고 대부분 sector 가 NULL 이라, 행 순서에 맡기면 대형주가 neutral 로 떨어져 tech 민감도·US 반도체 축이 빠진다. ⚠️ 섹터 민감도·US 축은 **통설 기반 미검증**(reduce-only)이고, NQ 축은 매수시점 레벨의 예측력이 실측되지 않아 `FUTURES_NQ_MAX_CUT`(0.3)이 코스피 축(0.5)보다 낮다 |
 | 거시 이벤트 게이트 | `macro_gate.py`, `signal_executor.py` | 보유 창(매수→다음 평일 09:00)의 **예정 이벤트 리스크** — futures_gate 가 실현된 방향을 재는 것과 상보적. jongalab `macro_event` 에서 창 안 이벤트를 조회해 **severity 3(FOMC·CPI·고용) 존재 시 시드 keep=`MACRO_EVENT_KEEP`(0.5)**. **sev2 는 관찰 전용**(감액 없음, 진단 기록만) — PPI·금통위에 더해 **해외 반도체 실적**(엔비디아·브로드컴·마이크론·TSMC·샌디스크)과 **관세 발효일**이 여기 들어간다. **프록시 관찰 축**(VIX·WTI·환율)도 keep 을 계산해 진단에만 기록 — ⛔ 지금 설계대로 승격 금지. 축끼리 min 결합(같은 쇼크 이중 감액 방지). 캘린더 조회 실패 시 미개입 |
 | 집행 레이어 rule | `edge_execution.py`, `signal_executor.py` + risk_config `NXT_GAP_FILTER_ENABLED` | **NXT(19:50) 전용 · 원장 기반.** 주문 직전 갭을 계산해 **jongalab 원장의 live rule predicate 에 먹여** 매수 여부를 정한다(밴드는 rule 소관, 하드코딩 상수 아님). **제약 2**: ① 종목 추가 불가(화이트리스트로만 동작, 거른 몫의 시드가 논다) ② **적용 대상은 그 rule 이 혼자 데려온 종목뿐**(`in_scope` — 다른 rule 과 함께 선정·점수 top-N 포함·점수순 선정은 비대상). **fail-open 4종**(rule 없음/점수 선정분/갭 판정 불가/리포트 행 없음)이라 오설정 rule 하나가 전 종목을 막지 않는다. KRX 종가(갭 분모)·리포트 행·live rule 은 **데드라인 전** 윈도우 대기 중에 미리 확보하고, 분모는 ka10081 당일 캔들로 고정한다. 전건 `audit_log('nxt_gap_filter')` |
 | 권리락 스킵 | `ex_rights.py`, `signal_executor.py`, `/buy-preview` | **다음 거래일(=이 매수분의 청산일)이 권리락일인 종목은 매수하지 않는다.** `blocklist` 다음·레버리지 치환 **전**에 원종목 기준으로 검사(조정이 일어나는 건 원종목). ⚠️ **평단 보정은 하지 않는다**(평단은 하드손절선의 기준값이라 추정 비율이 틀리면 손절선이 조용히 움직인다). 신호는 `skipped`/note=`ex_rights`. 조회 실패·캘린더 비어 있음 → **미개입**. 당일 권리락 종목은 대상 아님 |
@@ -207,7 +206,7 @@ watchdog 은 **jongalab 통합 스케줄러의 dead-man's switch 도 겸한다**
 
 **거시 이벤트 표시**(`GET /macro-events?month=YYYYMM`): 캘린더 탭 날짜 셀 점 마커(주황=sev3 감액 대상 /
 회색=sev2 관찰) + 범례 + 상세 뱃지. 홈 '오늘 매수 예정' 카드는 `/buy-preview` 의 `macro` 진단으로
-오늘 밤 이벤트를 안내한다(레짐 축소도 같은 자리).
+오늘 밤 이벤트를 안내한다.
 
 **윈도우 종료 표시**(`/buy-preview` 응답 `venues[].closed`): 데드라인이 지난 거래소는 `closed=true` ·
 **시드·수량 0 · note=`윈도우 종료`**(배분·게이트 조회도 건너뜀). 표시 계층만 — 거래소별 시드는 여전히
@@ -249,7 +248,7 @@ cd trading/frontend && npm run dev                                        # 대�
 (fake 협력 객체 주입 + repository monkeypatch). 커버리지:
 - 시드 배분(`seed_allocator`) — 캡·첫1주 예외·확신도 표 비례·클램프·표 없으면 등가중 동일·표 계산법
 - 멱등키·사이징·paper 체결 시뮬레이션(`execution_engine`), 한도·서킷브레이커 분기(`risk_engine`)
-- 게이트 — 레짐 배수 매핑·역전 판정 / 선물 섹터 클래스·keep 차등·미개입 / 거시 보유 창·severity·프록시
+- 게이트 — 선물 섹터 클래스·keep 차등·결합 하한·미개입 / 거시 보유 창·severity·프록시
   관찰 전용·미개입
 - 뉴스 베토 — 전량매도·0순위 우선·fail-safe(빈 판정/조회 실패에도 하드손절 정상)·venue 보류·TTL 캐시
 - 집행 레이어 rule — 레이어 감지·fail-open 4종·점수 선정분 불개입·오설정 rule 격리·행 비변형·
