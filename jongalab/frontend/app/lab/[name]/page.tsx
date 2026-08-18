@@ -22,9 +22,9 @@ function ruleDescription(rule: EdgeRuleWithDaily): string {
     s && s.n > 0
       ? ` · 검증 ${s.n}회${s.n_days != null ? `(${s.n_days}거래일)` : ""}` +
         `${s.win_rate !== null ? ` · ${STAT_META.win_rate.label} ${Math.round(s.win_rate * 100)}%` : ""}` +
-        ` · ${STAT_META.mean_net.label} ${fmtPct(s.mean_net)}(거래비용 차감)`
+        ` · ${STAT_META.mean_net.label} ${fmtPct(s.mean_net)}(수수료·세금 뺀 값)`
       : "";
-  return `종가베팅 ${roleMeta(rule.role).label} 전략 · ${STATUS_LABEL[rule.status] ?? rule.status}${stat}. ${rule.description}`;
+  return `종가베팅 ${roleMeta(rule.role).label} 전략이에요 · ${STATUS_LABEL[rule.status] ?? rule.status}${stat}. ${rule.description}`;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {

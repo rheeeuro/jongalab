@@ -149,12 +149,12 @@ export function EdgeRuleDetail({
             </div>
           ) : (
             <p className="rounded-2xl bg-slate-50 p-4 text-center text-sm text-slate-400 dark:bg-slate-800/50">
-              아직 검증 기록이 없습니다 ({rule.registered_at} 등록 이후 매 거래일 자동으로 쌓입니다).
+              아직 성적 기록이 없어요 ({rule.registered_at}에 등록했고, 거래일마다 자동으로 쌓여요).
             </p>
           )}
           {s && (
             <p className="-mt-2 text-[11px] leading-relaxed text-slate-400">
-              모든 수익률은 세금·수수료 등 거래비용을 뺀 값입니다.
+              모든 수익률은 세금·수수료를 뺀 값이에요.
               {s.worst_low_ret !== null && ` · ${STAT_META.worst_low_ret.label} ${fmtPct(s.worst_low_ret)}`}
             </p>
           )}
@@ -197,13 +197,13 @@ export function EdgeRuleDetail({
               </div>
             </div>
           ) : (
-            <p className="text-xs text-slate-400">아직 날짜별 검증 데이터가 없습니다.</p>
+            <p className="text-xs text-slate-400">아직 날짜별 기록이 없어요.</p>
           )}
 
           {/* 종목 선정 조건 */}
           <div>
             <p className="mb-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
-              이 전략이 종목을 고르는 조건 (모두 만족해야 함)
+              이 전략이 종목을 고르는 조건 (모두 맞아야 해요)
             </p>
             <div className="flex flex-wrap gap-1.5">
               {rule.predicate.map((c, i) => (

@@ -29,7 +29,8 @@ export const metadata: Metadata = {
     default: "종가랩 — 종가 전략 연구소",
     template: "%s | 종가랩",
   },
-  description: "AI가 분석해주는 매일의 주식 시장 요약",
+  description:
+    "장이 끝나면 AI가 그날 시장을 정리하고, 다음 날 오를 만한 종목을 골라 알려줘요. 왜 골랐는지와 실제 성적까지 그대로 보여줘요.",
   // 파비콘은 `app/icon.png`(192²) · `app/apple-icon.png`(180²) 파일 규약으로 낸다 —
   // Next 가 해시 URL + 불변 캐시 헤더를 붙인다. 여기서 `icons` 를 선언하지 않는다.
   // 구글은 파비콘이 **48의 배수인 정사각형**일 때만 검색 결과에 쓴다.

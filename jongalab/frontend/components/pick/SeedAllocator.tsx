@@ -195,9 +195,9 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
             시드 배분
           </DialogTitle>
           <DialogDescription>
-            선정 근거가 많은 순으로 {Math.min(reports.length, TOP_N)}개 종목에
-            <b> 근거 수에 비례</b>해 나눠 담았을 때의 수량입니다(종목당 시드의{" "}
-            {MAX_NAME_PCT * 100}% 상한).
+            고른 이유가 많은 순으로 {Math.min(reports.length, TOP_N)}개 종목에
+            <b> 이유가 많을수록 더 많이</b> 나눠 담으면 몇 주가 되는지 계산해 봤어요(한 종목에
+            최대 전체 돈의 {MAX_NAME_PCT * 100}%까지만).
           </DialogDescription>
         </DialogHeader>
 
@@ -257,8 +257,8 @@ export function SeedAllocator({ reports }: { reports: StockReport[] }) {
             </p>
             {buyable.length === 0 ? (
               <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
-                시드가 부족해 매수할 수 있는 종목이 없습니다. 시드를 늘리거나
-                검색으로 종목 수를 줄여보세요.
+                금액이 적어서 살 수 있는 종목이 없어요. 금액을 늘리거나 검색으로 종목 수를
+                줄여 보세요.
               </p>
             ) : (
               <>

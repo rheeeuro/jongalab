@@ -52,7 +52,7 @@ export default function DashboardLoading() {
             시장
           </h1>
           <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
-            추천 종목이 놓인 배경 — 지수와 주도 섹터를 나눠서 봅니다.
+            추천 종목이 어떤 시장 분위기에서 나왔는지 봐요. 지수와 잘 나가는 업종을 나눠서 보여줘요.
           </p>
         </header>
 

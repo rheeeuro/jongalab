@@ -27,7 +27,7 @@ export function RecordSummaryPanel({
     return (
       <section className="rounded-3xl bg-white p-6 text-center dark:bg-slate-900/60">
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          아직 집계할 성적이 없습니다.
+          아직 모인 성적이 없어요.
         </p>
       </section>
     );
@@ -38,10 +38,10 @@ export function RecordSummaryPanel({
     summary.avg_exec_ret !== null && summary.exec_days !== summary.days;
   const execSub =
     summary.avg_exec_ret === null
-      ? "집계 전"
+      ? "아직 집계 전"
       : execWindowDiffers
         ? `${summary.exec_from_date} ~ ${summary.exec_to_date} · ${summary.exec_days}거래일 구간만`
-        : "체결가 기준(수수료·세금 전)";
+        : "실제로 사고판 가격 기준(수수료·세금 빼기 전)";
 
   return (
     <section className="rounded-3xl bg-white p-5 sm:p-6 dark:bg-slate-900/60">
@@ -85,8 +85,8 @@ export function RecordSummaryPanel({
       </div>
 
       <p className="mt-4 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
-        선정 종목 <b>전체</b>를 종가에 사서 다음 거래일 시가에 판다고 가정한 과거 기록입니다.
-        일부만 골라 담은 성적이 아니며, 미래 수익을 보장하지 않습니다.
+        뽑은 종목 <b>전체</b>를 장 마감 가격에 사서 다음 거래일 아침 첫 가격에 팔았다고 가정한
+        지난 기록이에요. 잘된 것만 골라 담은 성적이 아니고, 앞으로도 그럴 거라는 보장은 없어요.
       </p>
     </section>
   );

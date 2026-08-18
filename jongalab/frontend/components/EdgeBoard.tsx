@@ -10,8 +10,8 @@ import { ROLE_META, verifyProgress, isMeasurementOnly, isDecided, promoPolicy, P
 // 위→아래 순서. **끝난 것(판정 종결·종료)은 이 목록이 아니라 페이지 최하단**에 접힌 채로 둔다
 // 더 심사하지 않는 전략이 위쪽 자리를 차지하면 지금 볼 것을 가린다.
 const GROUPS: { status: "live" | "candidate"; label: string; desc: string }[] = [
-  { status: "live", label: "적용 중", desc: "검증을 통과해 종목 선정에 반영되는 전략" },
-  { status: "candidate", label: "검증 중", desc: "모의 채점으로 성적을 쌓는 중" },
+  { status: "live", label: "적용 중", desc: "성적 검사를 통과해서 실제로 쓰고 있는 전략" },
+  { status: "candidate", label: "검증 중", desc: "아직 실제로 쓰지 않고 성적만 쌓는 중" },
 ];
 
 // 역할(role) 탭 — 선정/위험 회피/측정용을 따로 볼 수 있게. 라벨·도움말은 ROLE_META 단일 소스.
@@ -49,9 +49,9 @@ export function EdgeBoard({ rules }: { rules: EdgeRuleWithDaily[] }) {
   if (rules.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-slate-200 py-16 text-center dark:border-slate-800">
-        <p className="text-sm text-slate-500 dark:text-slate-400">등록된 전략이 없습니다.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">등록된 전략이 없어요.</p>
         <p className="mt-1 text-xs text-slate-400">
-          전략이 등록되면 매 거래일 아침 자동으로 검증 성적이 쌓입니다.
+          전략을 등록하면 거래일마다 아침에 성적이 자동으로 쌓여요.
         </p>
       </div>
     );
@@ -120,7 +120,7 @@ export function EdgeBoard({ rules }: { rules: EdgeRuleWithDaily[] }) {
 
       {visible.length === 0 && (
         <p className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-xs text-slate-400 dark:border-slate-800">
-          이 역할의 전략이 없습니다.
+          이 역할을 하는 전략이 없어요.
         </p>
       )}
 

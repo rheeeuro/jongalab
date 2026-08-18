@@ -35,7 +35,7 @@ export function MacroEventNotice({ events }: { events: MacroEvent[] }) {
         <span className="font-bold">오늘 밤 {names}</span>
         <span className={major ? "" : "text-slate-400 dark:text-slate-400"}>
           {" "}
-          — {major ? "익일 갭 변동성 주의, 자동매매 시드 축소 적용" : "익일 갭 참고(감액 없음)"}
+          — {major ? "내일 아침 가격이 크게 흔들릴 수 있어요. 자동매매 금액을 줄여서 들어가요" : "내일 아침 가격 참고용이에요(금액은 그대로예요)"}
         </span>
       </p>
     </section>

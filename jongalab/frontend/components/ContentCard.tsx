@@ -303,7 +303,7 @@ export function ContentCard({ item }: Props) {
           </div>
         
         <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded text-sm text-yellow-800 dark:text-yellow-200 mt-2">
-          💡 <strong>Tip:</strong> 이 분석은 AI가 생성했습니다. 투자 판단의 참고용으로만 활용하세요.
+          💡 <strong>Tip:</strong> 이 분석은 AI가 만든 거예요. 참고만 하고, 투자 결정은 직접 하세요.
         </div>
       </DialogContent>
     </Dialog>

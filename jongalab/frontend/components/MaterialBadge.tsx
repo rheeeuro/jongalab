@@ -18,25 +18,25 @@ const STYLE: Record<
 > = {
   연속: {
     label: "연속",
-    hint: "다음 예정 사건이 한 달 안에 남았거나 산업 사이클 재료 (관찰 중 · 미검증)",
+    hint: "한 달 안에 관련 일정이 남아 있거나, 업종 흐름을 타고 있는 이유예요 (지켜보는 중 · 아직 검증 안 됨)",
     cls: "bg-slate-100 text-slate-700 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700",
     Icon: ArrowUpRight,
   },
   소진: {
     label: "소진",
-    hint: "다음 예정 사건이 없거나 마무리 국면인 재료 (관찰 중 · 미검증)",
+    hint: "남은 일정이 없거나 이미 마무리된 이유예요 (지켜보는 중 · 아직 검증 안 됨)",
     cls: "bg-slate-100 text-slate-600 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700",
     Icon: ArrowDownRight,
   },
   중립: {
     label: "중립",
-    hint: "다음 사건은 남았지만 시점이 멀거나 불명인 재료 (관찰 중 · 미검증)",
+    hint: "일정은 남았지만 언제인지 멀거나 확실하지 않은 이유예요 (지켜보는 중 · 아직 검증 안 됨)",
     cls: "bg-slate-50 text-slate-500 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:ring-slate-700",
     Icon: Minus,
   },
   미판정: {
     label: "미판정",
-    hint: "재료를 특정할 수 없어 판정하지 않음 (억지로 채우지 않는다)",
+    hint: "왜 움직였는지 딱 집을 수 없어서 비워 뒀어요 (억지로 고르지 않아요)",
     cls: "bg-transparent text-slate-400 ring-1 ring-dashed ring-slate-300 dark:text-slate-500 dark:ring-slate-600",
     Icon: Minus,
   },

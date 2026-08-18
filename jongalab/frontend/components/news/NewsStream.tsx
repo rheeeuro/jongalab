@@ -81,7 +81,7 @@ export function NewsStream({
       <div className="overflow-hidden rounded-2xl bg-white dark:bg-slate-900/60">
         {shown.length === 0 ? (
           <p className="p-6 text-center text-sm font-medium text-slate-400">
-            이 날 수집된 기사가 없습니다.
+            이 날 모아 온 기사가 없어요.
           </p>
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">

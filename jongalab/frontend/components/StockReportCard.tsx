@@ -337,7 +337,7 @@ export function StockReportCard({
             (없으면 배정비율만큼 낮아진 기준가 때문에 오른 종목이 하락으로 읽힌다) */}
         {r.gap_ex_rights_ratio != null && (
           <span
-            title="무상증자 권리락일입니다 — 배정비율만큼 낮아진 권리락 기준가 대비 등락률입니다"
+            title="무상증자로 주식 수가 늘어나 기준 가격이 낮아진 날이에요 — 낮아진 가격과 비교한 등락률이에요"
             className={`shrink-0 rounded-full bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900 dark:bg-amber-900/50 dark:text-amber-200`}
           >
             권리락

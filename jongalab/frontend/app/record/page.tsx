@@ -217,8 +217,8 @@ export default async function ReportsArchivePage({
             추천 성적
           </h1>
           <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
-            선정 종목을 종가에 사서 다음 거래일 시가에 판 결과를 그대로 공개합니다.
-            날짜를 누르면 그날의 추천 목록을 볼 수 있습니다.
+            추천한 종목을 장 마감 가격에 사서 다음 거래일 아침 첫 가격에 팔았다면 어땠을지 그대로
+            공개해요. 날짜를 누르면 그날 추천 목록을 볼 수 있어요.
           </p>
         </header>
 
@@ -254,7 +254,7 @@ export default async function ReportsArchivePage({
           {cellWeeks.length === 0 ? (
             <div className="rounded-3xl bg-white p-12 text-center dark:bg-slate-900/60">
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                이 달의 리포트가 없습니다.
+                이 달에는 리포트가 없어요.
               </p>
             </div>
           ) : (

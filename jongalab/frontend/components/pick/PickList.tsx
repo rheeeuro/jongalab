@@ -62,10 +62,10 @@ export function PickList({
     return (
       <section className="rounded-3xl bg-white p-10 text-center dark:bg-slate-900/60">
         <p className="text-sm font-bold text-slate-600 dark:text-slate-300">
-          이 날짜의 추천 종목이 없습니다.
+          이 날짜에는 추천 종목이 없어요.
         </p>
         <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
-          장 마감 후 리포트가 만들어집니다. 다른 거래일을 선택해 보세요.
+          리포트는 장이 끝난 뒤에 만들어져요. 다른 날짜를 골라 보세요.
         </p>
       </section>
     );
@@ -120,7 +120,7 @@ export function PickList({
             </>
           ) : (
             <span className="text-slate-400 dark:text-slate-500">
-              결과는 다음 거래일 아침에 채워집니다
+              결과는 다음 거래일 아침에 채워져요
             </span>
           )}
           {action && <div className="ml-auto shrink-0">{action}</div>}

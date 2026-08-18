@@ -161,7 +161,7 @@ export function EdgeRuleDetailContent({
               </>
             ) : (
               <p className="rounded-xl bg-slate-50 px-3 py-8 text-center text-sm text-slate-400 dark:bg-[#202027]">
-                아직 날짜별 검증 데이터가 없습니다.
+                아직 날짜별 기록이 없어요.
               </p>
             )}
           </Panel>
@@ -185,8 +185,8 @@ export function EdgeRuleDetailContent({
           {matchedHistory && matchedHistory.length > 0 && (
             <Panel title="날짜별 매칭 기록" icon={<CalendarDays className="h-4 w-4" />}>
               <p className="mb-3 text-xs leading-relaxed text-slate-400 dark:text-slate-500">
-                조건에 걸린 종목과 결과를 날짜별로 보여줍니다(최근 {matchedHistory.length}일).
-                종목별 수익률은 거래비용 차감 전 원본이고, 날짜 평균만 비용을 뺀 값입니다.
+                조건에 걸린 종목과 그 결과를 날짜별로 보여줘요(최근 {matchedHistory.length}일).
+                종목별 수익률은 수수료·세금을 빼기 전 값이고, 날짜 평균만 빼고 계산한 값이에요.
               </p>
               <div className="space-y-2">
                 {matchedHistory.map((day, idx) => (
@@ -241,7 +241,7 @@ export function EdgeRuleDetailContent({
                         ))}
                       </div>
                       <p className="mt-2.5 text-[10px] leading-relaxed text-slate-400 dark:text-slate-500">
-                        당일 = 매칭 당일 등락률 · 수익 = {exitLabelText(rule.exit_label)} · 익일최저 = 다음날 장중 최저가 기준(꼬리 리스크)
+                        당일 = 조건에 걸린 날의 등락률 · 수익 = {exitLabelText(rule.exit_label)} · 익일최저 = 다음 날 장중에 가장 낮았던 가격 기준
                       </p>
                     </div>
                   </details>
@@ -277,12 +277,12 @@ export function EdgeRuleDetailContent({
               </div>
             ) : (
               <p className="rounded-xl bg-slate-50 px-3 py-6 text-center text-sm text-slate-400 dark:bg-[#202027]">
-                아직 검증 기록이 없습니다.
+                아직 성적 기록이 없어요.
               </p>
             )}
             {s && (
               <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
-                모든 수익률은 세금·수수료 등 거래비용을 뺀 값입니다.
+                모든 수익률은 세금·수수료를 뺀 값이에요.
                 {s.worst_low_ret !== null && ` · ${STAT_META.worst_low_ret.label} ${fmtPct(s.worst_low_ret)}`}
               </p>
             )}

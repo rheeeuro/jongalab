@@ -20,7 +20,7 @@ function supplyLine(r: StockReport): string {
   if (r.inst_net_buy > 0) buyers.push(`기관 ${billion(r.inst_net_buy)}`);
   if (r.frgn_net_buy > 0) buyers.push(`외국인 ${billion(r.frgn_net_buy)}`);
   if (r.prog_net_buy > 0) buyers.push(`프로그램 ${billion(r.prog_net_buy)}`);
-  if (buyers.length === 0) return "기관·외국인 순매수 없음";
+  if (buyers.length === 0) return "기관·외국인이 사지 않았어요";
   const days = r.supply_days > 0 ? ` · ${r.supply_days}일 연속` : "";
   return `${buyers.join(" · ")}${days}`;
 }
@@ -32,7 +32,7 @@ function technicalLine(r: StockReport): string {
   if (r.near_high) parts.push("신고가 근접");
   if (r.is_leader) parts.push(`${r.sector || "섹터"} 대장주`);
   if (r.is_theme_stock) parts.push("테마 주도주");
-  if (parts.length === 0) return "특별한 기술적 신호 없음";
+  if (parts.length === 0) return "차트에서 눈에 띄는 신호는 없어요";
   return parts.join(" · ");
 }
 
@@ -45,7 +45,7 @@ function materialLine(r: StockReport): string {
     );
   }
   if ((r.content_score ?? 0) > 0) parts.push("유튜브·텔레그램 언급");
-  if (parts.length === 0) return "당일 수집된 재료 없음";
+  if (parts.length === 0) return "이 날 모아 온 재료가 없어요";
   return parts.join(" · ");
 }
 

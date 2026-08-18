@@ -30,8 +30,8 @@ export async function generateMetadata({
   // 제목에 날짜를 넣지 않아 종목 이름만으로 찾는 질의를 이 화면이 받는다.
   const description =
     stockReports.length > 0
-      ? `${stockName}(${decodedTicker}) 종목 분석 — 종가베팅 후보로 선정된 이력 ${stockReports.length}건과 그때의 선정 근거, 수급·뉴스 재료를 한 화면에 모았습니다.`
-      : `${stockName}(${decodedTicker}) 종목 분석 — 수집한 뉴스·콘텐츠에서 이 종목이 어떻게 언급됐는지 모아 봅니다.`;
+      ? `${stockName}(${decodedTicker}) 종목 분석이에요. 종가베팅 후보로 뽑힌 기록 ${stockReports.length}건과 그때 왜 뽑혔는지, 수급(기관·외국인 매수)과 뉴스 재료를 한 화면에 모아 뒀어요.`
+      : `${stockName}(${decodedTicker}) 종목 분석이에요. 모아 온 뉴스와 유튜브·텔레그램에서 이 종목이 어떻게 언급됐는지 볼 수 있어요.`;
 
   return {
     title: `${stockName} 종목 분석`,
@@ -159,7 +159,7 @@ export default async function StockDetailPage({
               <p className="text-sm text-slate-500 dark:text-slate-400">
                 아직 <strong className="text-slate-900 dark:text-slate-100">{decodedTicker}</strong>에 대해
                 <br />
-                AI가 수집한 데이터가 없습니다.
+                AI가 모아 온 자료가 없어요.
               </p>
             </div>
           )}

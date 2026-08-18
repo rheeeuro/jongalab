@@ -14,19 +14,19 @@ export function TradePlan({ report: r }: { report: StockReport }) {
       icon: LogIn,
       label: "진입",
       value: `${r.current_price.toLocaleString("ko-KR")}원`,
-      note: "리포트 작성 시점(장 마감 무렵) 가격",
+      note: "리포트를 만든 때(장 마감 무렵) 가격이에요",
     },
     {
       icon: LogOut,
       label: "청산",
       value: "다음 거래일 시가",
-      note: "성적 집계가 쓰는 기준",
+      note: "성적을 셀 때 쓰는 기준이에요",
     },
     {
       icon: ShieldAlert,
       label: "손절",
       value: "직접 설정",
-      note: "감당할 손실 금액에서 수량을 역산하세요",
+      note: "잃어도 괜찮은 금액을 정하고 수량을 거꾸로 계산해 보세요",
     },
   ];
 
@@ -60,8 +60,8 @@ export function TradePlan({ report: r }: { report: StockReport }) {
       </div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
-        이 구간(종가 매수 → 익일 시가 매도)이 성적 페이지의 승률·평균 수익률을 계산하는
-        전제입니다. 다르게 매매하면 결과도 달라집니다.
+        성적 화면의 승률·평균 수익률은 이렇게(장 마감에 사서 다음 날 아침에 팔기) 했다고 보고
+        계산한 값이에요. 다르게 매매하면 결과도 달라져요.
       </p>
     </section>
   );

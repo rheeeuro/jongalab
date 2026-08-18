@@ -28,7 +28,7 @@ import { apiFetch } from "@/lib/api";
 export const metadata: Metadata = {
   title: "뉴스 - 오늘의 종목 재료",
   description:
-    "그 날의 종목 재료와 헤드라인, 그리고 유튜브·텔레그램 콘텐츠 분석.",
+    "그날 종목이 왜 움직였는지, 뉴스에서 찾은 이유(재료)와 기사 제목을 모아 봐요. 유튜브·텔레그램에서 무슨 얘기가 나왔는지도 정리해 줘요.",
   // ?view=·?date=·?page= 변형은 기본 경로로 통합해 중복 색인을 방지한다.
   alternates: { canonical: "/news" },
 };
@@ -138,7 +138,7 @@ export default async function NewsPage({
           뉴스
         </h1>
         <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
-          기사에서 나온 종목 재료와, 유튜브·텔레그램 콘텐츠 분석을 나눠서 봅니다.
+          기사에서 찾은 종목이 오를 이유(재료)와, 유튜브·텔레그램 이야기를 나눠서 보여줘요.
         </p>
       </header>
 
@@ -187,7 +187,7 @@ async function NewsView({ date: requestedDate }: { date?: string }) {
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-          {isToday ? "오늘" : formatKoDate(date)}의 종목 재료와 수집 헤드라인
+          {isToday ? "오늘" : formatKoDate(date)} 종목이 움직인 이유와 모아 온 기사예요
         </p>
         <NewsDateNav date={date} dates={dates} />
       </div>
@@ -196,16 +196,16 @@ async function NewsView({ date: requestedDate }: { date?: string }) {
           details/summary(CSS-only)라 서버 컴포넌트를 유지한다. */}
       <details className="mt-3 rounded-2xl bg-white px-4 py-3 dark:bg-slate-900/60">
         <summary className="cursor-pointer list-none text-xs font-bold text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-300">
-          ⚠️ 재료 등급은 관찰 중 · 미검증입니다 — 어떻게 판정하나요?
+          ⚠️ 재료 등급은 아직 검증되지 않은 실험이에요 — 어떻게 정하나요?
         </summary>
         <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-          뉴스가 있는 후보 종목의 재료를 AI가 읽고 <b>이어질 성질인지</b> 판정합니다. 다음 예정
-          사건이 남고 수치가 확정되지 않았으면 &lsquo;연속&rsquo;, 수치가 확정되고 남은 일정이
-          없으면 &lsquo;소진&rsquo;입니다. 재료를 특정할 수 없으면 억지로 채우지 않고 판정을
-          보류합니다.
+          후보 종목에 뉴스가 있으면 AI가 그 내용을 읽고 <b>이 이야기가 더 이어질지</b> 판단해요.
+          앞으로 남은 일정이 있고 결과가 아직 안 나왔으면 &lsquo;연속&rsquo;, 결과가 이미 다
+          나오고 남은 일정도 없으면 &lsquo;소진&rsquo;이에요. 무엇 때문에 움직였는지 딱 집을 수
+          없으면 억지로 고르지 않고 비워 둬요.
           <br />
           <span className="font-bold text-slate-400 dark:text-slate-500">
-            이 등급은 매수 신호가 아니고 실매매에 개입하지 않습니다(성적만 기록 중).
+            이 등급은 &ldquo;사라는 신호&rdquo;가 아니고, 실제 매매에도 쓰지 않아요(성적만 기록하고 있어요).
           </span>
         </p>
       </details>
@@ -218,7 +218,7 @@ async function NewsView({ date: requestedDate }: { date?: string }) {
         <div className="min-w-0 space-y-8">
           {rows.length === 0 ? (
             <p className="rounded-2xl bg-white p-6 text-center text-sm font-medium text-slate-400 dark:bg-slate-900/60">
-              이 날 뉴스가 매칭된 후보 종목이 없습니다.
+              이 날은 뉴스가 붙은 후보 종목이 없어요.
             </p>
           ) : (
             <MaterialBoard rows={rows} date={date} />
@@ -273,7 +273,7 @@ async function ContentView({ page }: { page: number }) {
           </div>
         ) : (
           <div className="rounded-3xl bg-white p-12 text-center text-sm text-slate-400 dark:bg-slate-900/60">
-            아직 수집된 콘텐츠가 없습니다.
+            아직 모아 온 콘텐츠가 없어요.
           </div>
         )}
 

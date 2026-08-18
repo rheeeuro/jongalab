@@ -184,7 +184,7 @@ export function CandlestickChart({
   if (!data.length) {
     return (
       <p className="text-sm text-slate-400 text-center py-8">
-        차트 데이터가 없습니다
+        차트로 보여줄 자료가 없어요
       </p>
     );
   }

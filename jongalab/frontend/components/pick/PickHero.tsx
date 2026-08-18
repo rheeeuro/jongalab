@@ -60,8 +60,8 @@ export function PickHero({
         </h1>
         <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
           {ruleCount > 0
-            ? `검증 통과 규칙 ${ruleCount}개가 선정`
-            : "수급·기술·재료 종합 점수로 선정"}
+            ? `성적을 확인한 전략 ${ruleCount}개가 골랐어요`
+            : "수급·차트·뉴스 점수를 합쳐 골랐어요"}
         </p>
       </div>
 
@@ -70,7 +70,7 @@ export function PickHero({
         <summary className="flex cursor-pointer list-none items-start gap-1.5 text-xs leading-relaxed font-semibold text-amber-800 dark:text-amber-300">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
-            매수 신호가 아니며 투자 판단의 책임은 본인에게 있습니다.
+            사라는 신호가 아니에요. 투자 결정과 그 결과는 본인 책임이에요.
             <span className="ml-1 font-bold underline underline-offset-2 group-open:hidden">
               자세히
             </span>
@@ -78,12 +78,12 @@ export function PickHero({
         </summary>
         <div className="mt-2 space-y-1.5 pl-5 text-xs leading-relaxed text-amber-800/90 dark:text-amber-200/80">
           <p>
-            이 목록은 수급·기술·재료 데이터로 자동 선정된 <b>관찰 대상</b>입니다. 특정 종목의
-            매수·매도를 권유하지 않으며, 실제 매매에 개입하지 않습니다.
+            이 목록은 수급(기관·외국인 매수)·차트·뉴스를 보고 자동으로 뽑은 <b>지켜볼 종목</b>이에요.
+            사라거나 팔라고 권하는 게 아니고, 실제 매매에도 끼어들지 않아요.
           </p>
           <p>
-            성적은 <b>선정 종목 전체</b>를 종가에 사서 다음 거래일 시가에 판다고 가정한
-            과거 기록이며, 미래 수익을 보장하지 않습니다.
+            성적은 <b>뽑은 종목 전체</b>를 장 마감 가격에 사서 다음 거래일 아침 첫 가격에 팔았다고
+            가정한 지난 기록이에요. 앞으로도 그럴 거라는 보장은 없어요.
           </p>
         </div>
       </details>

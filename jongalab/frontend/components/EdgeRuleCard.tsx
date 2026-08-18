@@ -45,7 +45,7 @@ export function EdgeRuleCard({
   const decidedReason = (() => {
     const step = rule.decision?.confirm ?? rule.decision?.discovery;
     const reason = step?.reasons?.[0];
-    if (!reason) return "검증이 끝나 더 심사하지 않습니다(채점은 계속됩니다).";
+    if (!reason) return "검사가 끝나서 더는 심사하지 않아요(성적은 계속 매겨요).";
     const at = step?.at ?? rule.decision?.decided_at;
     const md = at?.match(/^\d{4}-(\d{2})-(\d{2})/);
     return md ? `${+md[1]}/${+md[2]} 판정 기준 — ${reason}` : reason;
@@ -141,7 +141,7 @@ export function EdgeRuleCard({
         </div>
       ) : (
         <p className="mt-auto truncate text-xs text-slate-400 dark:text-slate-500">
-          아직 검증 기록 없음 ({rule.registered_at} 등록, 매 거래일 자동 채점)
+          아직 성적 기록이 없어요 ({rule.registered_at} 등록, 거래일마다 자동으로 매겨요)
         </p>
       )}
 

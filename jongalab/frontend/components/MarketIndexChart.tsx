@@ -124,8 +124,8 @@ export function MarketIndexChart({
         ) : (
           <p className="py-12 text-center text-sm text-slate-400">
             {isFutures
-              ? "선물 시세를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
-              : "이 지표는 분봉 차트 데이터를 제공하지 않습니다."}
+              ? "선물 가격을 가져오지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+              : "이 지표는 분 단위 차트를 제공하지 않아요."}
           </p>
         )}
       </div>

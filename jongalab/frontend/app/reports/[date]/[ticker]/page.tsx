@@ -69,7 +69,7 @@ export async function generateMetadata({
   const data = await getReportDetail(resolvedParams.date, resolvedParams.ticker);
 
   if (!data) {
-    return { title: "리포트를 찾을 수 없습니다" };
+    return { title: "리포트를 찾을 수 없어요" };
   }
 
   const r = data.report;
@@ -78,7 +78,7 @@ export async function generateMetadata({
   // "추천 근거"는 그 자체가 검색되는 말이 아니다. description 도 순매수 금액 나열 대신
   // "왜 골랐나"를 쓴다. 근거: docs/plan/seo/search-visibility.md
   const title = `${r.stock_name} 투자분석 - ${resolvedParams.date.replace(/-/g, ".")}`;
-  const description = `${r.stock_name} 종목을 종가베팅 후보로 고른 근거 — 수급 ${r.supply_grade}등급(${r.supply_score?.toFixed(1) ?? 0}점), 종합 ${r.score}점. 다음날 아침 실제 결과까지 공개합니다.`;
+  const description = `${r.stock_name}을 종가베팅 후보로 고른 이유를 알려드려요. 수급(기관·외국인 매수) ${r.supply_grade}등급(${r.supply_score?.toFixed(1) ?? 0}점), 종합 ${r.score}점이었어요. 다음 날 아침 실제 결과까지 볼 수 있어요.`;
 
   return {
     title,
@@ -181,10 +181,10 @@ export default async function StockReportPage({
       <div className="min-h-screen flex items-center justify-center p-8">
         <div className="text-center space-y-4">
           <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-            해당 리포트가 없습니다
+            이 리포트가 없어요
           </h1>
           <p className="text-slate-500">
-            {date} / {ticker} 에 대한 종목 리포트를 찾을 수 없습니다.
+            {date} / {ticker} 종목 리포트를 찾을 수 없어요.
           </p>
           <Link
             href="/"
@@ -244,7 +244,7 @@ export default async function StockReportPage({
               <Link
                 key={c.name}
                 href={`/lab/${encodeURIComponent(c.name)}`}
-                title="실험실에서 검증한 규칙이 이 종목을 골랐습니다 (점수 순위와 무관) — 눌러서 규칙 성적 보기"
+                title="실험실에서 성적을 확인한 전략이 이 종목을 골랐어요 (점수 순위와는 관계없어요) — 눌러서 전략 성적 보기"
                 className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-3 py-1 text-sm font-extrabold text-violet-700 hover:bg-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:hover:bg-violet-900/60"
               >
                 <FlaskConical className="h-3.5 w-3.5 shrink-0" />
@@ -307,8 +307,8 @@ export default async function StockReportPage({
                   <span className="font-bold">무상증자 권리락일</span> — 1주당 신주{" "}
                   {exRatio}주 배정으로 기준가가{" "}
                   <span className="font-bold tabular-nums">{basePrice.toLocaleString("ko-KR")}</span>
-                  원으로 조정됐습니다. 아래 등락률은 <span className="font-bold">조정 기준가 대비</span>{" "}
-                  실제 움직임입니다.
+                  원으로 낮아졌어요. 아래 등락률은 <span className="font-bold">낮아진 기준 가격과 비교한</span>{" "}
+                  실제 움직임이에요.
                 </div>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -541,7 +541,7 @@ export default async function StockReportPage({
                         colSpan={5}
                         className="py-8 text-center text-slate-400"
                       >
-                        수급 이력 데이터가 없습니다
+                        수급 기록이 없어요
                       </td>
                     </tr>
                   )}
@@ -863,7 +863,7 @@ export default async function StockReportPage({
 
         {/* 면책 */}
         <p className="text-xs text-slate-400 text-center pb-8">
-          본 리포트는 AI가 자동 생성한 참고 자료이며, 투자 판단의 근거로 사용해서는 안 됩니다.
+          이 리포트는 AI가 자동으로 만든 참고 자료예요. 이것만 보고 투자를 결정하면 안 돼요.
         </p>
       </div>
     </main>

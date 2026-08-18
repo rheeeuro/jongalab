@@ -33,14 +33,14 @@ export async function generateMetadata({
   const topPick = stockReports[0] ?? null;
 
   if (!topPick) {
-    return { title: "리포트를 찾을 수 없습니다" };
+    return { title: "리포트를 찾을 수 없어요" };
   }
 
   // 제목 앞머리는 **검색 의도 키워드**, 날짜는 뒤로 뺀다(종목 상세와 같은 `이름 - YYYY.MM.DD` 형식)
   // — 날짜를 앞세우면 "종목명 날짜 종가" 같은 시세 조회 쿼리에만 걸린다.
   // 근거: docs/plan/seo/search-visibility.md
   const title = `종가베팅 추천 ${stockReports.length}종목 - ${resolvedParams.date.replace(/-/g, ".")}`;
-  const description = `${topPick.stock_name} 외 ${stockReports.length}종목을 종가베팅 후보로 고른 근거 — 수급·기술·재료 점수와 다음날 아침 실제 결과까지 공개합니다.`;
+  const description = `${topPick.stock_name} 등 ${stockReports.length}종목을 종가베팅 후보로 고른 이유를 알려드려요. 수급(기관·외국인 매수)·차트·뉴스 점수와 다음 날 아침 실제 결과까지 볼 수 있어요.`;
 
   return {
     title,
@@ -76,7 +76,7 @@ export default async function ReportPage({
       <main className="flex min-h-screen items-center justify-center px-6">
         <div className="text-center">
           <p className="text-sm font-medium text-slate-400">
-            해당 날짜의 리포트가 없습니다.
+            이 날짜의 리포트가 없어요.
           </p>
           <p className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-slate-100">
             {date}
@@ -121,8 +121,8 @@ export default async function ReportPage({
           </h1>
           <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
             {ruleCount > 0
-              ? `검증된 규칙 ${ruleCount}개가 고른 종목과 다음날 아침 결과입니다.`
-              : "종합 점수로 고른 종목과 다음날 아침 결과입니다."}
+              ? `성적 검사를 통과한 전략 ${ruleCount}개가 고른 종목이에요. 다음 날 아침 결과도 함께 있어요.`
+              : "종합 점수로 고른 종목이에요. 다음 날 아침 결과도 함께 있어요."}
           </p>
           <div className="mt-3">
             <DateStepper date={date} dates={dates} />

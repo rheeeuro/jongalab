@@ -8,7 +8,7 @@ import { ViewSegment } from "@/components/ViewSegment";
 
 export const metadata: Metadata = {
   title: "시장",
-  description: "지수·경제 일정과 주도 섹터를 나눠서 봅니다.",
+  description: "오늘 시장 분위기를 한눈에 봐요. 주요 지수와 경제 일정, 잘 나가는 업종을 나눠서 보여줘요.",
   alternates: { canonical: "/market" },
 };
 
@@ -68,7 +68,7 @@ export default async function MarketPage({
             시장
           </h1>
           <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
-            추천 종목이 놓인 배경 — 지수와 주도 섹터를 나눠서 봅니다.
+            추천 종목이 어떤 시장 분위기에서 나왔는지 봐요. 지수와 잘 나가는 업종을 나눠서 보여줘요.
           </p>
         </header>
 

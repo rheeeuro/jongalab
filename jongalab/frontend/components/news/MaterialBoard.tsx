@@ -161,7 +161,7 @@ export function MaterialBoard({
       <div className="mt-3 overflow-hidden rounded-2xl bg-white dark:bg-slate-900/60">
         {filtered.length === 0 ? (
           <p className="p-6 text-center text-sm font-medium text-slate-400">
-            조건에 맞는 종목이 없습니다.
+            조건에 맞는 종목이 없어요.
           </p>
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">

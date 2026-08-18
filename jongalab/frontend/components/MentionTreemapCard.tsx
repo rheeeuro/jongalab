@@ -256,7 +256,7 @@ export function MentionTreemapCard({ stats }: { stats: MentionStats | null }) {
 
       {!stats || treemapData.length === 0 ? (
         <div className="h-40 flex items-center justify-center text-sm text-slate-400">
-          최근 24시간 동안 분류 가능한 콘텐츠가 없습니다.
+          최근 24시간 동안 분류할 만한 콘텐츠가 없어요.
         </div>
       ) : (
         <>
