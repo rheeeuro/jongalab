@@ -31,7 +31,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { name } = await params;
   const rule = await getEdgeRuleWithDailyByName(name, 60);
   return {
-    title: rule ? `${rule.title ?? rule.name} 전략` : "전략 상세",
+    title: rule
+      ? `${rule.title ?? rule.name} - 종가베팅 전략 검증`
+      : "전략 상세",
     description: rule ? ruleDescription(rule) : undefined,
     alternates: { canonical: rule ? `/lab/${encodeURIComponent(rule.name)}` : `/lab/${encodeURIComponent(name)}` },
   };

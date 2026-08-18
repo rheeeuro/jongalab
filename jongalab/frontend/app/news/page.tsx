@@ -26,7 +26,7 @@ import { ViewSegment } from "@/components/ViewSegment";
 import { apiFetch } from "@/lib/api";
 
 export const metadata: Metadata = {
-  title: "뉴스",
+  title: "뉴스 - 오늘의 종목 재료",
   description:
     "그 날의 종목 재료와 헤드라인, 그리고 유튜브·텔레그램 콘텐츠 분석.",
   // ?view=·?date=·?page= 변형은 기본 경로로 통합해 중복 색인을 방지한다.

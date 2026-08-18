@@ -26,8 +26,16 @@ export async function generateMetadata({
   // (사이트맵도 같은 기준으로 리포트 있는 종목만 싣는다). 근거: docs/plan/seo/search-visibility.md
   const hasContent = contents.length > 0 || stockReports.length > 0;
 
+  // 날짜가 붙는 리포트 상세(`{종목명} 투자분석 - YYYY.MM.DD`)와 달리 여기는 **상시** 페이지다.
+  // 제목에 날짜를 넣지 않아 종목 이름만으로 찾는 질의를 이 화면이 받는다.
+  const description =
+    stockReports.length > 0
+      ? `${stockName}(${decodedTicker}) 종목 분석 — 종가베팅 후보로 선정된 이력 ${stockReports.length}건과 그때의 선정 근거, 수급·뉴스 재료를 한 화면에 모았습니다.`
+      : `${stockName}(${decodedTicker}) 종목 분석 — 수집한 뉴스·콘텐츠에서 이 종목이 어떻게 언급됐는지 모아 봅니다.`;
+
   return {
     title: `${stockName} 종목 분석`,
+    description,
     alternates: { canonical: `/stocks/${decodedTicker}` },
     ...(hasContent ? {} : { robots: { index: false, follow: true } }),
   };

@@ -85,7 +85,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const dates = await getReportDates();
   const summary = await getRecordSummary(dates.length || 20);
   return {
-    title: "추천 성적",
+    title: "추천 성적 - 종가베팅 승률·수익률",
     description: recordMetaDescription(summary),
     alternates: { canonical: "/record" },
   };
