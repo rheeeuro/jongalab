@@ -4,17 +4,24 @@ import { CandlestickChart } from "@/components/CandlestickChart";
 import { MaterialBadge, materialAxisLabels } from "@/components/MaterialBadge";
 import { apiFetch, getEdgeRules } from "@/lib/api";
 import { humanizeMaterialReason, splitHeadlineUrl } from "@/lib/news";
+import {
+  formatBillion,
+  formatMarketCap,
+  formatWon,
+  gapBasePrice,
+  morningSentence,
+  reportLede,
+  reportMetaDescription,
+} from "@/lib/report";
+import { RichText } from "@/components/ui/rich-text";
+import { PANEL, INSET } from "@/lib/ui";
 import { Metadata } from "next";
 import Link from "next/link";
 import {
   ArrowLeft,
   TrendingUp,
-  Building2,
-  Crown,
   BarChart3,
   Activity,
-  CheckCircle2,
-  XCircle,
   Newspaper,
   ExternalLink,
   Youtube,
@@ -22,9 +29,9 @@ import {
   Sunrise,
   FlaskConical,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WhyPicked } from "@/components/pick/WhyPicked";
 import { TradePlan } from "@/components/pick/TradePlan";
+import { ScoreGauge } from "@/components/pick/ScoreGauge";
 
 function fetchOptions(date: string): RequestInit {
   // 종가베팅 워커가 평일 30분 간격으로 daily_stock_report를 DELETE+INSERT 하므로
@@ -37,9 +44,13 @@ function fetchOptions(date: string): RequestInit {
 
 async function getReportDetail(
   date: string,
-  ticker: string
+  ticker: string,
 ): Promise<StockReportDetail | null> {
-  return apiFetch(`/api/stock-report/${date}/${ticker}`, null, fetchOptions(date));
+  return apiFetch(
+    `/api/stock-report/${date}/${ticker}`,
+    null,
+    fetchOptions(date),
+  );
 }
 
 /** 선정 근거 룰 → 화면에 낼 한글 제목 + 링크 경로.
@@ -49,7 +60,7 @@ async function getReportDetail(
  * (title 이 비어 있으면 실험실 화면과 동일하게 슬러그로 폴백).
  */
 async function getRuleChips(
-  ruleNames: string[]
+  ruleNames: string[],
 ): Promise<{ name: string; label: string }[]> {
   if (ruleNames.length === 0) return [];
   const rules = await getEdgeRules();
@@ -66,7 +77,10 @@ export async function generateMetadata({
   params: { date: string; ticker: string };
 }): Promise<Metadata> {
   const resolvedParams = await params;
-  const data = await getReportDetail(resolvedParams.date, resolvedParams.ticker);
+  const data = await getReportDetail(
+    resolvedParams.date,
+    resolvedParams.ticker,
+  );
 
   if (!data) {
     return { title: "리포트를 찾을 수 없어요" };
@@ -74,11 +88,11 @@ export async function generateMetadata({
 
   const r = data.report;
   // 제목은 `{종목명} 투자분석 - {YYYY.MM.DD}` — 앞머리에 **실제로 검색되는 키워드**를 두고
-  // 날짜는 뒤로 뺀다. 날짜를 앞세우면 "종목명 날짜 종가" 같은 시세 조회 쿼리에만 걸리고,
-  // "추천 근거"는 그 자체가 검색되는 말이 아니다. description 도 순매수 금액 나열 대신
-  // "왜 골랐나"를 쓴다. 근거: docs/plan/seo/search-visibility.md
+  // 날짜는 뒤로 뺀다. 날짜를 앞세우면 "종목명 날짜 종가" 같은 시세 조회 쿼리에만 걸린다.
+  // description 은 본문 리드와 같은 빌더(`lib/report`)를 쓴다 — 스니펫과 본문이 갈리지 않게.
+  // 근거: docs/plan/seo/search-visibility.md
   const title = `${r.stock_name} 투자분석 - ${resolvedParams.date.replace(/-/g, ".")}`;
-  const description = `${r.stock_name}을 종가베팅 후보로 고른 이유를 알려드려요. 수급(기관·외국인 매수) ${r.supply_grade}등급(${r.supply_score?.toFixed(1) ?? 0}점), 종합 ${r.score}점이었어요. 다음 날 아침 실제 결과까지 볼 수 있어요.`;
+  const description = reportMetaDescription(r, resolvedParams.date);
 
   return {
     title,
@@ -96,74 +110,45 @@ export async function generateMetadata({
   };
 }
 
-function formatTradingValue(val: number): string {
-  const b = val / 1e8;
-  return `${b.toLocaleString("ko-KR", { maximumFractionDigits: 0 })}`;
-}
-
-function formatMarketCap(val: number): string {
-  if (val <= 0) return "-";
-  const trillion = val / 1e12;
-  if (trillion >= 1) {
-    return `${trillion.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}조`;
-  }
-  const billion = val / 1e8;
-  return `${billion.toLocaleString("ko-KR", { maximumFractionDigits: 0 })}억`;
-}
-
-const SUPPLY_GRADE_STYLE: Record<string, { label: string; color: string; bg: string }> = {
-  S: { label: "S (종가베팅 최우선)", color: "text-red-700 dark:text-red-400", bg: "bg-red-100 dark:bg-red-900/40" },
-  A: { label: "A (관심권)", color: "text-orange-700 dark:text-orange-400", bg: "bg-orange-100 dark:bg-orange-900/40" },
-  B: { label: "B (조건부 관찰)", color: "text-yellow-700 dark:text-yellow-400", bg: "bg-yellow-100 dark:bg-yellow-900/40" },
-  C: { label: "C (수급 약함)", color: "text-slate-600 dark:text-slate-400", bg: "bg-slate-100 dark:bg-slate-800" },
-  D: { label: "D (제외)", color: "text-slate-500 dark:text-slate-500", bg: "bg-slate-50 dark:bg-slate-900" },
+/** 수급 등급 칩 색 — 등급 뜻(관심권·수급 약함…)은 '왜 뽑혔나' 축이 내므로 여기선 색만 갖는다. */
+const SUPPLY_GRADE_CHIP: Record<string, string> = {
+  S: "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300",
+  A: "bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300",
+  B: "bg-yellow-100 text-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300",
+  C: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+  D: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
 };
 
-function SupplyGradeBadge({ grade, score }: { grade: string; score?: number }) {
-  const style = SUPPLY_GRADE_STYLE[grade] || SUPPLY_GRADE_STYLE.D;
+/** 조건 충족 여부 칩 — 참이면 색면, 아니면 회색으로 눕힌다(색 단독 표시가 아니라 문구가 라벨). */
+function ConditionChip({ on, label }: { on: boolean; label: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-bold ${style.color} ${style.bg}`}>
-        {style.label}
-      </span>
-      {typeof score === "number" && (
-        <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-          {score.toFixed(1)}점
-        </span>
-      )}
-    </div>
-  );
-}
-
-function BoolBadge({ value, trueText, falseText }: { value: boolean; trueText: string; falseText: string }) {
-  return value ? (
-    <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400 font-semibold">
-      <CheckCircle2 className="w-4 h-4" /> {trueText}
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 text-slate-400 dark:text-slate-500">
-      <XCircle className="w-4 h-4" /> {falseText}
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${
+        on
+          ? "bg-teal-100 text-teal-800 dark:bg-teal-950/50 dark:text-teal-300"
+          : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
+      }`}
+    >
+      {on ? "○" : "×"} {label}
     </span>
   );
 }
 
 function NetBuyCell({ value }: { value: number | null | undefined }) {
   const b = (value ?? 0) / 1e8;
-  const isPositive = b > 0;
-  const isNegative = b < 0;
   return (
-    <span
-      className={`font-mono font-semibold ${
-        isPositive
+    <td
+      className={`py-2 px-1.5 text-right font-mono text-[11px] font-semibold tabular-nums sm:text-xs ${
+        b > 0
           ? "text-red-600 dark:text-red-400"
-          : isNegative
-          ? "text-blue-600 dark:text-blue-400"
-          : "text-slate-500"
+          : b < 0
+            ? "text-blue-600 dark:text-blue-400"
+            : "text-slate-400"
       }`}
     >
-      {isPositive ? "+" : ""}
-      {b.toLocaleString("ko-KR", { maximumFractionDigits: 0 })}억
-    </span>
+      {b > 0 ? "+" : ""}
+      {b.toLocaleString("ko-KR", { maximumFractionDigits: 0 })}
+    </td>
   );
 }
 
@@ -197,22 +182,26 @@ export default async function StockReportPage({
     );
   }
 
-  const { report: r, content_analyses: contentAnalyses = [] } = data;
-  const supplyHistory = r.supply_history ?? [];
+  const {
+    report: r,
+    content_analyses: contentAnalyses = [],
+    score_breakdown: breakdown = null,
+  } = data;
   const ruleChips = await getRuleChips(
-    (r.rule_names ?? "").split(",").filter(Boolean)
+    (r.rule_names ?? "").split(",").filter(Boolean),
   );
-
-  const contentCount = contentAnalyses.length;
-  const contentAvgScore =
-    contentCount > 0
-      ? contentAnalyses.reduce((s, c) => s + (c.sentiment_score ?? 50), 0) / contentCount
-      : 0;
+  const lede = reportLede(
+    r,
+    date,
+    ruleChips.map((c) => c.label),
+  );
+  const hasNews = (r.news_count ?? 0) > 0;
+  const hasContent = contentAnalyses.length > 0;
 
   return (
     <main className="min-h-screen">
-      <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-10">
-        {/* 네비게이션 */}
+      {/* 세로 리듬은 섹션 간 gap 하나로 통일한다 — 카드 안쪽 여백은 `PANEL` 이 갖는다. */}
+      <div className="mx-auto max-w-7xl space-y-4 px-4 py-5 sm:px-6 sm:py-8">
         <Link
           href={`/reports/${date}`}
           className="inline-flex items-center gap-1 text-sm font-bold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
@@ -221,10 +210,13 @@ export default async function StockReportPage({
           {date} 추천 목록
         </Link>
 
-        {/* 헤더 */}
+        {/* 헤더 — 종목·시세·선정 배지 + 기본 정보 한 줄 + 리드 문단.
+            ⚠️ **값 하나짜리 카드를 만들지 않는다** — 섹터·가격·거래대금 같은 단일 값은 이 `dl` 한 줄에
+            모으고, 리드 문단이 같은 사실을 문장으로 한 번 더 낸다(검색 유입용 본문).
+            경위: docs/history/frontend-ui.md */}
         <header>
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
-            <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-slate-100 sm:text-4xl">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl dark:text-slate-100">
               {r.stock_name}
             </h1>
             <span className="font-mono text-base font-bold text-slate-400">
@@ -232,12 +224,10 @@ export default async function StockReportPage({
             </span>
             <StockPriceBadge ticker={r.stock_code} date={date} />
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-indigo-100 px-3 py-1 text-sm font-extrabold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
-              #{r.rank_no}위
-            </span>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-extrabold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-              {r.score.toFixed(0)}점 / 100
+
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-extrabold tabular-nums text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
+              종합 {r.score.toFixed(0)}점 · 점수 {r.rank_no}위
             </span>
             {/* 룰 선정 종목(hybrid) — 점수 순위와 무관하게 실험실 룰이 뽑았다. 근거 룰로 넘어간다. */}
             {ruleChips.map((c) => (
@@ -245,7 +235,7 @@ export default async function StockReportPage({
                 key={c.name}
                 href={`/lab/${encodeURIComponent(c.name)}`}
                 title="실험실에서 성적을 확인한 전략이 이 종목을 골랐어요 (점수 순위와는 관계없어요) — 눌러서 전략 성적 보기"
-                className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-3 py-1 text-sm font-extrabold text-violet-700 hover:bg-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:hover:bg-violet-900/60"
+                className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-extrabold text-violet-700 hover:bg-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:hover:bg-violet-900/60"
               >
                 <FlaskConical className="h-3.5 w-3.5 shrink-0" />
                 <span className="break-keep">{c.label}</span>
@@ -255,618 +245,210 @@ export default async function StockReportPage({
               </Link>
             ))}
           </div>
+
+          <dl className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1.5 text-xs">
+            {[
+              { label: "섹터", value: r.sector || "기타" },
+              { label: "리포트가", value: `${formatWon(r.current_price)}원` },
+              {
+                label: "당일 등락",
+                value: `${r.change_pct > 0 ? "+" : ""}${r.change_pct.toFixed(2)}%`,
+                tone:
+                  r.change_pct > 0
+                    ? "text-red-600 dark:text-red-400"
+                    : r.change_pct < 0
+                      ? "text-blue-600 dark:text-blue-400"
+                      : undefined,
+              },
+              {
+                label: "거래대금",
+                value: `${formatBillion(r.trading_value)}원`,
+              },
+              { label: "시가총액", value: formatMarketCap(r.market_cap) },
+            ].map(({ label, value, tone }) => (
+              <div key={label} className="flex items-baseline gap-1">
+                <dt className="font-medium text-slate-400 dark:text-slate-500">
+                  {label}
+                </dt>
+                <dd
+                  className={`font-bold tabular-nums ${tone ?? "text-slate-700 dark:text-slate-200"}`}
+                >
+                  {value}
+                </dd>
+              </div>
+            ))}
+          </dl>
         </header>
 
-        {/* 추천 화면이므로 선정 근거와 매매 전제를 상세 데이터보다 먼저 낸다 —
-            예전에는 기본정보·수급표부터 시작해 '왜 이 종목인지'가 스크롤 아래에 있었다. */}
-        <WhyPicked report={r} />
+        {/* 요약 밴드 — 도입 문단 + 근거 3축. 화면 폭 전체를 쓰고 3축이 데스크탑에서 가로로 눕는다.
+            2단 영역 위에 두는 이유: '왜 뽑혔나' 는 이 화면의 본론이라 모바일·데스크탑 모두 먼저 읽혀야 한다. */}
+        <WhyPicked report={r} lede={lede} />
 
-        <TradePlan report={r} />
-
-        {/* 다음날 아침 갭 체크 결과 */}
-        {(typeof r.gap_nxt_pct === "number" || typeof r.gap_krx_pct === "number") && (() => {
-          const hasNxt = typeof r.gap_nxt_pct === "number" && r.gap_nxt_price != null;
-          const hasKrx = typeof r.gap_krx_pct === "number" && r.gap_krx_price != null;
-          // 텔레그램 포맷과 동일: NXT+KRX 둘 다 있으면 KRX는 NXT→KRX 장중 델타
-          const krxIntraday =
-            hasNxt && hasKrx && r.gap_nxt_price! > 0
-              ? ((r.gap_krx_price! - r.gap_nxt_price!) / r.gap_nxt_price!) * 100
-              : null;
-          // 무상증자 권리락일(sql/50): 갭은 배정비율로 낮춰진 **권리락 기준가** 대비로 측정된다.
-          // 리포트가를 그대로 보여주면 등락률과 앞뒤가 안 맞으므로 조정 기준가를 시작가로 쓴다.
-          const exRatio = r.gap_ex_rights_ratio ?? null;
-          const basePrice = exRatio
-            ? Math.round(r.current_price / (1 + exRatio))
-            : r.current_price;
-          return (
-          <Card className="border-0 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 rounded-3xl shadow-none">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Sunrise className="w-5 h-5 text-amber-500" />
-                다음날 아침 갭 체크
-                {r.gap_checked_at && (
-                  <span className="ml-auto text-xs font-normal text-slate-500">
-                    {new Date(r.gap_checked_at).toLocaleString("ko-KR", {
-                      month: "2-digit",
-                      day: "2-digit",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      timeZone: "Asia/Seoul",
-                    })}{" "}
-                    기준
-                  </span>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-                리포트 시각 가격: <span className="font-bold tabular-nums">{r.current_price.toLocaleString("ko-KR")}</span>원
-              </p>
-              {exRatio && (
-                <div className="mb-3 rounded-2xl bg-amber-100/70 dark:bg-amber-900/30 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
-                  <span className="font-bold">무상증자 권리락일</span> — 1주당 신주{" "}
-                  {exRatio}주 배정으로 기준가가{" "}
-                  <span className="font-bold tabular-nums">{basePrice.toLocaleString("ko-KR")}</span>
-                  원으로 낮아졌어요. 아래 등락률은 <span className="font-bold">낮아진 기준 가격과 비교한</span>{" "}
-                  실제 움직임이에요.
-                </div>
-              )}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {hasNxt && (
-                  <GapResultBox
-                    label="장 시작 전 (NXT)"
-                    sublabel={exRatio ? "권리락 기준가 → NXT" : "리포트가 → NXT"}
-                    pct={r.gap_nxt_pct!}
-                    fromPrice={basePrice}
-                    toPrice={r.gap_nxt_price!}
-                  />
-                )}
-                {hasKrx && (
-                  <GapResultBox
-                    label="장 시작 후 (KRX)"
-                    sublabel={
-                      krxIntraday !== null
-                        ? "NXT → KRX (장중)"
-                        : exRatio
-                          ? "권리락 기준가 → KRX"
-                          : "리포트가 → KRX"
-                    }
-                    pct={krxIntraday !== null ? krxIntraday : r.gap_krx_pct!}
-                    fromPrice={krxIntraday !== null ? r.gap_nxt_price! : basePrice}
-                    toPrice={r.gap_krx_price!}
-                  />
-                )}
-              </div>
-              {hasNxt && hasKrx && (
-                <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                  리포트가 → KRX 누적{" "}
-                  <span
-                    className={`font-extrabold tabular-nums ${
-                      r.gap_krx_pct! > 0
-                        ? "text-rose-600 dark:text-rose-400"
-                        : r.gap_krx_pct! < 0
-                          ? "text-blue-600 dark:text-blue-400"
-                          : "text-slate-500"
-                    }`}
-                  >
-                    {r.gap_krx_pct! > 0 ? "+" : ""}
-                    {r.gap_krx_pct!.toFixed(2)}%
-                  </span>
-                </p>
-              )}
-              {/* 실체결 손익률 — 갭(참조가 기준)과 달리 실제 체결가로 계산된 값이라
-                  두 수치가 어긋날 수 있다. 어느 쪽이 실제인지 밝혀 둔다. */}
-              {typeof r.exec_leg_ret === "number" && (
-                <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                  실제 체결 기준{" "}
-                  <span
-                    className={`font-extrabold tabular-nums ${
-                      r.exec_leg_ret > 0
-                        ? "text-rose-600 dark:text-rose-400"
-                        : r.exec_leg_ret < 0
-                          ? "text-blue-600 dark:text-blue-400"
-                          : "text-slate-500"
-                    }`}
-                  >
-                    {r.exec_leg_ret > 0 ? "+" : ""}
-                    {r.exec_leg_ret.toFixed(2)}%
-                  </span>
-                  {r.exec_leg_venue && (
-                    <span className="ml-1 text-slate-400">
-                      ({r.exec_leg_venue})
-                    </span>
-                  )}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-          );
-        })()}
-
-        {/* 1. 종목 기본 정보 카드 */}
-        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Building2 className="w-5 h-5 text-slate-500" />
-              종목 기본 정보
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="space-y-1">
-                <p className="text-xs text-slate-500 font-medium">섹터</p>
-                <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                  {r.sector || "기타"}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-slate-500 font-medium">시가총액</p>
-                <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                  {formatMarketCap(r.market_cap)}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-slate-500 font-medium">대장주 여부</p>
-                <BoolBadge
-                  value={r.is_leader}
-                  trueText="섹터 대장"
-                  falseText="일반"
-                />
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-slate-500 font-medium">등락률</p>
-                <p
-                  className={`text-sm font-bold ${
-                    r.change_pct > 0
-                      ? "text-red-600 dark:text-red-400"
-                      : r.change_pct < 0
-                      ? "text-blue-600 dark:text-blue-400"
-                      : "text-slate-600"
-                  }`}
-                >
-                  {r.change_pct > 0 ? "+" : ""}
-                  {r.change_pct.toFixed(2)}%
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 2. 거래대금 & 수급등급 */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <BarChart3 className="w-5 h-5 text-slate-500" />
-                거래대금
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-bold text-slate-800 dark:text-slate-100">
-                {formatTradingValue(r.trading_value)}
-                <span className="text-base font-normal text-slate-500 ml-1">억원</span>
-              </p>
-              <p className="text-xs text-slate-400 mt-1">
-                {r.trading_value >= 200_000_000_000
-                  ? "우수 (2,000억 이상)"
-                  : r.trading_value >= 100_000_000_000
-                  ? "보통 (1,000억 이상)"
-                  : "저조"}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Activity className="w-5 h-5 text-slate-500" />
-                수급 등급
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <SupplyGradeBadge grade={r.supply_grade} score={r.supply_score} />
-              <p className="text-xs text-slate-400 mt-2">
-                연속 수급 <span className="font-bold text-slate-700 dark:text-slate-300">{r.supply_days}일</span>
-              </p>
-            </CardContent>
-          </Card>
+        {/* 카드 배치 — 데스크탑은 **짝이 고정된 2열 밴드 3줄**이다.
+            ⚠️ 2열 다단(`columns-2`)으로 되돌리지 말 것 — 열 나눔을 브라우저에 맡기면 카드 수가
+            날마다 달라 열끝 차가 0~444px 로 튄다(10가지 데이터 조합 실측). 짝을 고정하고 각 짝의
+            높이를 **설계로** 맞추면(점수↔매매·결과 / 수급↔차트) 어느 날이든 차가 예측 가능하다.
+            재료 줄은 둘 중 하나만 있는 날 **전체 폭**으로 낸다 — 빈 절반이 '카드가 빠진 자리'로 보인다.
+            모바일(<lg)은 1열이라 DOM 순서가 곧 화면 순서다: 점수 → 매매·결과 → 수급 → 차트 → 재료. */}
+        {/* 이 짝만 `lg:` 부터 2열이다 — 768px 에서는 열이 352px 라 매매 카드의 3칸이 세로로 쌓여
+            높이가 두 배(334 vs 614)가 되고, 그 차이가 점수 카드 안 빈 공간으로 남는다. */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ScoreGauge report={r} breakdown={breakdown} />
+          {/* 매매 전제 + 그 결과는 한 카드다(결과가 없는 날 토막 카드가 남지 않게) */}
+          <TradePlan report={r} footer={<MorningResultBlock report={r} />} />
         </div>
 
-        {/* 3. 최근 5일 수급 동향 */}
-        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <TrendingUp className="w-5 h-5 text-slate-500" />
-              최근 5일 수급 동향
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-700">
-                    <th className="text-left py-3 px-2 text-slate-500 font-medium">
-                      날짜
-                    </th>
-                    <th className="text-right py-3 px-2 text-slate-500 font-medium">
-                      개인
-                    </th>
-                    <th className="text-right py-3 px-2 text-slate-500 font-medium">
-                      외국인
-                    </th>
-                    <th className="text-right py-3 px-2 text-slate-500 font-medium">
-                      기관
-                    </th>
-                    <th className="text-right py-3 px-2 text-slate-500 font-medium">
-                      프로그램
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {supplyHistory.length > 0 ? (
-                    supplyHistory.map((h: SupplyHistoryItem, i: number) => (
-                      <tr
-                        key={h.date}
-                        className={`border-b border-slate-100 dark:border-slate-800 ${
-                          i === 0
-                            ? "bg-indigo-50/50 dark:bg-indigo-900/10"
-                            : ""
-                        }`}
-                      >
-                        <td className="py-3 px-2 font-medium text-slate-700 dark:text-slate-300">
-                          {h.date}
-                          {i === 0 && (
-                            <span className="ml-1 text-xs text-indigo-500">
-                              (오늘)
-                            </span>
-                          )}
-                        </td>
-                        <td className="text-right py-3 px-2">
-                          <NetBuyCell value={h.indv_net_buy} />
-                        </td>
-                        <td className="text-right py-3 px-2">
-                          <NetBuyCell value={h.frgn_net_buy} />
-                        </td>
-                        <td className="text-right py-3 px-2">
-                          <NetBuyCell value={h.inst_net_buy} />
-                        </td>
-                        <td className="text-right py-3 px-2">
-                          <NetBuyCell value={h.prog_net_buy} />
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="py-8 text-center text-slate-400"
-                      >
-                        수급 기록이 없어요
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <SupplySection report={r} />
+          <ChartSection report={r} />
+        </div>
 
-        {/* 4. 차트 분석 (캔들차트 + 이평선 정배열) */}
-        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Activity className="w-5 h-5 text-slate-500" />
-              차트 분석
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* 캔들차트 */}
-            <CandlestickChart data={r.hourly_candles ?? []} />
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50 space-y-3">
-                <p className="text-sm text-slate-500 font-medium">
-                  이동평균 정배열 (5MA &gt; 10MA &gt; 20MA)
-                </p>
-                <BoolBadge
-                  value={r.ma_aligned}
-                  trueText="정배열 확인"
-                  falseText="정배열 아님"
-                />
-                <p className="text-xs text-slate-400">
-                  5일선이 10일선 위, 10일선이 20일선 위이며 종가가 5일선 위에 있는 상태
-                </p>
-              </div>
-              <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50 space-y-3">
-                <p className="text-sm text-slate-500 font-medium">
-                  52주 신고가 근접 (95% 이상)
-                </p>
-                <BoolBadge
-                  value={r.near_high}
-                  trueText="신고가 근접"
-                  falseText="신고가 미달"
-                />
-                <p className="text-xs text-slate-400">
-                  현재가가 52주 최고가의 95% 이상일 때 강한 상승 모멘텀으로 판단
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 5. 콘텐츠 분석 (유튜브/텔레그램) */}
-        {contentCount > 0 && (
-        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Newspaper className="w-5 h-5 text-slate-500" />
-              콘텐츠 분석
-              <span className="ml-auto text-sm font-normal text-slate-500">
-                {contentCount}건 / 평균 감성점수{" "}
-                <span
-                  className={`font-bold ${
-                    contentAvgScore >= 60
-                      ? "text-red-600 dark:text-red-400"
-                      : contentAvgScore >= 40
-                      ? "text-amber-600 dark:text-amber-400"
-                      : "text-blue-600 dark:text-blue-400"
-                  }`}
-                >
-                  {contentAvgScore.toFixed(0)}
-                </span>
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-                {contentAnalyses.map((c) => (
-                  <div
-                    key={c.id}
-                    className="p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50 space-y-2"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        {c.platform === "youtube" ? (
-                          <Youtube className="w-4 h-4 text-red-500 shrink-0" />
-                        ) : (
-                          <MessageCircle className="w-4 h-4 text-sky-500 shrink-0" />
-                        )}
-                        <span className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">
-                          {c.title}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
-                            c.sentiment_score >= 60
-                              ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400"
-                              : c.sentiment_score >= 40
-                              ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400"
-                              : "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400"
-                          }`}
-                        >
-                          {c.sentiment_score}점
-                        </span>
-                        {c.source_url && (
-                          <a
-                            href={c.source_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-slate-400 hover:text-indigo-500 transition-colors"
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      {c.source_name}
-                      {c.created_at && (
-                        <span className="ml-2">
-                          {new Date(c.created_at).toLocaleTimeString("ko-KR", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                ))}
-              </div>
-          </CardContent>
-        </Card>
+        {(hasNews || hasContent) && (
+          <div
+            className={
+              hasNews && hasContent
+                ? "grid grid-cols-1 gap-4 md:grid-cols-2 md:items-start"
+                : undefined
+            }
+          >
+            {hasNews && <NewsSection report={r} />}
+            {hasContent && <ContentSection items={contentAnalyses} />}
+          </div>
         )}
 
-        {/* 5-1. 뉴스 재료 (속보 채널 사전매칭 집계 + 배치 요약) */}
-        {(r.news_count ?? 0) > 0 && (
-        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Newspaper className="w-5 h-5 text-emerald-500" />
-              뉴스 재료
-              <span className="ml-auto text-sm font-normal text-slate-500">
-                오늘 <span className="font-bold text-emerald-600 dark:text-emerald-400">{r.news_count}</span>건 언급
-                {(r.news_unique_count ?? 0) > 0 && r.news_unique_count !== r.news_count && (
-                  <span className="text-xs"> (고유 {r.news_unique_count})</span>
-                )}
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {/* 재료 지속성 — 등급 + 사실 4축 + 판정 근거.
-                  등급만 보여주면 왜 그렇게 판정됐는지 알 수 없어 화면에서 오탐 감사가 안 된다.
-                  근거 문장(news_label_reason)이 감사 도구다. 관찰 라벨이므로 '미검증'을 명시한다. */}
-              {(r.news_durability || r.news_label_reason) && (
-                <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-800/40">
-                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-                    <MaterialBadge durability={r.news_durability} showUnjudged />
-                    {materialAxisLabels(r).map((t) => (
-                      <span
-                        key={t}
-                        className="text-[11px] font-medium text-slate-500 dark:text-slate-400"
-                      >
-                        · {t}
-                      </span>
-                    ))}
-                    <span className="ml-auto text-[10px] font-bold text-slate-400 dark:text-slate-500">
-                      관찰 중 · 미검증
-                    </span>
-                  </div>
-                  {r.news_label_reason && (
-                    <p className="mt-2 break-words text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                      {/* 내부 필드명이 섞인 과거 판정문을 사람 말로 바꿔서 낸다(lib/news) */}
-                      {humanizeMaterialReason(r.news_label_reason)}
-                    </p>
-                  )}
-                  {r.news_followup_days != null && (
-                    <p className="mt-1.5 text-[11px] font-medium text-slate-400 dark:text-slate-500">
-                      이 재료가 다시 기사에 등장한 날{" "}
-                      <span className="tabular-nums">{r.news_followup_days}</span>일
-                      <span className="text-slate-300 dark:text-slate-600">
-                        {" "}
-                        / 이후 10일 (주가 등락 기사 제외)
-                      </span>
-                    </p>
-                  )}
-                </div>
-              )}
-              {(r.news_catalyst || r.news_sentiment != null) && (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {r.news_catalyst && (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                      {r.news_catalyst}
-                    </span>
-                  )}
-                  {r.news_sentiment != null && (
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                        r.news_sentiment > 50
-                          ? "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400"
-                          : r.news_sentiment < 50
-                          ? "bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-400"
-                          : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
-                      }`}
-                    >
-                      {r.news_sentiment > 50 ? "호재" : r.news_sentiment < 50 ? "악재" : "중립"}{" "}
-                      {r.news_sentiment}
-                    </span>
-                  )}
-                  {r.news_first_today && (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400">
-                      첫 등장
-                    </span>
-                  )}
-                </div>
-              )}
-              {r.news_summary && (
-                <p className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-line">
-                  {r.news_summary}
-                </p>
-              )}
-              {r.news_headlines && r.news_headlines.length > 0 && (
-                <ul className="space-y-2">
-                  {r.news_headlines.map((h, i) => {
-                    const { text, url } = splitHeadlineUrl(h);
-                    return (
-                      <li
-                        key={i}
-                        className="flex gap-2 text-sm text-slate-600 dark:text-slate-400"
-                      >
-                        <span className="text-emerald-500 shrink-0">•</span>
-                        {url ? (
-                          <a
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="min-w-0 break-words hover:text-emerald-600 hover:underline dark:hover:text-emerald-400"
-                          >
-                            {text}
-                          </a>
-                        ) : (
-                          <span className="min-w-0 break-words">{text}</span>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-        )}
-
-        {/* 6. 점수 상세 (점수 브레이크다운) */}
-        <Card className="border-0 bg-white dark:bg-slate-900/60 rounded-3xl shadow-none">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Crown className="w-5 h-5 text-slate-500" />
-              종합 점수 상세
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {(() => {
-                // 백엔드 score_candidate(trading_engine.py)의 가점·정규화와 일치시킨다.
-                // 각 항목의 raw 가점을 최대 합(SCORE_MAX=135)로 나눠 100점 환산 →
-                // 항목 합이 총점(r.score)과 정확히 맞는다.
-                const SCORE_MAX = 135;
-                const rows = [
-                  {
-                    label: "수급 점수",
-                    raw: ((r.supply_score ?? 0) / 100) * 40,
-                    rawMax: 40,
-                  },
-                  { label: "이평선 정배열", raw: r.ma_aligned ? 10 : 0, rawMax: 10 },
-                  { label: "52주 신고가 근접", raw: r.near_high ? 10 : 0, rawMax: 10 },
-                  {
-                    label: "거래대금",
-                    raw:
-                      r.trading_value >= 200_000_000_000
-                        ? 15
-                        : r.trading_value >= 100_000_000_000
-                        ? 8
-                        : 0,
-                    rawMax: 15,
-                  },
-                  { label: "섹터 대장주", raw: r.is_leader ? 10 : 0, rawMax: 10 },
-                  { label: "프로그램 양매수", raw: r.prog_net_buy > 0 ? 10 : 0, rawMax: 10 },
-                  { label: "오늘의 테마주", raw: r.is_theme_stock ? 15 : 0, rawMax: 15 },
-                  {
-                    // 1~5일 연속성은 supply_score에 반영 → 6일째(초과분)부터 가점
-                    label: "연속 수급",
-                    raw: Math.min(Math.max(r.supply_days - 5, 0), 5) * 3,
-                    rawMax: 15,
-                  },
-                  { label: "콘텐츠 분석", raw: r.content_score, rawMax: 10 },
-                ];
-                return rows.map((row) => (
-                  <ScoreRow
-                    key={row.label}
-                    label={row.label}
-                    value={Math.round((row.raw / SCORE_MAX) * 100)}
-                    max={Math.round((row.rawMax / SCORE_MAX) * 100)}
-                  />
-                ));
-              })()}
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                <span className="font-bold text-slate-800 dark:text-slate-200">
-                  총합
-                </span>
-                <span className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
-                  {r.score.toFixed(0)} / 100
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 면책 */}
-        <p className="text-xs text-slate-400 text-center pb-8">
-          이 리포트는 AI가 자동으로 만든 참고 자료예요. 이것만 보고 투자를 결정하면 안 돼요.
+        <p className="pb-6 text-center text-xs break-keep text-slate-400">
+          이 리포트는 AI가 자동으로 만든 참고 자료예요. 이것만 보고 투자를
+          결정하면 안 돼요.
         </p>
       </div>
     </main>
+  );
+}
+
+/** 다음 거래일 아침 결과 — 갭(참조가 기준)·실체결(체결가 기준) + 한 문장 설명.
+ *
+ * 독립 카드가 아니라 **'어떻게 매매하나' 카드 안 블록**이다: 전제와 그 결과는 한 장에서 읽는 게 맞고,
+ * 결과가 없는 날에 따로 카드를 두면 100px 짜리 토막 카드가 남는다(측정으로 확인).
+ */
+function MorningResultBlock({
+  report: r,
+}: {
+  report: StockReportDetail["report"];
+}) {
+  const hasNxt = typeof r.gap_nxt_pct === "number" && r.gap_nxt_price != null;
+  const hasKrx = typeof r.gap_krx_pct === "number" && r.gap_krx_price != null;
+  // 텔레그램 포맷과 동일: NXT+KRX 둘 다 있으면 KRX는 NXT→KRX 장중 델타
+  const krxIntraday =
+    hasNxt && hasKrx && r.gap_nxt_price! > 0
+      ? ((r.gap_krx_price! - r.gap_nxt_price!) / r.gap_nxt_price!) * 100
+      : null;
+  const exRatio = r.gap_ex_rights_ratio ?? null;
+  const basePrice = gapBasePrice(r);
+
+  return (
+    <>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
+        <h3 className="flex items-center gap-1.5 text-sm font-extrabold text-slate-700 dark:text-slate-200">
+          <Sunrise className="h-4 w-4 text-amber-500" />
+          다음 거래일 아침 결과
+        </h3>
+        {r.gap_checked_at && (
+          <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+            {new Date(r.gap_checked_at).toLocaleString("ko-KR", {
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              timeZone: "Asia/Seoul",
+            })}{" "}
+            기준
+          </span>
+        )}
+      </div>
+
+      {exRatio && (
+        <p className="mt-2 rounded-2xl bg-amber-50 px-3 py-2 text-[11px] leading-relaxed break-keep text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          <span className="font-bold">무상증자 권리락일</span> — 1주당 신주{" "}
+          {exRatio}주 배정으로 기준가가{" "}
+          <span className="font-bold tabular-nums">{formatWon(basePrice)}</span>
+          원으로 낮아졌어요. 아래 등락률은 낮아진 기준 가격과 비교한 실제
+          움직임이에요.
+        </p>
+      )}
+
+      {(hasNxt || hasKrx) && (
+        <>
+          <div className="mt-2 space-y-2">
+            {hasNxt && (
+              <GapResultBox
+                label="장 시작 전 (NXT)"
+                sublabel={exRatio ? "권리락 기준가 → NXT" : "리포트가 → NXT"}
+                pct={r.gap_nxt_pct!}
+                fromPrice={basePrice}
+                toPrice={r.gap_nxt_price!}
+              />
+            )}
+            {hasKrx && (
+              <GapResultBox
+                label="정규장 (KRX)"
+                sublabel={
+                  krxIntraday !== null
+                    ? "NXT → KRX (장중)"
+                    : exRatio
+                      ? "권리락 기준가 → KRX"
+                      : "리포트가 → KRX"
+                }
+                pct={krxIntraday !== null ? krxIntraday : r.gap_krx_pct!}
+                fromPrice={krxIntraday !== null ? r.gap_nxt_price! : basePrice}
+                toPrice={r.gap_krx_price!}
+              />
+            )}
+          </div>
+
+          {/* 누적(참조가 기준)과 실체결(체결가 기준)은 어긋날 수 있어 어느 쪽이 실제인지 밝혀 둔다. */}
+          {(hasNxt && hasKrx) || typeof r.exec_leg_ret === "number" ? (
+            <p className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              {hasNxt && hasKrx && (
+                <span>
+                  리포트가 → KRX 누적 <PctText pct={r.gap_krx_pct!} />
+                </span>
+              )}
+              {typeof r.exec_leg_ret === "number" && (
+                <span>
+                  실제 체결 <PctText pct={r.exec_leg_ret} />
+                  {r.exec_leg_venue && (
+                    <span className="ml-0.5 text-slate-400">
+                      ({r.exec_leg_venue})
+                    </span>
+                  )}
+                </span>
+              )}
+            </p>
+          ) : null}
+        </>
+      )}
+
+      <p className="mt-2 text-[11px] leading-relaxed break-keep text-slate-500 dark:text-slate-400">
+        <RichText parts={morningSentence(r)} />
+      </p>
+    </>
+  );
+}
+
+function PctText({ pct }: { pct: number }) {
+  return (
+    <span
+      className={`font-extrabold tabular-nums ${
+        pct > 0
+          ? "text-rose-600 dark:text-rose-400"
+          : pct < 0
+            ? "text-blue-600 dark:text-blue-400"
+            : "text-slate-500"
+      }`}
+    >
+      {pct > 0 ? "+" : ""}
+      {pct.toFixed(2)}%
+    </span>
   );
 }
 
@@ -883,59 +465,441 @@ function GapResultBox({
   fromPrice: number;
   toPrice: number | null;
 }) {
-  const isUp = pct > 0;
-  const isDown = pct < 0;
   return (
-    <div className="rounded-2xl bg-white/70 p-4 dark:bg-slate-900/40">
-      <p className="text-xs font-bold text-slate-500 dark:text-slate-400">{label}</p>
-      {sublabel && (
-        <p className="text-[10px] font-medium text-slate-400">{sublabel}</p>
-      )}
-      <p
-        className={`mt-1 text-2xl font-extrabold tabular-nums ${
-          isUp
-            ? "text-rose-600 dark:text-rose-400"
-            : isDown
-              ? "text-blue-600 dark:text-blue-400"
-              : "text-slate-500"
-        }`}
-      >
-        {isUp ? "+" : ""}
-        {pct.toFixed(2)}%
-      </p>
-      {toPrice != null && (
-        <p className="mt-1 text-xs text-slate-500 tabular-nums">
-          {fromPrice.toLocaleString("ko-KR")} → {toPrice.toLocaleString("ko-KR")}원
+    <div className={`${INSET} px-3 py-2`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
+          {label}
         </p>
-      )}
+        <p className="text-xl font-extrabold">
+          <PctText pct={pct} />
+        </p>
+      </div>
+      <div className="mt-0.5 flex items-baseline justify-between gap-2 text-[10px] font-medium text-slate-400 dark:text-slate-500">
+        <span>{sublabel}</span>
+        {toPrice != null && (
+          <span className="tabular-nums">
+            {formatWon(fromPrice)} → {formatWon(toPrice)}원
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
-function ScoreRow({
-  label,
-  value,
-  max,
-}: {
-  label: string;
-  value: number;
-  max: number;
-}) {
-  const pct = max > 0 ? (value / max) * 100 : 0;
+/** 수급 — 등급·연속일을 헤더에 두고 본문은 5일 표 하나. 등급 카드를 따로 두지 않는다(값 하나짜리 카드). */
+function SupplySection({ report: r }: { report: StockReportDetail["report"] }) {
+  const supplyHistory = r.supply_history ?? [];
+  const gradeChip = SUPPLY_GRADE_CHIP[r.supply_grade] ?? SUPPLY_GRADE_CHIP.D;
+
   return (
-    <div className="flex items-center gap-3">
-      <span className="w-32 text-sm text-slate-600 dark:text-slate-400 shrink-0">
-        {label}
-      </span>
-      <div className="flex-1 h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-indigo-500 dark:bg-indigo-400 rounded-full transition-all"
-          style={{ width: `${pct}%` }}
-        />
+    <section className={PANEL}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
+        <h2 className="flex items-center gap-2 text-lg font-extrabold text-slate-900 dark:text-slate-100">
+          <TrendingUp className="h-4.5 w-4.5 text-purple-800 dark:text-purple-300" />
+          수급
+        </h2>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={`rounded-full px-2 py-0.5 text-[11px] font-extrabold ${gradeChip}`}
+          >
+            {r.supply_grade}등급 {r.supply_score.toFixed(0)}점
+          </span>
+          <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+            연속 {r.supply_days}일
+          </span>
+        </div>
       </div>
-      <span className="w-16 text-right text-sm font-mono font-semibold text-slate-700 dark:text-slate-300">
-        {value}/{max}
+
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-slate-200 text-[11px] text-slate-400 dark:border-slate-700 dark:text-slate-500">
+              <th className="py-1.5 px-1.5 text-left font-medium">날짜</th>
+              <th className="py-1.5 px-1.5 text-right font-medium">개인</th>
+              <th className="py-1.5 px-1.5 text-right font-medium">외국인</th>
+              <th className="py-1.5 px-1.5 text-right font-medium">기관</th>
+              <th className="py-1.5 px-1.5 text-right font-medium">프로그램</th>
+            </tr>
+          </thead>
+          <tbody>
+            {supplyHistory.length > 0 ? (
+              supplyHistory.map((h: SupplyHistoryItem, i: number) => (
+                <tr
+                  key={h.date}
+                  className={`border-b border-slate-100 dark:border-slate-800 ${
+                    i === 0 ? "bg-indigo-50/60 dark:bg-indigo-950/20" : ""
+                  }`}
+                >
+                  <td className="py-2 px-1.5 font-semibold tabular-nums text-slate-600 dark:text-slate-300">
+                    {h.date.slice(5).replace("-", ".")}
+                    {i === 0 && (
+                      <span className="ml-1 text-[10px] font-bold text-indigo-500">
+                        기준일
+                      </span>
+                    )}
+                  </td>
+                  <NetBuyCell value={h.indv_net_buy} />
+                  <NetBuyCell value={h.frgn_net_buy} />
+                  <NetBuyCell value={h.inst_net_buy} />
+                  <NetBuyCell value={h.prog_net_buy} />
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={5} className="py-6 text-center text-slate-400">
+                  수급 기록이 없어요
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {/* 5일 합계 — 표의 다섯 줄을 눈으로 더해야 알 수 있던 값이다. 막대는 방향 색(매수 빨강 /
+          매도 파랑)이고 길이는 네 주체 중 가장 큰 절대값 기준이다(숫자를 항상 함께 낸다). */}
+      {supplyHistory.length > 0 && (
+        <div className={`${INSET} mt-3 px-3 py-2.5`}>
+          <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+            최근 {supplyHistory.length}일 합계
+          </p>
+          <ul className="mt-1.5 space-y-1.5">
+            {supplyTotals(supplyHistory).map(({ label, value, ratio }) => (
+              <li key={label} className="flex items-center gap-2">
+                <span className="w-12 shrink-0 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  {label}
+                </span>
+                <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200/80 dark:bg-slate-700/70">
+                  <span
+                    className={`block h-full rounded-full ${
+                      value > 0
+                        ? "bg-red-500/80"
+                        : value < 0
+                          ? "bg-blue-500/80"
+                          : "bg-slate-400/60"
+                    }`}
+                    style={{ width: `${ratio}%` }}
+                  />
+                </span>
+                <span
+                  className={`w-16 shrink-0 text-right text-[11px] font-bold tabular-nums ${
+                    value > 0
+                      ? "text-red-600 dark:text-red-400"
+                      : value < 0
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-slate-400"
+                  }`}
+                >
+                  {formatBillion(value, true)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <p className="mt-2 text-[11px] leading-relaxed break-keep text-slate-400 dark:text-slate-500">
+        표의 단위는 억원이고, 그날 사들인 금액이 팔아치운 금액보다 많으면{" "}
+        <span className="font-bold text-red-500">빨강(+)</span>, 반대면{" "}
+        <span className="font-bold text-blue-500">파랑(−)</span>이에요.
+      </p>
+    </section>
+  );
+}
+
+/** 5일 수급 합계 — 표에 있는 값만 더한다(판정·추정은 하지 않는다). 막대 길이는 최대 절대값 기준. */
+function supplyTotals(history: SupplyHistoryItem[]) {
+  const sum = (pick: (h: SupplyHistoryItem) => number | null | undefined) =>
+    history.reduce((acc, h) => acc + (pick(h) ?? 0), 0);
+  const rows = [
+    { label: "기관", value: sum((h) => h.inst_net_buy) },
+    { label: "외국인", value: sum((h) => h.frgn_net_buy) },
+    { label: "개인", value: sum((h) => h.indv_net_buy) },
+    { label: "프로그램", value: sum((h) => h.prog_net_buy) },
+  ];
+  const maxAbs = Math.max(...rows.map((r) => Math.abs(r.value)), 1);
+  return rows.map((r) => ({
+    ...r,
+    ratio: Math.round((Math.abs(r.value) / maxAbs) * 100),
+  }));
+}
+
+/** 차트 — 캔들 하나 + 조건 칩 2개. 조건 설명은 박스 두 개가 아니라 아래 한 문장이 담는다. */
+function ChartSection({ report: r }: { report: StockReportDetail["report"] }) {
+  return (
+    <section className={PANEL}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
+        <h2 className="flex items-center gap-2 text-lg font-extrabold text-slate-900 dark:text-slate-100">
+          <Activity className="h-4.5 w-4.5 text-teal-600 dark:text-teal-300" />
+          차트
+        </h2>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <ConditionChip on={r.ma_aligned} label="이동평균 정배열" />
+          <ConditionChip on={r.near_high} label="52주 신고가 근접" />
+        </div>
+      </div>
+
+      <div className="mt-3">
+        {/* 상세 본문의 일부라 시장 차트보다 낮게 쓴다(모바일 스크롤). */}
+        <CandlestickChart data={r.hourly_candles ?? []} height={280} />
+      </div>
+
+      <p className="mt-2 text-[11px] leading-relaxed break-keep text-slate-400 dark:text-slate-500">
+        최근 1주일 1시간봉이에요. <span className="font-bold">정배열</span>은
+        5·10·20일 평균 가격이 차례로 위에 놓이고 현재가가 5일 평균 위에 있는
+        상태, <span className="font-bold">신고가 근접</span>은 현재가가 1년
+        최고가의 95% 이상이라는 뜻이에요.
+      </p>
+    </section>
+  );
+}
+
+/** 뉴스 재료 — 지속성 판정 근거를 반드시 노출한다(등급만 내면 화면에서 오탐 감사가 안 된다). */
+function NewsSection({ report: r }: { report: StockReportDetail["report"] }) {
+  const headlines = r.news_headlines ?? [];
+  const shown = headlines.slice(0, 4);
+  const rest = headlines.slice(4);
+
+  return (
+    <section className={PANEL}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
+        <h2 className="flex items-center gap-2 text-lg font-extrabold text-slate-900 dark:text-slate-100">
+          <Newspaper className="h-4.5 w-4.5 text-amber-500 dark:text-amber-300" />
+          뉴스 재료
+        </h2>
+        <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+          이 날{" "}
+          <span className="font-bold text-slate-600 dark:text-slate-300">
+            {r.news_count}
+          </span>
+          건 언급
+          {(r.news_unique_count ?? 0) > 0 &&
+            r.news_unique_count !== r.news_count && (
+              <> · 고유 {r.news_unique_count}건</>
+            )}
+        </span>
+      </div>
+
+      <div className="mt-3 space-y-2.5">
+        {(r.news_durability || r.news_label_reason) && (
+          <div className={`${INSET} px-3 py-2.5`}>
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+              <MaterialBadge durability={r.news_durability} showUnjudged />
+              {materialAxisLabels(r).map((t) => (
+                <span
+                  key={t}
+                  className="text-[11px] font-medium text-slate-500 dark:text-slate-400"
+                >
+                  · {t}
+                </span>
+              ))}
+              <span className="ml-auto text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                관찰 중 · 미검증
+              </span>
+            </div>
+            {r.news_label_reason && (
+              <p className="mt-1.5 break-keep text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                {/* 내부 필드명이 섞인 과거 판정문을 사람 말로 바꿔서 낸다(lib/news) */}
+                {humanizeMaterialReason(r.news_label_reason)}
+              </p>
+            )}
+            {r.news_followup_days != null && (
+              <p className="mt-1 text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                이 재료가 다시 기사에 등장한 날{" "}
+                <span className="tabular-nums">{r.news_followup_days}</span>일
+                <span className="text-slate-300 dark:text-slate-600">
+                  {" "}
+                  / 이후 10일 (주가 등락 기사 제외)
+                </span>
+              </p>
+            )}
+          </div>
+        )}
+
+        {(r.news_catalyst ||
+          r.news_sentiment != null ||
+          r.news_first_today) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {r.news_catalyst && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                {r.news_catalyst}
+              </span>
+            )}
+            {r.news_sentiment != null && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                  r.news_sentiment > 50
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
+                    : r.news_sentiment < 50
+                      ? "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400"
+                      : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                }`}
+              >
+                {r.news_sentiment > 50
+                  ? "호재"
+                  : r.news_sentiment < 50
+                    ? "악재"
+                    : "중립"}{" "}
+                {r.news_sentiment}
+              </span>
+            )}
+            {r.news_first_today && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-400">
+                첫 등장
+              </span>
+            )}
+          </div>
+        )}
+
+        {r.news_summary && (
+          <p className="text-xs leading-relaxed break-keep whitespace-pre-line text-slate-700 dark:text-slate-300">
+            {r.news_summary}
+          </p>
+        )}
+
+        {headlines.length > 0 && (
+          <div>
+            <HeadlineList items={shown} />
+            {rest.length > 0 && (
+              // 헤드라인이 많은 날 카드가 통째로 길어져 나머지는 접는다(닫혀 있어도 색인은 된다).
+              <details className="mt-1.5 group">
+                <summary className="cursor-pointer list-none text-[11px] font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+                  헤드라인 {rest.length}건 더 보기
+                </summary>
+                <div className="mt-1.5">
+                  <HeadlineList items={rest} />
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function HeadlineList({ items }: { items: string[] }) {
+  return (
+    <ul className="space-y-1.5">
+      {items.map((h, i) => {
+        const { text, url } = splitHeadlineUrl(h);
+        return (
+          <li
+            key={`${i}-${text.slice(0, 12)}`}
+            className="flex gap-1.5 text-xs leading-relaxed break-keep text-slate-600 dark:text-slate-400"
+          >
+            <span className="shrink-0 text-amber-500">•</span>
+            {url ? (
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-w-0 break-words hover:text-slate-900 hover:underline dark:hover:text-slate-100"
+              >
+                {text}
+              </a>
+            ) : (
+              <span className="min-w-0 break-words">{text}</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** 유튜브·텔레그램 언급 — 4건까지 펼쳐 두고 나머지는 접는다. */
+function ContentSection({
+  items,
+}: {
+  items: NonNullable<StockReportDetail["content_analyses"]>;
+}) {
+  const avg =
+    items.reduce((s, c) => s + (c.sentiment_score ?? 50), 0) / items.length;
+  const shown = items.slice(0, 4);
+  const rest = items.slice(4);
+
+  return (
+    <section className={PANEL}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
+        <h2 className="flex items-center gap-2 text-lg font-extrabold text-slate-900 dark:text-slate-100">
+          <BarChart3 className="h-4.5 w-4.5 text-amber-500 dark:text-amber-300" />
+          유튜브·텔레그램 언급
+        </h2>
+        <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+          {items.length}건 · 평균 분위기{" "}
+          <span className="font-bold text-slate-600 dark:text-slate-300 tabular-nums">
+            {avg.toFixed(0)}점
+          </span>
+        </span>
+      </div>
+
+      <ul className="mt-3 space-y-1.5">
+        {shown.map((c) => (
+          <ContentRow key={c.id} item={c} />
+        ))}
+      </ul>
+      {rest.length > 0 && (
+        <details className="mt-1.5">
+          <summary className="cursor-pointer list-none text-[11px] font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+            {rest.length}건 더 보기
+          </summary>
+          <ul className="mt-1.5 space-y-1.5">
+            {rest.map((c) => (
+              <ContentRow key={c.id} item={c} />
+            ))}
+          </ul>
+        </details>
+      )}
+      <p className="mt-2 text-[11px] leading-relaxed break-keep text-slate-400 dark:text-slate-500">
+        분위기 점수는 AI가 콘텐츠 내용을 읽고 0~100으로 매긴 값이에요(50이
+        중립).
+      </p>
+    </section>
+  );
+}
+
+function ContentRow({
+  item: c,
+}: {
+  item: NonNullable<StockReportDetail["content_analyses"]>[number];
+}) {
+  return (
+    <li className={`${INSET} flex items-center gap-2 px-3 py-2`}>
+      {c.platform === "youtube" ? (
+        <Youtube className="h-3.5 w-3.5 shrink-0 text-red-500" />
+      ) : (
+        <MessageCircle className="h-3.5 w-3.5 shrink-0 text-sky-500" />
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-bold text-slate-700 dark:text-slate-200">
+          {c.title}
+        </p>
+        <p className="truncate text-[10px] font-medium text-slate-400 dark:text-slate-500">
+          {c.source_name}
+          {c.created_at && (
+            <>
+              {" · "}
+              {new Date(c.created_at).toLocaleTimeString("ko-KR", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </>
+          )}
+        </p>
+      </div>
+      <span className="shrink-0 text-[11px] font-extrabold tabular-nums text-slate-500 dark:text-slate-400">
+        {c.sentiment_score}
       </span>
-    </div>
+      {c.source_url && (
+        <a
+          href={c.source_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 text-slate-400 transition-colors hover:text-slate-700 dark:hover:text-slate-200"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      )}
+    </li>
   );
 }

@@ -303,9 +303,33 @@ export interface NewsStreamResponse {
   has_more: boolean;
 }
 
+// 종합점수 구성 — 서버(`core/backtest.score_breakdown`)가 **현재 가중치**로 낸 항목별 100점 환산 점수.
+// ⚠️ 프론트가 가중치를 따로 갖지 않는다. 가중치는 주간 튜닝(`strategy_config`)으로 바뀌므로
+// 화면이 미러를 들면 조용히 어긋난다(경위: docs/history/frontend-ui.md).
+// 튜닝 이후에 조회한 과거 리포트는 `total` 이 저장된 `score` 와 다를 수 있어, 화면이 그 차이를 밝힌다.
+export interface ScoreBreakdownItem {
+  key: string;
+  label: string;
+  points: number;      // 획득 점수 (100점 환산)
+  max_points: number;  // 만점 (100점 환산)
+}
+
+export interface ScoreBreakdownPenalty {
+  key: string;
+  label: string;
+  points: number;      // 감점이라 음수
+}
+
+export interface ScoreBreakdown {
+  items: ScoreBreakdownItem[];
+  penalty?: ScoreBreakdownPenalty | null;
+  total: number;
+}
+
 export interface StockReportDetail {
   report: StockReport;
   content_analyses?: ContentAnalysisItem[];
+  score_breakdown?: ScoreBreakdown | null;
 }
 
 export interface SectorStock {

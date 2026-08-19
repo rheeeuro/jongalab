@@ -17,6 +17,11 @@ export const CARD =
 
 export const INSET = "rounded-lg bg-slate-100 dark:bg-slate-800/60";
 
+/** 본문 섹션 패널 — 목록 카드(`CARD`)와 달리 **화면의 한 단락**을 담는 큰 면이다.
+ *  안쪽 여백까지 포함한다(섹션마다 패딩이 갈리면 세로 리듬이 어긋난다). */
+export const PANEL =
+  "rounded-3xl bg-white p-5 sm:p-6 dark:bg-slate-900/60";
+
 /** 카드 호버 — 목록 안의 누를 수 있는 카드에만 붙인다. */
 export const CARD_HOVER =
   "transition-all hover:-translate-y-0.5 hover:shadow-md";

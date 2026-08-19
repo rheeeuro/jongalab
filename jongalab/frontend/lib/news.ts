@@ -108,8 +108,8 @@ const REASON_TERMS: [RegExp, string][] = [
   [/\bnull\b/gi, "판정 보류"],
 ];
 
-/** 치환으로 앞말의 종성이 바뀌면 조사가 틀어진다("수치 확정를 판정 보류로"). 한국어 규칙대로 고친다. */
-function hasFinalConsonant(syllable: string): boolean {
+/** 앞말에 종성(받침)이 있는가 — 조사 선택에 쓴다(`lib/report` 의 서술문도 이 함수를 쓴다). */
+export function hasFinalConsonant(syllable: string): boolean {
   const code = syllable.charCodeAt(0) - 0xac00;
   return code >= 0 && code <= 11171 && code % 28 !== 0;
 }

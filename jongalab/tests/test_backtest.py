@@ -6,7 +6,8 @@
 import pytest
 
 from core.backtest import (
-    recompute_score, evaluate_weights, backtest_proposal, _ranks, _spearman,
+    recompute_score, score_breakdown, evaluate_weights, backtest_proposal,
+    _ranks, _spearman,
 )
 from core.trading_engine import AnalysisEngine, StockCandidate, StrategyConfig
 from workers.closing_bet import ClosingBetStrategy
@@ -94,6 +95,40 @@ def test_recompute_uses_defaults_for_missing_keys():
     c = _CANDIDATES[1]
     real = AnalysisEngine(api=None, config=StrategyConfig()).score_candidate(c)
     assert recompute_score(_row(c), {}) == real
+
+
+# ── 화면 게이지용 항목별 점수 ──
+
+@pytest.mark.parametrize("c", _CANDIDATES, ids=lambda c: c.code)
+def test_breakdown_items_sum_to_total(c):
+    """게이지 항목 합(+감점) = 총점. 어긋나면 화면 막대가 총점과 다른 얘기를 한다."""
+    cfg = StrategyConfig()
+    b = score_breakdown(_row(c), _weights(cfg))
+    got = sum(i["points"] for i in b["items"])
+    if b["penalty"]:
+        got += b["penalty"]["points"]
+    assert b["total"] == AnalysisEngine(api=None, config=cfg).score_candidate(c)
+    # 항목별 반올림(0.1) 오차만 허용. 총점이 0 클램프된 표본은 합이 음수라 비교 대상이 아니다.
+    if b["total"] > 0:
+        assert abs(got - b["total"]) <= 0.5
+
+
+def test_breakdown_drops_zero_weight_items():
+    # 가중치 0 인 항목(프로그램·뉴스는 기본 0)은 채울 수 없는 칸이라 게이지에서 빼고,
+    # 가중치를 올리면 다시 들어온다.
+    cfg = StrategyConfig()
+    keys = {i["key"] for i in score_breakdown(_row(_CANDIDATES[1]), _weights(cfg))["items"]}
+    assert "prog_buy" not in keys and "news" not in keys
+    cfg.SCORE_PROGRAM_BUY_BONUS = 10
+    keys2 = {i["key"] for i in score_breakdown(_row(_CANDIDATES[1]), _weights(cfg))["items"]}
+    assert "prog_buy" in keys2
+
+
+def test_breakdown_penalty_only_when_overheated():
+    cfg = StrategyConfig()
+    assert score_breakdown(_row(_CANDIDATES[1]), _weights(cfg))["penalty"] is None   # +5.5%
+    hot = score_breakdown(_row(_CANDIDATES[3]), _weights(cfg))["penalty"]            # +18.3%
+    assert hot is not None and hot["points"] < 0
 
 
 # ── 순위/상관 유틸 ──

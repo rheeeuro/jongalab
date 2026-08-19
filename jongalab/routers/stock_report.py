@@ -3,6 +3,8 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from core.backtest import score_breakdown
+from core.repository.strategy_config import get_strategy_config
 from core.repository import (
     get_stock_report,
     get_stock_report_history,
@@ -112,9 +114,35 @@ class ContentAnalysisItem(BaseModel):
     created_at: Optional[str] = None
 
 
+class ScoreBreakdownItem(BaseModel):
+    key: str
+    label: str
+    points: float = 0.0      # 100점 환산 획득 점수
+    max_points: float = 0.0  # 100점 환산 만점
+
+
+class ScoreBreakdownPenalty(BaseModel):
+    key: str
+    label: str
+    points: float = 0.0      # 감점이라 음수
+
+
+class ScoreBreakdown(BaseModel):
+    """종합점수 구성 — 화면 게이지 전용.
+
+    가중치가 주간 튜닝(`strategy_config`)으로 바뀌므로 **화면이 아니라 서버가** 낸다.
+    ⚠️ 지금 가중치로 다시 계산한 값이라, 튜닝 이후에 조회한 과거 리포트는 저장된
+    `score` 와 `total` 이 다를 수 있다(화면이 그 차이를 밝힌다).
+    """
+    items: List[ScoreBreakdownItem] = []
+    penalty: Optional[ScoreBreakdownPenalty] = None
+    total: float = 0.0
+
+
 class StockReportDetail(BaseModel):
     report: StockReport
     content_analyses: List[ContentAnalysisItem] = []
+    score_breakdown: Optional[ScoreBreakdown] = None
 
 
 class SectorStock(BaseModel):
@@ -286,7 +314,11 @@ def get_report_detail(report_date: str, stock_code: str):
             stock_code, report_date
         )
 
-        return {"report": report, "content_analyses": content_analyses}
+        return {
+            "report": report,
+            "content_analyses": content_analyses,
+            "score_breakdown": score_breakdown(report, get_strategy_config()),
+        }
     except HTTPException:
         raise
     except Exception as e:

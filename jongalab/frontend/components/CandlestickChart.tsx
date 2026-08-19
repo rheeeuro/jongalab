@@ -41,10 +41,12 @@ export function CandlestickChart({
   data,
   initialRangeDays = 7,
   fit = false,
+  height = 400,
 }: {
   data: CandleData[];
   initialRangeDays?: number;
   fit?: boolean; // true 면 가져온 전 구간을 꽉 차게(분봉 시장 차트용). false 면 최근 N일 줌.
+  height?: number; // 차트가 본문의 일부인 화면(종목 리포트)은 낮춰 쓴다 — 기본값은 시장 차트 기준.
 }) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -61,7 +63,7 @@ export function CandlestickChart({
 
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 400,
+      height,
       layout: {
         background: { color: isDark ? "#0f172a" : "#ffffff" },
         textColor: isDark ? "#94a3b8" : "#64748b",
@@ -179,7 +181,7 @@ export function CandlestickChart({
         chartRef.current = null;
       }
     };
-  }, [data, initialRangeDays, fit]);
+  }, [data, initialRangeDays, fit, height]);
 
   if (!data.length) {
     return (

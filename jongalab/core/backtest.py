@@ -4,8 +4,12 @@
 **재적용**해 "제안 가중치가 승자/패자를 더 잘 가려내는가"를 수치로 보여준다. GPT 설명만 보고
 승인하던 것을 근거 기반 승인으로 바꾼다.
 
+`score_components()` 는 이 파일의 유일한 채점 공식이고 두 곳이 함께 쓴다 —
+백테스트 총점(`recompute_score`)과 **종목 상세 화면의 종합점수 게이지**(`score_breakdown`,
+`/api/stock-report/{date}/{code}`). 화면이 가중치를 따로 갖고 있으면 주간 튜닝 때마다 어긋난다.
+
 [정확 재현이 가능한 이유]
-`recompute_score()` 는 `trading_engine.AnalysisEngine.score_candidate()` 공식을 그대로 미러링한다.
+`score_components()` 는 `trading_engine.AnalysisEngine.score_candidate()` 공식을 그대로 미러링한다.
 저장된 `daily_stock_report` 컴포넌트(supply_score/ma_aligned/near_high/trading_value/is_leader/
 prog_net_buy/is_theme_stock/supply_days/content_score/change_pct)만으로 정확히 재현된다. 콘텐츠 항은 원천값이
 항상 ≤10 이라 저장된 content_score 를 그대로 콘텐츠 항으로 쓰고 상한(CONTENT_SCORE_MAX)만 다시 적용한다.
@@ -22,67 +26,116 @@ prog_net_buy/is_theme_stock/supply_days/content_score/change_pct)만으로 정�
 from core.repository.strategy_config import _DEFAULTS as _SC_DEFAULTS
 
 
+def score_components(row: dict, w: dict) -> list[dict]:
+    """저장된 종목 지표(row)에 가중치(w)를 적용해 **항목별 가점**을 낸다.
+
+    항목 순서·공식은 score_candidate() 와 같다. 총점(`recompute_score`)과 화면 게이지
+    (`score_breakdown`)가 이 한 함수를 함께 쓴다 — 갈라 두면 항목 합이 총점과 어긋난다.
+    `raw_max` 는 그 항목이 받을 수 있는 최대 가점(정규화 분모의 구성분)이고, 과열 항은
+    감점이라 `raw` 가 음수이며 `raw_max` 는 0 이다(엔진 max_possible 에 미포함).
+    w 에 없는 키는 전략 기본값으로 폴백한다.
+    """
+    def g(k):
+        return w.get(k, _SC_DEFAULTS[k])
+
+    # 거래대금 브래킷 (임계값은 튜닝 대상이 아니라 양쪽 동일)
+    tv = int(row.get("trading_value") or 0)
+    if tv >= g("PREFERRED_TRADING_VALUE"):
+        value_raw = float(g("SCORE_PREFERRED_VALUE_BONUS"))
+    elif tv >= g("MIN_TRADING_VALUE"):
+        value_raw = float(g("SCORE_MIN_VALUE_BONUS"))
+    else:
+        value_raw = 0.0
+
+    # 당일 등락률 — 스윗스팟(2~12%) 가점, 과열(15%+) 감점
+    change_pct = float(row.get("change_pct") or 0)
+    in_band = g("CHANGE_BAND_MIN_PCT") <= change_pct < g("CHANGE_BAND_MAX_PCT")
+    overheated = not in_band and change_pct >= g("OVERHEAT_CHANGE_PCT")
+
+    # 5일 이내 연속성은 supply_score 에 이미 반영 → 6~10일+ 장기 연속만 가산
+    extra_days = min(max(int(row.get("supply_days") or 0) - 5, 0), 5)
+    cap = g("NEWS_HEAT_CAP") or 1
+
+    return [
+        {"key": "supply", "label": "5일 수급",
+         "raw": float(row.get("supply_score") or 0) / 100 * g("SCORE_SUPPLY_BONUS"),
+         "raw_max": float(g("SCORE_SUPPLY_BONUS"))},
+        {"key": "ma_aligned", "label": "이동평균 정배열",
+         "raw": float(g("SCORE_MA_ALIGNED_BONUS")) if row.get("ma_aligned") else 0.0,
+         "raw_max": float(g("SCORE_MA_ALIGNED_BONUS"))},
+        {"key": "near_high", "label": "52주 신고가 근접",
+         "raw": float(g("SCORE_NEAR_HIGH_BONUS")) if row.get("near_high") else 0.0,
+         "raw_max": float(g("SCORE_NEAR_HIGH_BONUS"))},
+        {"key": "trading_value", "label": "거래대금",
+         "raw": value_raw, "raw_max": float(g("SCORE_PREFERRED_VALUE_BONUS"))},
+        {"key": "leader", "label": "섹터 대장주",
+         "raw": float(g("SCORE_LEADER_BONUS")) if row.get("is_leader") else 0.0,
+         "raw_max": float(g("SCORE_LEADER_BONUS"))},
+        {"key": "prog_buy", "label": "프로그램 양매수",
+         "raw": float(g("SCORE_PROGRAM_BUY_BONUS")) if int(row.get("prog_net_buy") or 0) > 0 else 0.0,
+         "raw_max": float(g("SCORE_PROGRAM_BUY_BONUS"))},
+        {"key": "theme", "label": "오늘의 테마주",
+         "raw": float(g("THEME_STOCK_BONUS")) if row.get("is_theme_stock") else 0.0,
+         "raw_max": float(g("THEME_STOCK_BONUS"))},
+        {"key": "change_band", "label": "당일 등락 구간",
+         "raw": float(g("SCORE_CHANGE_BAND_BONUS")) if in_band else 0.0,
+         "raw_max": float(g("SCORE_CHANGE_BAND_BONUS"))},
+        {"key": "overheat", "label": "당일 과열 감점",
+         "raw": -float(g("SCORE_OVERHEAT_PENALTY")) if overheated else 0.0,
+         "raw_max": 0.0},
+        {"key": "supply_days", "label": "연속 수급",
+         "raw": extra_days * float(g("SCORE_EXTRA_SUPPLY_DAY_BONUS")),
+         "raw_max": 5 * float(g("SCORE_EXTRA_SUPPLY_DAY_BONUS"))},
+        # 콘텐츠 — 저장된 원천값(≤10)에 제안 상한만 다시 적용
+        {"key": "content", "label": "유튜브·텔레그램 언급",
+         "raw": min(float(row.get("content_score") or 0), g("CONTENT_SCORE_MAX")),
+         "raw_max": float(g("CONTENT_SCORE_MAX"))},
+        # 뉴스 재료 — news_count 가 NEWS_HEAT_CAP 에서 SCORE_NEWS_BONUS 만점 (기본 0 → 무영향)
+        {"key": "news", "label": "뉴스 재료",
+         "raw": min(int(row.get("news_count") or 0), cap) / cap * g("SCORE_NEWS_BONUS"),
+         "raw_max": float(g("SCORE_NEWS_BONUS"))},
+    ]
+
+
 def recompute_score(row: dict, w: dict) -> float:
     """저장된 종목 지표(row)에 가중치(w)를 적용해 종합점수(0~100)를 재계산.
 
     score_candidate() 와 동일 공식. w 에 없는 키는 전략 기본값으로 폴백한다.
     """
-    def g(k):
-        return w.get(k, _SC_DEFAULTS[k])
-
-    raw = 0.0
-    # 5일 수급 가점 — 수급점수(0~100) 비율만큼
-    raw += float(row.get("supply_score") or 0) / 100 * g("SCORE_SUPPLY_BONUS")
-    # 정배열 + 신고가
-    if row.get("ma_aligned"):
-        raw += g("SCORE_MA_ALIGNED_BONUS")
-    if row.get("near_high"):
-        raw += g("SCORE_NEAR_HIGH_BONUS")
-    # 거래대금 브래킷 (임계값은 튜닝 대상이 아니라 양쪽 동일)
-    tv = int(row.get("trading_value") or 0)
-    if tv >= g("PREFERRED_TRADING_VALUE"):
-        raw += g("SCORE_PREFERRED_VALUE_BONUS")
-    elif tv >= g("MIN_TRADING_VALUE"):
-        raw += g("SCORE_MIN_VALUE_BONUS")
-    # 대장주
-    if row.get("is_leader"):
-        raw += g("SCORE_LEADER_BONUS")
-    # 프로그램 양매수
-    if int(row.get("prog_net_buy") or 0) > 0:
-        raw += g("SCORE_PROGRAM_BUY_BONUS")
-    # 테마주
-    if row.get("is_theme_stock"):
-        raw += g("THEME_STOCK_BONUS")
-    # 당일 등락률 — 스윗스팟(2~12%) 가점, 과열(15%+) 감점
-    change_pct = float(row.get("change_pct") or 0)
-    if g("CHANGE_BAND_MIN_PCT") <= change_pct < g("CHANGE_BAND_MAX_PCT"):
-        raw += g("SCORE_CHANGE_BAND_BONUS")
-    elif change_pct >= g("OVERHEAT_CHANGE_PCT"):
-        raw -= g("SCORE_OVERHEAT_PENALTY")
-    # 5일 초과 장기 연속 수급
-    extra_days = max(int(row.get("supply_days") or 0) - 5, 0)
-    raw += min(extra_days, 5) * g("SCORE_EXTRA_SUPPLY_DAY_BONUS")
-    # 콘텐츠 — 저장된 원천값(≤10)에 제안 상한만 다시 적용
-    raw += min(float(row.get("content_score") or 0), g("CONTENT_SCORE_MAX"))
-    # 뉴스 재료 — news_count 가 NEWS_HEAT_CAP 에서 SCORE_NEWS_BONUS 만점 (기본 0 → 무영향)
-    cap = g("NEWS_HEAT_CAP") or 1
-    raw += min(int(row.get("news_count") or 0), cap) / cap * g("SCORE_NEWS_BONUS")
-
-    max_possible = (
-        g("SCORE_SUPPLY_BONUS")
-        + g("SCORE_MA_ALIGNED_BONUS")
-        + g("SCORE_NEAR_HIGH_BONUS")
-        + g("SCORE_PREFERRED_VALUE_BONUS")
-        + g("SCORE_LEADER_BONUS")
-        + g("SCORE_PROGRAM_BUY_BONUS")
-        + g("THEME_STOCK_BONUS")
-        + g("SCORE_CHANGE_BAND_BONUS")
-        + 5 * g("SCORE_EXTRA_SUPPLY_DAY_BONUS")
-        + g("CONTENT_SCORE_MAX")
-        + g("SCORE_NEWS_BONUS")
-    )
+    items = score_components(row, w)
+    raw = sum(i["raw"] for i in items)
+    # 100점 만점 환산 분모 = 각 가점의 최대 합 (감점 항은 미포함)
+    max_possible = sum(i["raw_max"] for i in items)
     # 과열 감점으로 음수가 될 수 있어 0 에서 클램프 (엔진과 동일)
     return round(max(raw, 0.0) / max_possible * 100, 1) if max_possible else 0.0
+
+
+def score_breakdown(row: dict, w: dict) -> dict:
+    """화면 게이지용 — 항목별 가점을 **100점 환산 점수**로 낸다(합 = 총점).
+
+    가중치 0 인 항목(`SCORE_PROGRAM_BUY_BONUS`·`SCORE_NEWS_BONUS` 처럼 표시·튜닝 전용)은
+    채울 수 없는 칸이라 제외한다. 감점 항은 `penalty` 로 따로 낸다(막대 밖 각주용).
+    """
+    items = score_components(row, w)
+    max_possible = sum(i["raw_max"] for i in items) or 1.0
+
+    def to100(v: float) -> float:
+        return round(v / max_possible * 100, 1)
+
+    penalty = next((i for i in items if i["key"] == "overheat" and i["raw"] < 0), None)
+    return {
+        "items": [
+            {"key": i["key"], "label": i["label"],
+             "points": to100(i["raw"]), "max_points": to100(i["raw_max"])}
+            for i in items
+            if i["raw_max"] > 0
+        ],
+        "penalty": (
+            {"key": penalty["key"], "label": penalty["label"], "points": to100(penalty["raw"])}
+            if penalty else None
+        ),
+        "total": recompute_score(row, w),
+    }
 
 
 def _avg(xs: list) -> float:
