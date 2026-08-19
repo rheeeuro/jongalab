@@ -89,9 +89,7 @@ NEWS_RETENTION_DAYS = int(os.getenv('NEWS_RETENTION_DAYS', '30'))
 # 카운트 소비 — news_count/news_unique_count/news_pm_count/news_first_today/news_prior_avg.
 # 텔레그램 고정이 기본이다. 넓히면 위 표본의 성질이 그날부터 바뀌므로 rule 판정과 함께 결정한다.
 NEWS_COUNT_SOURCES = tuple(
-    s.strip() for s in os.getenv(
-        'NEWS_COUNT_SOURCES', os.getenv('NEWS_ACTIVE_SOURCES', 'telegram')
-    ).split(',') if s.strip()
+    s.strip() for s in os.getenv('NEWS_COUNT_SOURCES', 'telegram').split(',') if s.strip()
 ) or ('telegram',)
 # 텍스트 소비 — 재료 지속성 판정(news_material_judge)·뉴스 베토 판정(news_guard)·화면 헤드라인.
 # 네이버를 포함해 지속성 라벨 커버리지를 넓힌다. 다만 종목이 스쳐 언급된 기사까지 들어오므로
@@ -105,8 +103,6 @@ NEWS_COUNT_SOURCES = tuple(
 NEWS_TEXT_SOURCES = tuple(
     s.strip() for s in os.getenv('NEWS_TEXT_SOURCES', 'telegram,naver').split(',') if s.strip()
 ) or ('telegram',)
-# 레거시 별칭 — 예전 이름을 읽는 곳(문서·로그)이 남아 있어 카운트 게이트를 가리킨다.
-NEWS_ACTIVE_SOURCES = NEWS_COUNT_SOURCES
 
 # ── 네이버 증권 종목별 뉴스 수집 (workers/naver_news_collector.py) ──
 # 유니버스 종목의 재료 라벨 커버리지 부족을 메우기 위한 소스(실측: docs/history/news-pipeline.md).
