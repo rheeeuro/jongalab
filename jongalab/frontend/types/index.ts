@@ -80,6 +80,11 @@ export interface MarketIndex {
   change: number | null;
   change_percent: number | null;
   sparkline?: number[] | null;
+  // 미국 정규장 밖 시세 (SKHY·EWY·KORU 등 장 밖 거래가 있는 심볼만).
+  // extended_percent 는 정규장 종가 대비 등락률. 정규장 중에는 값이 없다.
+  extended_price?: number | null;
+  extended_percent?: number | null;
+  market_state?: string | null;
 }
 
 export interface MarketIndices {

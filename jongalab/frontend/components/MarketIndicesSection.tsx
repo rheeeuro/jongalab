@@ -19,6 +19,22 @@ function readCachedMarketIndices(): MarketIndices | null {
   }
 }
 
+/** 새 응답에서 값이 빈 카드는 화면(캐시)에 있던 마지막 값을 유지한다.
+ * 서버도 마지막 정상값을 채우지만(백엔드 재기동 직후엔 그 값이 없다), 카드가
+ * '데이터 없음'으로 깜빡이지 않게 하는 최종 방어선. */
+function mergeKeepLast(prev: MarketIndices, next: MarketIndices): MarketIndices {
+  const merged = { ...next } as MarketIndices;
+  for (const key of Object.keys(next) as (keyof MarketIndices)[]) {
+    const prevItems = prev[key] ?? [];
+    merged[key] = (next[key] ?? []).map((item) => {
+      if (item.price !== null) return item;
+      const last = prevItems.find((p) => p.symbol === item.symbol);
+      return last && last.price !== null ? last : item;
+    });
+  }
+  return merged;
+}
+
 function Section({
   icon,
   title,
@@ -46,9 +62,12 @@ export function MarketIndicesSection() {
   });
   const [animate, setAnimate] = useState(false);
   const hasCache = useRef(displayData !== EMPTY_INDICES);
+  // 빈 값 대체(mergeKeepLast)에 쓸 현재 표시값 — 폴링 콜백이 최신 값을 읽어야 한다.
+  const latest = useRef(displayData);
 
   const animateTo = useCallback((next: MarketIndices) => {
     setAnimate(false);
+    latest.current = next;
     // 1프레임: 현재 값 고정 → 2프레임: 새 값으로 전환
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -69,9 +88,10 @@ export function MarketIndicesSection() {
       if (!res.ok) return;
       const data: MarketIndices = await res.json();
       if (hasCache.current) {
-        animateTo(data);
+        animateTo(mergeKeepLast(latest.current, data));
       } else {
         setDisplayData(data);
+        latest.current = data;
         hasCache.current = true;
         try {
           localStorage.setItem(CACHE_KEY, JSON.stringify(data));

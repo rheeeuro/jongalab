@@ -524,8 +524,48 @@ def fetch_stock_name(ticker: str) -> str:
     return original_ticker
 
 
+# 지수 카드 마지막 정상값 (심볼 → price/change/change_percent/sparkline).
+# 외부 API(yfinance·KIS) 는 간헐적으로 빈 응답을 주는데, 그때 카드를 '데이터 없음'으로
+# 비우는 대신 직전 값을 그대로 보여준다 — 시세는 마지막 값이 곧 현재 상태다.
+_last_good_quotes: dict[str, dict] = {}
+
+# 지수 응답 캐시 — 카드 폴링(60s)이 클라이언트마다 15+ 심볼을 외부 API 로 때려
+# 레이트리밋(=빈 응답)을 부르기 때문에 짧게 공유한다.
+_INDICES_TTL_SEC = 30
+_indices_cache: dict[str, dict] = {}
+
+
+def _with_last_good(item: dict) -> dict:
+    """조회 실패면 마지막 정상값으로 대체하고, 성공이면 그 값을 마지막 정상값으로 갱신한다."""
+    symbol = item.get("symbol")
+    if not symbol:
+        return item
+    last = _last_good_quotes.get(symbol)
+
+    if item.get("price") is None:
+        return {**item, **last} if last else item
+
+    merged = dict(item)
+    if merged.get("sparkline") is None and last and last.get("sparkline"):
+        merged["sparkline"] = last["sparkline"]
+    _last_good_quotes[symbol] = {
+        "price": merged["price"],
+        "change": merged.get("change"),
+        "change_percent": merged.get("change_percent"),
+        "sparkline": merged.get("sparkline"),
+    }
+    return merged
+
+
 def fetch_market_indices() -> dict:
-    """주요 시장 지수 일괄 조회 (카테고리별 그룹핑)"""
+    """주요 시장 지수 일괄 조회 (카테고리별 그룹핑).
+
+    응답은 30s 공유 캐시, 개별 심볼 실패는 마지막 정상값으로 채운다(_with_last_good).
+    """
+    cached = _indices_cache.get("all")
+    if cached and time.time() - cached["at"] < _INDICES_TTL_SEC:
+        return cached["data"]
+
     all_items = []
     for items in MARKET_INDICES.values():
         all_items.extend(items)
@@ -554,7 +594,35 @@ def fetch_market_indices() -> dict:
         fut_day["sparkline"] = fut_spark
     grouped["FUTURES"] = [fut_night, fut_day] + grouped.get("FUTURES", [])
 
+    grouped = {cat: [_with_last_good(it) for it in items] for cat, items in grouped.items()}
+    _overlay_extended(grouped)
+    _indices_cache["all"] = {"at": time.time(), "data": grouped}
     return grouped
+
+
+def _overlay_extended(grouped: dict) -> None:
+    """미국 정규장 밖(프리/애프터) 시세를 해당 카드에 덧붙인다 — `price`/`change_percent` 는
+    정규장 기준 그대로 두고 `extended_*` 필드만 추가한다(공식 종가와 장외 값을 섞지 않는다).
+
+    대상은 실제로 장 밖 거래가 있는 미국 상장 ETF/ADR(SKHY·EWY·KORU — `fetch_us_extended`
+    와 같은 소스, 60s 캐시 공유). 지수(^GSPC 등)는 프리/애프터 시세 자체가 없고,
+    선물·환율·코인은 사실상 24시간 거래라 `price` 가 이미 최신값이다.
+
+    ⚠️ 이 필드는 `_with_last_good` 캐시에 넣지 않는다 — 정규장이 열리면 값이 사라져야 하는데
+    마지막 값을 붙들면 장중에 지난밤 시간외가 남는다.
+    """
+    try:
+        ext = fetch_us_extended()
+    except Exception:
+        return
+    for items in grouped.values():
+        for it in items:
+            e = ext.get(it.get("symbol"))
+            if not e or e.get("extended_ret") is None:
+                continue
+            it["extended_price"] = e.get("extended_price")
+            it["extended_percent"] = e.get("extended_ret")
+            it["market_state"] = e.get("market_state")
 
 
 # ── 엣지 연구용 시장 스냅샷 (market_snapshot 테이블 1행) ──
@@ -651,7 +719,8 @@ def _us_extended_one(symbol: str) -> dict:
     실패·필드 부재는 None(그 심볼만 제외, 소비자는 None 이면 그 축 미개입).
     프리마켓이 살아있으면 extended_ret=프리마켓 등락(신선), 폐장이면 마지막 애프터마켓 등락.
     """
-    out = {"symbol": symbol, "regular_ret": None, "extended_ret": None, "market_state": None}
+    out = {"symbol": symbol, "regular_ret": None, "extended_ret": None,
+           "extended_price": None, "market_state": None}
     try:
         info = yf.Ticker(symbol).info
     except Exception:
@@ -667,6 +736,7 @@ def _us_extended_one(symbol: str) -> dict:
     if ext_price is None:
         ext_price = info.get("postMarketPrice")
     if ext_price is not None and reg:
+        out["extended_price"] = float(ext_price)
         out["extended_ret"] = round((float(ext_price) - reg) / reg * 100, 3)
     return out
 
