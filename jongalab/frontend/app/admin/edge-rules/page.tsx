@@ -1,7 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Loader2, Rocket, Archive, ShieldCheck, Info } from "lucide-react";
+import {
+  Loader2,
+  Rocket,
+  Archive,
+  ShieldCheck,
+  Info,
+  PauseCircle,
+  PlayCircle,
+  RotateCcw,
+} from "lucide-react";
 import type { EdgeRule } from "@/types";
 import {
   familyMeta,
@@ -46,12 +55,21 @@ export default function EdgeRulesAdminPage() {
     load();
   }, [load]);
 
-  async function act(rule: EdgeRule, action: "promote" | "retire") {
-    const confirmText =
-      action === "promote"
-        ? `'${rule.title ?? rule.name}' 전략을 실전 매매에 투입합니다.\n다음 매수 사이클부터 실제 주문에 반영됩니다. 진행할까요?`
-        : `'${rule.title ?? rule.name}' 전략을 종료합니다.\n${rule.status === "live" ? "실전 매매에서 즉시 빠집니다. " : ""}진행할까요?`;
-    if (!window.confirm(confirmText)) return;
+  // 원장 축(promote·retire·unretire)과 운용 축(pause·resume)이 같은 프록시를 쓴다.
+  type RuleAction = "promote" | "retire" | "pause" | "resume" | "unretire";
+
+  async function act(rule: EdgeRule, action: RuleAction) {
+    const who = `'${rule.title ?? rule.name}' 전략`;
+    // 되돌릴 수 있는 전이(쉬기·복귀)와 영구 종결을 문구에서 갈라 놓는다 — 같은 톤으로 물으면
+    // 쉬는 것도 종료처럼 읽혀 아무도 누르지 않는다(그게 강등이 한 번도 실행되지 않은 이유였다).
+    const CONFIRM: Record<RuleAction, string> = {
+      promote: `${who}을 실전 매매에 투입합니다.\n다음 매수 사이클부터 실제 주문에 반영됩니다. 진행할까요?`,
+      retire: `${who}을 영구 종료합니다.\n${rule.status === "live" ? "실전 매매에서 즉시 빠집니다. " : ""}되돌리려면 처음부터 다시 검증해야 합니다. 진행할까요?`,
+      pause: `${who}을 잠시 쉬게 합니다.\n종목 선정에서 빠지지만 성적은 계속 매기고, 회복되면 자동으로 다시 쓰입니다.`,
+      resume: `${who}을 다시 씁니다.\n최근 성적이 나쁘면 다음 평가에서 자동으로 다시 쉬게 될 수 있습니다.`,
+      unretire: `${who}을 검증 단계로 되돌립니다.\n**성적을 처음부터 다시 쌓습니다** — 오늘부터의 새 표본으로만 판정합니다. 진행할까요?`,
+    };
+    if (!window.confirm(CONFIRM[action])) return;
 
     setActing(rule.id);
     setMsg(null);
@@ -65,13 +83,15 @@ export default function EdgeRulesAdminPage() {
       if (!res.ok) {
         setMsg({ type: "error", text: data.detail || "처리에 실패했습니다." });
       } else {
-        setMsg({
-          type: "success",
-          text:
-            action === "promote"
-              ? `실전 투입 완료. ${data.worst_low_ret !== null && data.worst_low_ret !== undefined ? `참고 — 이 전략의 ${STAT_META.worst_low_ret.label}: ${fmtPct(data.worst_low_ret)} (손절 정책과 비교해 보세요)` : ""}`
-              : "전략을 종료했습니다.",
-        });
+        const DONE: Record<RuleAction, string> = {
+          promote: `실전 투입 완료. ${data.worst_low_ret !== null && data.worst_low_ret !== undefined ? `참고 — 이 전략의 ${STAT_META.worst_low_ret.label}: ${fmtPct(data.worst_low_ret)} (손절 정책과 비교해 보세요)` : ""}`,
+          retire: "전략을 종료했습니다.",
+          // 백엔드가 내려주는 note 를 그대로 쓴다 — 후속 동작(자동 복귀 등) 설명이 거기 있다.
+          pause: data.note ?? "잠시 쉬게 했습니다.",
+          resume: data.note ?? "다시 적용합니다.",
+          unretire: data.note ?? "검증 단계로 되돌렸습니다.",
+        };
+        setMsg({ type: "success", text: DONE[action] });
         load();
       }
     } catch {
@@ -95,6 +115,7 @@ export default function EdgeRulesAdminPage() {
   const pipeline = rules.filter((r) => !isMeasurementOnly(r));
   const ready = pipeline.filter(isPromotionCandidate);
   const live = pipeline.filter((r) => r.status === "live");
+  const paused = pipeline.filter((r) => r.status === "paused");
   const verifying = pipeline.filter((r) => r.status === "candidate" && !isPromotionCandidate(r));
   const retired = rules.filter((r) => r.status === "retired");
 
@@ -114,8 +135,11 @@ export default function EdgeRulesAdminPage() {
           실전 투입 조건(서로 다른 거래일 10일 이상 · 회당 평균 수익 &gt; 0% · 보수적 수익 &gt; 0% ·
           매수 시점에 실행 가능한 조건)은{" "}
           <b>서버가 검증</b>하며, 미충족 시 사유와 함께 거부됩니다(강제 불가). 각 카드의{" "}
-          <b>&ldquo;남은 조건&rdquo;</b>이 서버가 판단한 미충족 항목입니다. 과도한 투입을 막기 위해
-          실전 투입은 <b>월 3개까지</b>입니다.
+          <b>&ldquo;남은 조건&rdquo;</b>이 서버가 판단한 미충족 항목입니다.
+          <br />
+          적용 중인 전략은 매일 성적을 다시 재서, 시장 몫을 뺀 수익이 연달아 마이너스면{" "}
+          <b>자동으로 잠시 쉬게</b> 하고 회복되면 <b>자동으로 다시 씁니다</b>(승인 불필요·되돌릴 수
+          있음). 아래 버튼은 그 판단에 사람이 먼저 끼어들 때 씁니다. <b>종료</b>만 영구입니다.
         </span>
       </div>
 
@@ -148,21 +172,58 @@ export default function EdgeRulesAdminPage() {
         )}
       />
 
-      {/* ② 실전 적용 중 */}
+      {/* ② 실전 적용 중 — 쉬기(되돌릴 수 있음)를 먼저, 종료(영구)는 뒤에 둔다 */}
       <Section
         title="실전 적용 중"
         empty="실전 적용 중인 전략이 없습니다."
         rules={live}
         render={(r) => (
-          <ActionButton
-            label="종료"
-            icon={<Archive className="h-3.5 w-3.5" />}
-            busy={acting === r.id}
-            onClick={() => act(r, "retire")}
-            variant="danger"
-          />
+          <>
+            <ActionButton
+              label="쉬게 하기"
+              icon={<PauseCircle className="h-3.5 w-3.5" />}
+              busy={acting === r.id}
+              onClick={() => act(r, "pause")}
+              variant="ghost"
+            />
+            <ActionButton
+              label="종료"
+              icon={<Archive className="h-3.5 w-3.5" />}
+              busy={acting === r.id}
+              onClick={() => act(r, "retire")}
+              variant="danger"
+            />
+          </>
         )}
       />
+
+      {/* ②-b 잠시 쉬는 중 — 평가기가 자동으로 넣고 빼는 자리. 사람은 덮어쓰기만 한다 */}
+      {paused.length > 0 && (
+        <Section
+          title="잠시 쉬는 중 (선정에 미반영 · 채점은 계속)"
+          icon={<PauseCircle className="h-4 w-4 text-amber-500" />}
+          empty=""
+          rules={paused}
+          render={(r) => (
+            <>
+              <ActionButton
+                label="다시 쓰기"
+                icon={<PlayCircle className="h-3.5 w-3.5" />}
+                busy={acting === r.id}
+                onClick={() => act(r, "resume")}
+                variant="primary"
+              />
+              <ActionButton
+                label="종료"
+                icon={<Archive className="h-3.5 w-3.5" />}
+                busy={acting === r.id}
+                onClick={() => act(r, "retire")}
+                variant="danger"
+              />
+            </>
+          )}
+        />
+      )}
 
       {/* ③ 검증 중 */}
       <Section
@@ -198,15 +259,31 @@ export default function EdgeRulesAdminPage() {
         />
       )}
 
-      {/* ⑤ 종료됨 (접힘) */}
+      {/* ⑤ 종료됨 (접힘) — 되살릴 수 있지만 성적은 처음부터 다시 쌓는다 */}
       {retired.length > 0 && (
         <details>
           <summary className="cursor-pointer list-none text-sm font-bold text-slate-400">
             종료된 전략 ({retired.length})
           </summary>
+          <p className="mt-2 text-xs leading-relaxed text-slate-400">
+            되살리면 <b>성적을 처음부터 다시 쌓습니다</b> — 예전 표본으로 다시 심사하면 통과할 때까지
+            반복해서 시험하는 셈이라, 오늘부터의 새 표본으로만 판정합니다.
+          </p>
           <div className="mt-3 space-y-2">
             {retired.map((r) => (
-              <RuleRow key={r.id} rule={r} />
+              <RuleRow
+                key={r.id}
+                rule={r}
+                action={
+                  <ActionButton
+                    label="되살리기"
+                    icon={<RotateCcw className="h-3.5 w-3.5" />}
+                    busy={acting === r.id}
+                    onClick={() => act(r, "unretire")}
+                    variant="ghost"
+                  />
+                }
+              />
             ))}
           </div>
         </details>
@@ -322,7 +399,8 @@ function RuleRow({ rule, action }: { rule: EdgeRule; action?: React.ReactNode })
           <p className="mt-1.5 text-xs text-slate-400">아직 검증 기록 없음</p>
         )}
       </div>
-      {action && <div className="shrink-0">{action}</div>}
+      {/* 버튼이 둘 이상인 행(적용 중·쉬는 중)이 있어 모바일에서 줄바꿈되게 둔다 */}
+      {action && <div className="flex shrink-0 flex-wrap gap-2">{action}</div>}
     </div>
   );
 }

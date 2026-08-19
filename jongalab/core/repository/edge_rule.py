@@ -139,15 +139,43 @@ def delete_rule(rule_id: int) -> int:
 
 
 def set_rule_status(rule_id: int, status: str) -> None:
-    """상태 전이 — live 면 promoted_at, retired 면 retired_at 타임스탬프도 찍는다."""
-    ts = ""
+    """상태 전이 — 상태별 타임스탬프도 함께 찍는다.
+
+    ⚠️ live ↔ paused 는 rule_evaluator 가 **자동으로** 굴린다. `promoted_at` 은 원장 기록(언제
+    승격했나)이라 **candidate → live 일 때만** 찍는다 — paused 복귀는 승격이 아니고, live 로
+    시드된 rule(promoted_at NULL)에 복귀 시각을 넣으면 없던 승격 이력을 만들어낸다.
+    """
+    # promoted_at 을 status 보다 **먼저** 배치해야 CASE 안의 status 가 전이 전 값을 읽는다
+    # (MariaDB 는 SET 절을 왼쪽부터 평가한다). 순서가 바뀌면 모든 live 전이가 승격으로 찍힌다.
+    sets = ""
     if status == "live":
-        ts = ", promoted_at = CURRENT_TIMESTAMP"
+        sets = ("promoted_at = CASE WHEN status = 'candidate' "
+                "THEN CURRENT_TIMESTAMP ELSE promoted_at END, ")
     elif status == "retired":
-        ts = ", retired_at = CURRENT_TIMESTAMP"
+        sets = "retired_at = CURRENT_TIMESTAMP, "
+    elif status == "paused":
+        sets = "paused_at = CURRENT_TIMESTAMP, "
     with get_db() as (conn, cursor):
         cursor.execute(
-            f"UPDATE edge_rule SET status = %s{ts} WHERE id = %s", (status, rule_id)
+            f"UPDATE edge_rule SET {sets}status = %s WHERE id = %s", (status, rule_id)
+        )
+        conn.commit()
+
+
+def reset_for_unretire(rule_id: int, registered_at: str) -> None:
+    """retired → candidate 복귀 + **표본 리셋**(사전 등록 원칙).
+
+    `registered_at` 을 복귀일로 밀어 발견창부터 새 표본으로 다시 판정한다. 같은 표본으로
+    게이트를 다시 보는 재시험(optional stopping)을 막는 유일하게 깨끗한 방법이라 이 경로만 둔다.
+    과거 채점은 `edge_rule_daily` 에 그대로 남아 화면·수동 검토에서 참고할 수 있다
+    (registered_at 이후만 집계하므로 통계에는 섞이지 않는다).
+    """
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            "UPDATE edge_rule SET status = 'candidate', registered_at = %s, "
+            "decision = NULL, stats = NULL, retired_at = NULL, paused_at = NULL, "
+            "promoted_at = NULL WHERE id = %s",
+            (registered_at, rule_id),
         )
         conn.commit()
 

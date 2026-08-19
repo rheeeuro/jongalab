@@ -485,7 +485,9 @@ export interface EdgeRule {
   description: string;
   predicate: PredicateCond[];
   exit_label: string;
-  status: 'candidate' | 'live' | 'retired';
+  // 두 축이 한 컬럼에 들어 있다 — 원장(candidate/live/retired, 사람 결정)과
+  // 운용(live↔paused, rule_evaluator 자동). paused 는 선정에서 표만 빠지고 채점은 계속된다.
+  status: 'candidate' | 'live' | 'paused' | 'retired';
   min_sample: number;          // 참고값 — 2026-07-28 승격 게이트에서 제외(단위가 거래일 규율과 어긋남)
   registered_at: string;
   stats: EdgeRuleStats | null;
@@ -493,6 +495,7 @@ export interface EdgeRule {
   created_at: string;
   promoted_at: string | null;
   retired_at: string | null;
+  paused_at: string | null;    // 마지막 live↔paused 전이 시각
 }
 
 export interface EdgeRuleMatched {

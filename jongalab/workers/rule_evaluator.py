@@ -10,22 +10,22 @@
      결과 라벨 미도래 날짜는 스킵(다음날 재시도)하되, 등록 후 _LABEL_RETRY_DEADLINE_DAYS 를
      넘긴 날짜는 n=0 sentinel 로 종결한다(실시간 라벨은 소급 불가 — 영구 재시도 방지).
      이어서 rule 별 누적 통계(registered_at 이후 표본만, 사전 등록 원칙) 재계산.
-  pass 2 (게이트·알림): 모든 rule 의 통계가 신선해진 뒤 core.edge_policy.check_promotion
-     (라우터 승격 게이트와 **동일 단일 소스**)으로 자격 판정 → stats.promo_eligible 저장
-     (프론트 '승격후보' 배지가 이 값을 렌더링) → 텔레그램 알림:
-       승격 후보(게이트 전체 충족) / 집행 설계 필요(통계는 충족, 선정 시점 실행 불가 피처) /
-       강등 검토(core.edge_policy.check_demotion — live 비대조군, 최근 10거래일 창
-       n≥20·거래일≥5 + **역할별 부호**: selector 는 매수 종목 recent_alpha<0, veto 는 제외 종목
-       recent_alpha>0(이기는 종목을 버리는 중)일 때. 자가 절대 수익이 아니라 **시장 회귀
-       잔차(alpha)** 인 이유는 절대 수익이 시장과 동기화돼 하락 구간엔 전 룰을 후보로 올리고
-       상승 구간엔 아무도 못 걸렀기 때문이다. benchmark 는 제외 — 실탄이 아닌 페이퍼
-       기준선이라 유지 비용이 없다). 승격/집행설계는 판정일 1회이며 **어느 판정일인지는
-       정책이 정한다** — strict 는 확인창 판정일, experimental 은 라우터 승격에서 판정 일정이
-       면제되므로 발견 판정일에 알린다(두 경로가 어긋나면 화면만 '검증 통과'가 된다).
-       **강등은 판정 일정(sql/39) 밖이라 매 평일 재검사**되어 조건이 유지되는 동안 반복된다 —
-       알림에 판정값 alpha·beta·하락일 성적과 일 등가중 최근 평균을 병기해, 쏠림(부호 상충)과
-       "장이 나빠서인가 룰이 죽었나"를 눈으로 걸러낸다.
-     실제 전이는 관리자 API 수동 승인.
+  pass 2 (게이트·전이·알림): 모든 rule 의 통계가 신선해진 뒤 두 축을 따로 판정한다.
+     · **원장 축(사람)** — core.edge_policy.check_promotion(라우터 승격 게이트와 **동일 단일
+       소스**)으로 candidate 자격 판정 → stats.promo_eligible 저장(프론트 '승격후보' 배지가 이
+       값을 렌더링) → 알림: 승격 후보(게이트 전체 충족) / 집행 설계 필요(통계는 충족, 선정 시점
+       실행 불가 피처). 판정일 1회이며 **어느 판정일인지는 정책이 정한다** — strict 는 확인창
+       판정일, experimental 은 라우터 승격에서 판정 일정이 면제되므로 발견 판정일에 알린다
+       (두 경로가 어긋나면 화면만 '검증 통과'가 된다). 승격·retire 는 관리자 API 수동 승인.
+     · **운용 축(자동)** — live ↔ paused 를 core.edge_policy.decide_transition 으로 **이 워커가
+       직접 전이시킨다**(승인 없음). 자는 시장 회귀 잔차 recent_alpha 이고 역할별 부호가 반대다
+       (selector 는 매수 종목 alpha<0, veto 는 제외 종목 alpha>0 일 때 내린다). 절대 수익이
+       아닌 이유는 그게 시장과 동기화돼 하락 구간엔 전 룰을 후보로 올리고 상승 구간엔 아무도
+       못 걸렀기 때문이다. benchmark 는 제외(실탄이 아닌 페이퍼 기준선이라 유지 비용이 없다).
+       **새 표본이 있는 실행에서만** 연속 카운트를 세고(stats.flip_streak), TRANSITION_STREAK
+       표본일 연속일 때 전이한다. 알림은 승인 요청이 아니라 **사후 보고**이며 판정값
+       alpha·beta·하락일 성적과 일 등가중 최근 평균을 병기해 "장이 나빠서인가 룰이 죽었나"를
+       사람이 되짚을 수 있게 한다.
 """
 import logging
 import math
@@ -36,10 +36,11 @@ from core.logging_setup import setup_logging
 from core.edge_predicate import evaluate
 from core.edge_policy import (
     CONFIRM_DAYS,
+    DEMOTE_MIN_N,
     DISCOVERY_DAYS,
     check_confirmation,
-    check_demotion,
     check_promotion,
+    decide_transition,
     decision_due,
     decision_stage,
     rule_role,
@@ -54,6 +55,7 @@ from core.repository import (
     upsert_rule_daily,
     get_rule_daily_since,
     get_universe_label_totals,
+    set_rule_status,
     update_rule_decision,
     update_rule_stats,
 )
@@ -62,10 +64,31 @@ setup_logging()
 logger = logging.getLogger("RuleEvaluator")
 
 _CI_Z = 1.64                     # 단측 95% 정규 근사
-_RECENT_DAYS = 10                # 강등 감시: 최근 창(거래일 수) — stats.recent_* 산출 폭
-                                 # 강등 판정 문턱(표본·거래일·부호)은 core.edge_policy.check_demotion
+_RECENT_DAYS = 10                # 강등 감시: 최근 창의 **최소** 표본일 수 (stats.recent_* 산출 폭)
+                                 # 실제 창은 적응형 — _recent_window 참고
 _LABEL_RETRY_DEADLINE_DAYS = 14  # 결과 라벨 미도래 재시도 마감 — 초과 시 n=0 sentinel 로 종결
 _FIT_MIN_DAYS = 5                # 시장 회귀(alpha·beta) 최소 거래일 — 미만이면 추정하지 않는다
+
+
+def _recent_window(day_counts: list[tuple[str, int]]) -> set[str]:
+    """강등 감시용 최근 창 = **max(표본일 _RECENT_DAYS 개, 종목-일 n 이 문턱을 채울 때까지)**.
+
+    day_counts: [(날짜, 그날 매칭 종목 수)] 오래된→최신.
+
+    창을 표본일 개수로만 고정하면 `n = 표본일 x 폭(1일당 매칭 종목 수)` 이 되어, **폭이 얇은
+    룰은 표본이 아무리 쌓여도 DEMOTE_MIN_N 을 영원히 못 넘는다**(창이 고정이라 n 이 늘 수
+    없다) — 그런 룰은 자동 전이 대상에서 영구히 빠진다. 창을 뒤로 늘려 문턱을 채우면 얇은 룰도
+    '표본이 모이면 판정되는' 같은 규칙 아래 들어온다.
+    두꺼운 룰은 _RECENT_DAYS 개에서 이미 문턱을 넘으므로 창이 늘지 않는다(동작 불변).
+    창을 달력으로 제한하지는 않는다 — 드문 룰은 창이 길어 반응이 느린 게 그 룰의 성질이다.
+    근거·실측: docs/history/edge-ledger.md
+    """
+    if not day_counts:
+        return set()
+    w = min(_RECENT_DAYS, len(day_counts))
+    while w < len(day_counts) and sum(c for _, c in day_counts[-w:]) < DEMOTE_MIN_N:
+        w += 1
+    return {d for d, _ in day_counts[-w:]}
 
 
 def _score_rule_date(rule: dict, rows: list[dict], market: dict | None) -> dict | None:
@@ -214,17 +237,21 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
                 "mean_exc_days": None, "t_days_exc": None,
                 "beta": None, "alpha": None, "t_alpha": None, "recent_alpha": None,
                 "down_day_n": 0, "down_day_mean": None,
-                "worst_low_ret": None, "updated_through": updated_through}
+                "worst_low_ret": None, "updated_through": updated_through,
+                "last_sample_date": None}
 
     mean_net = sum(nets) / n
     win_rate = sum(1 for x in nets if x > 0) / n
     std = (sum((x - mean_net) ** 2 for x in nets) / (n - 1)) ** 0.5 if n >= 2 else 0.0
     ci_low = mean_net - _CI_Z * std / math.sqrt(n)
 
-    # 강등 감시용 최근 창 — 최근 _RECENT_DAYS 거래일의 표본. 창을 종목-일 개수로 잡으면 광역
+    # 강등 감시용 최근 창(적응형 — _recent_window). 창을 종목-일 개수로 잡으면 광역
     # rule(일 10종목 매칭)에서 실효 3거래일밖에 안 돼 하루 시장 무브가 평균을 통째로 뒤집는다
     # (오탐 강등 사례: docs/history/edge-ledger.md).
-    recent_dates = set(sorted({d for d, _ in dated})[-_RECENT_DAYS:])
+    _day_counts: dict = {}
+    for d, _ in dated:
+        _day_counts[d] = _day_counts.get(d, 0) + 1
+    recent_dates = _recent_window(sorted(_day_counts.items()))
     recent = [net for d, net in dated if d in recent_dates]
     recent_mean = sum(recent) / len(recent) if recent else None
     # 일 등가중 최근 평균 — 알림 병기용 진단값(게이트는 recent_alpha 를 쓴다). 시드가 하루
@@ -310,6 +337,10 @@ def _recompute_stats(daily_rows: list[dict], uni_totals: dict | None = None) -> 
         "down_day_mean": round(sum(down) / len(down), 3) if down else None,
         "worst_low_ret": round(min(lows), 3) if lows else None,
         "updated_through": updated_through,
+        # 마지막으로 **표본이 생긴** 날. updated_through 는 매칭 0 인 날에도 갱신되므로
+        # 자동 전이의 '새 정보가 있었나' 판정에는 쓸 수 없다 — 그걸로 세면 연속 카운트가
+        # 표본일이 아니라 달력 평일이 되어, 안 바뀐 alpha 가 반복 집계된다.
+        "last_sample_date": max(d for d, _ in dated),
         "recent_n": len(recent),
         "recent_n_days": len(recent_dates),
         "recent_mean_net": round(recent_mean, 3) if recent_mean is not None else None,
@@ -431,13 +462,19 @@ def run():
         if low_refreshed:
             logger.info(f"{rule['name']}: next_low_ret 소급 반영 {low_refreshed}일")
         rule["_uni"] = uni_totals_by_label.get(rule.get("exit_label") or "exec_leg_ret")
+        # 자동 전이 연속 카운트는 stats 재계산에 살아남아야 한다(직전 실행에서 이어받는 값).
+        # 함께 들고 오는 직전 **last_sample_date** 로 "이번 실행에 새 표본이 있었나"를 판정한다
+        # (updated_through 가 아니다 — 그건 매칭 0 인 날에도 움직인다).
+        _prev = rule.get("stats") or {}
+        rule["_prev_flip_streak"] = _prev.get("flip_streak") or 0
+        rule["_prev_sample_date"] = _prev.get("last_sample_date")
         rule["stats"] = _recompute_stats(daily_rows, rule["_uni"])
         rule["_daily_rows"] = daily_rows   # pass2 판정이 발견/확인 구간으로 잘라 쓴다
         rule["_new_scored"] = new_scored
 
     # ── pass 2: 승격/강등 게이트 (모든 rule 의 stats 가 신선해진 뒤 — 판정 시점 정합) ──
     controls = [r for r in rules if rule_role(r) == "benchmark" and r["status"] == "live"]
-    promotions, exec_pending, demotions = [], [], []
+    promotions, exec_pending, transitions = [], [], []
     for rule in rules:
         stats = rule["stats"]
         # 적용 중인 심사 정책은 **전역 설정**이라 상태와 무관하게 전 rule 에 남긴다 — candidate
@@ -540,23 +577,35 @@ def run():
                             "mean_exc": c_stats.get("mean_exc"),           # 참고 표기
                             "stage": "confirm",
                         })
-        elif rule["status"] == "live":
-            # 강등 게이트도 core.edge_policy 단일 소스 — 역할별 mean_net 부호가 반대다
-            # (selector 는 음수, veto 는 제외 종목이 양수일 때 강등 검토). benchmark 면제.
-            if check_demotion(rule)["demote_candidate"]:
-                demotions.append({
-                    "name": rule["name"], "family": rule["family"], "role": rule_role(rule),
-                    # 게이트가 판단한 값(시장 조정 alpha)과 그 재료(beta·하락일 성적)를 함께 —
-                    # alpha 만 보면 "장이 나빠서인가"를 사람이 되짚을 수 없다.
-                    "alpha": stats["recent_alpha"], "beta": stats["beta"],
-                    "down_day_mean": stats["down_day_mean"], "down_day_n": stats["down_day_n"],
-                    # 절대 수익(종목-일 가중)은 이제 판정 자가 아니라 참고값이다.
-                    "n": stats["recent_n"], "mean_net": stats["recent_mean_net"],
-                    # 일 등가중 최근 평균을 병기 — 두 가중의 부호가 갈리면 쏠림(몇 종목의
-                    # 급등이 만든 평균)이라 강등 근거가 못 된다. 게이트 조건은 바꾸지 않고
-                    # 판단 재료만 노출한다(notifications._rule_line 이 ⚠️ 표시).
-                    "mean_net_days": stats["recent_mean_net_days"],
-                })
+        elif rule["status"] in ("live", "paused"):
+            # ── 운용 전이(live ↔ paused) — 자동. 판정은 core.edge_policy.decide_transition ──
+            # 새 표본이 없는 실행에서는 alpha 가 그대로라 **아무 것도 세지 않는다**(같은 값을
+            # 두 번 세면 새 정보 없이 상태가 바뀐다). 연속 단위가 표본일인 이유가 이것이다.
+            fresh = (stats["last_sample_date"] is not None
+                     and stats["last_sample_date"] != rule.get("_prev_sample_date"))
+            streak = rule.get("_prev_flip_streak") or 0
+            if fresh:
+                t = decide_transition(rule, streak)
+                streak = t["streak"]
+                if t["next_status"]:
+                    set_rule_status(rule["id"], t["next_status"])
+                    streak = 0
+                    transitions.append({
+                        "name": rule["name"], "family": rule["family"], "role": rule_role(rule),
+                        "from": rule["status"], "to": t["next_status"], "reason": t["reason"],
+                        # 판정값(시장 조정 alpha)과 그 재료(beta·하락일 성적)를 함께 —
+                        # alpha 만 보면 "장이 나빠서인가"를 사람이 되짚을 수 없다.
+                        "alpha": stats["recent_alpha"], "beta": stats["beta"],
+                        "down_day_mean": stats["down_day_mean"],
+                        "down_day_n": stats["down_day_n"],
+                        # 절대 수익(종목-일 가중)은 판정 자가 아니라 참고값이다.
+                        "n": stats["recent_n"], "mean_net": stats["recent_mean_net"],
+                        # 일 등가중 최근 평균을 병기 — 두 가중의 부호가 갈리면 쏠림(몇 종목의
+                        # 급등이 만든 평균)이라 판단 재료가 약하다(notifications 가 ⚠️ 표시).
+                        "mean_net_days": stats["recent_mean_net_days"],
+                    })
+                    rule["status"] = t["next_status"]
+            stats["flip_streak"] = streak
 
         update_rule_stats(rule["id"], stats)
         logger.info(
@@ -567,10 +616,11 @@ def run():
             f"최악저가={stats['worst_low_ret']}"
         )
 
-    if promotions or demotions or exec_pending:
-        send_edge_rule_alert(promotions, demotions, exec_pending)
+    if promotions or transitions or exec_pending:
+        send_edge_rule_alert(promotions, transitions, exec_pending)
     logger.info(
-        f"평가 완료 — 승격 후보 {len(promotions)} / 집행 설계 필요 {len(exec_pending)} / 강등 검토 {len(demotions)}"
+        f"평가 완료 — 승격 후보 {len(promotions)} / 집행 설계 필요 {len(exec_pending)} / "
+        f"운용 전이 {len(transitions)}"
     )
 
 

@@ -500,26 +500,92 @@ def check_demotion(rule: dict) -> dict:
                   막는다'가 추가 이유였는데, 대조군 우위 조건이 제거되어 더는 해당하지 않는다.)
     반환: {"demote_candidate": bool, "reasons": [...]} (reasons 는 해당 시 사람이 읽을 사유)
     """
+    sig = demotion_signal(rule)
+    if not sig["measurable"] or not sig["negative"]:
+        return {"demote_candidate": False, "reasons": []}
+    return {"demote_candidate": True, "reasons": [sig["reason"]]}
+
+
+def demotion_signal(rule: dict) -> dict:
+    """강등 신호를 **3-상태**로 판정 — 자동 전이(live↔paused)가 쓰는 원자 함수.
+
+    `check_demotion` 의 bool 로는 "성적이 괜찮다"와 "판정할 표본이 없다"가 구분되지 않는다.
+    전이는 양방향이라 이 구분이 필수다 — 표본 미충족을 '괜찮다'로 읽으면 갓 승격한 룰이
+    복귀 신호를 쌓아 올린다(무근거 전이). 그래서 measurable 을 따로 낸다.
+
+    반환: {"measurable": bool, "negative": bool, "reason": str, "alpha": float|None}
+      measurable=False → 그날은 **아무 것도 세지 않는다**(상태·연속 카운트 모두 유지).
+    """
     role = rule_role(rule)
     if role not in ("selector", "veto"):
-        return {"demote_candidate": False, "reasons": []}
+        return {"measurable": False, "negative": False,
+                "reason": "benchmark 는 강등 감시 대상이 아닙니다", "alpha": None}
 
     stats = rule.get("stats") or {}
     n = stats.get("recent_n") or 0
     n_days = stats.get("recent_n_days") or 0
     # ⚠️ recent_alpha 는 초과 기준선(유니버스 자기제외 평균)이 있어야 산출된다 — 없으면 None 이고
-    # 그때는 **강등 후보로 올리지 않는다**(fail-closed). 강등은 사람이 승인하는 되돌리기 어려운
-    # 전이라, 판정 불가를 '문제 있음'으로 읽는 쪽이 더 위험하다. 기준선 로드 실패는
-    # rule_evaluator 가 경고 로그로 남긴다.
+    # 그때는 **판정 불가**로 둔다(fail-closed). 판정 불가를 '문제 있음'으로 읽는 쪽이 더 위험하다.
+    # 기준선 로드 실패는 rule_evaluator 가 경고 로그로 남긴다.
+    # 창은 적응형(rule_evaluator._recent_window)이라 표본이 있는 한 n 은 자연히 이 문턱을
+    # 채우고, 못 채우면 그 룰은 아직 판정할 표본이 없다는 뜻이다.
     alpha = stats.get("recent_alpha")
     if n < DEMOTE_MIN_N or n_days < DEMOTE_MIN_DAYS or alpha is None:
-        return {"demote_candidate": False, "reasons": []}
+        return {"measurable": False, "negative": False,
+                "reason": f"판정 표본 미달(n={n}/{DEMOTE_MIN_N}, 거래일={n_days}/{DEMOTE_MIN_DAYS})",
+                "alpha": alpha}
 
-    if role == "selector" and alpha < 0:
-        return {"demote_candidate": True,
-                "reasons": [f"최근 {n_days}거래일 매수 종목 시장조정수익(alpha) {alpha}% < 0"]}
-    if role == "veto" and alpha > 0:
-        return {"demote_candidate": True,
-                "reasons": [f"최근 {n_days}거래일 제외 종목 시장조정수익(alpha) {alpha}% > 0 — "
-                            "veto 가 이기는 종목을 버리는 중"]}
-    return {"demote_candidate": False, "reasons": []}
+    if role == "selector":
+        neg = alpha < 0
+        reason = f"최근 {n_days}거래일 매수 종목 시장조정수익(alpha) {alpha}% < 0"
+    else:
+        neg = alpha > 0
+        reason = (f"최근 {n_days}거래일 제외 종목 시장조정수익(alpha) {alpha}% > 0 — "
+                  "veto 가 이기는 종목을 버리는 중")
+    return {"measurable": True, "negative": neg,
+            "reason": reason if neg else "최근 창 alpha 부호 정상", "alpha": alpha}
+
+
+# ── 운용 전이 (live ↔ paused) — 자동, 사람 승인 없음 ──
+# 원장(candidate→live/retired)과 **다른 축**이다. paused 는 '표를 안 준다'일 뿐 판정이 아니라
+# 되돌릴 수 있고, 그래서 자동으로 굴려도 된다. retired 는 여전히 사람만 결정한다.
+#
+# 연속 요구(TRANSITION_STREAK)의 단위는 **표본일**이지 달력 평일이 아니다. 표본이 없는 날은
+# alpha 가 갱신되지 않으므로 달력으로 세면 같은 값이 두 번 세어져 새 정보 없이 상태가 바뀐다.
+# 판정 일정(_slice_sample_days)이 이미 같은 원칙을 쓴다.
+#
+# 2 는 하루짜리 깜빡임을 걸러내면서 반응 속도는 유지하는 값이다(근거: docs/history/edge-ledger.md).
+TRANSITION_STREAK = 2
+
+
+def decide_transition(rule: dict, streak: int) -> dict:
+    """live ↔ paused 자동 전이 판정. rule_evaluator 가 표본일마다 1회 호출한다.
+
+    streak: **현재 상태를 바꾸자는 신호**가 연속 몇 표본일 나왔는가(이전 실행의 누적).
+            같은 방향 신호가 오면 +1, 반대 신호가 오면 0 으로 리셋한다.
+
+    반환: {"next_status": str|None, "streak": int, "reason": str, "measurable": bool}
+      next_status=None → 전이 없음(streak 만 갱신).
+    """
+    status = rule.get("status")
+    if status not in ("live", "paused"):
+        return {"next_status": None, "streak": 0, "reason": "", "measurable": False}
+
+    sig = demotion_signal(rule)
+    if not sig["measurable"]:
+        # 표본 미충족 — 상태도 카운트도 건드리지 않는다(fail-open: 갓 승격한 룰은 live 유지).
+        return {"next_status": None, "streak": streak, "reason": sig["reason"],
+                "measurable": False}
+
+    # live 면 '음의 신호'가, paused 면 '정상 신호'가 상태를 바꾸자는 쪽이다.
+    wants_change = sig["negative"] if status == "live" else not sig["negative"]
+    streak = streak + 1 if wants_change else 0
+    if streak < TRANSITION_STREAK:
+        return {"next_status": None, "streak": streak, "reason": sig["reason"],
+                "measurable": True}
+
+    nxt = "paused" if status == "live" else "live"
+    return {"next_status": nxt, "streak": 0, "measurable": True,
+            "reason": (f"{sig['reason']} — {TRANSITION_STREAK}표본일 연속"
+                       if nxt == "paused"
+                       else f"{TRANSITION_STREAK}표본일 연속 정상(alpha {sig['alpha']}%) — 복귀")}

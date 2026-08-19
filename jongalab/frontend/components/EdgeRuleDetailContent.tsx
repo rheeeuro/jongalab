@@ -55,6 +55,7 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: ChartTo
 const ACCENT: Record<EdgeRuleWithDaily["status"], string> = {
   live: "border-l-emerald-500",
   candidate: "border-l-slate-400",
+  paused: "border-l-amber-500",
   retired: "border-l-slate-300 dark:border-l-slate-600",
 };
 

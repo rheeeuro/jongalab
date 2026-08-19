@@ -1,11 +1,19 @@
-"""Edge Ledger 라우트 — 가설 원장 조회(공개) + 등록·승격·강등(admin).
+"""Edge Ledger 라우트 — 가설 원장 조회(공개) + 등록·상태 전이(admin).
 
 GET 은 대시보드 스코어보드가 쓰므로 공개, 변경(POST)만 개별 require_admin.
-승격은 코드가 정량 게이트(평균수익·거래일 수·신뢰구간 하한)를 강제하며,
-미충족 시 409 + 사유로 거부한다(force 없음 — 사전 등록 규율).
-**게이트를 통과하면 그대로 승격한다** — 통과 건수를 사람이 다시 줄이는 장치는 두지 않는다
-(2026-08-05 월 승격 상한 폐지, 아래 promote_edge_rule 주석).
+
+상태 축이 **둘**이다(섞으면 안 된다):
+  · 원장(사람) — `candidate → live`(승격) / `→ retired`(종결) / `retired → candidate`(복귀).
+    승격은 코드가 정량 게이트(평균수익·거래일 수·신뢰구간 하한)를 강제하며 미충족 시 409 +
+    사유로 거부한다(force 없음 — 사전 등록 규율). **게이트를 통과하면 그대로 승격한다** —
+    통과 건수를 사람이 다시 줄이는 장치는 두지 않는다(아래 promote_edge_rule 주석).
+    복귀는 `registered_at` 을 밀어 **표본을 리셋**한다(같은 표본 재시험 금지).
+  · 운용(자동) — `live ↔ paused`. 되돌릴 수 있는 온오프라 `workers/rule_evaluator` 가 승인
+    없이 굴린다. 여기 두는 pause/resume 은 **사람이 끼어들 때만** 쓰는 수동 경로이고,
+    다음 평가에서 자동 판정이 다시 덮어쓸 수 있다.
 """
+from datetime import date
+
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
@@ -19,6 +27,7 @@ from core.repository.edge_rule import (
     get_rule,
     get_rule_by_name,
     set_rule_status,
+    reset_for_unretire,
     get_rule_daily,
     get_latest_matched,
     get_rule_matched_history,
@@ -186,9 +195,71 @@ def promote_edge_rule(rule_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/{rule_id}/pause", dependencies=[Depends(require_admin)])
+def pause_edge_rule(rule_id: int):
+    """live → paused (수동). 선정에서 표를 빼되 채점은 계속하고, 되돌릴 수 있다.
+
+    평소엔 `workers/rule_evaluator` 가 자동으로 굴린다 — 이 경로는 사람이 먼저 끼어들 때만
+    쓰고, 다음 평가에서 자동 판정이 다시 덮어쓸 수 있다(영구 배제는 retire 다).
+    """
+    rule = get_rule(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="rule 을 찾을 수 없습니다.")
+    if rule["status"] != "live":
+        raise HTTPException(
+            status_code=409, detail=f"live 상태만 일시중지할 수 있습니다(현재 {rule['status']}).")
+    try:
+        set_rule_status(rule_id, "paused")
+        return {"ok": True, "status": "paused",
+                "note": "선정에서 즉시 빠집니다. 채점은 계속되며 성적이 회복되면 자동 복귀합니다."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{rule_id}/resume", dependencies=[Depends(require_admin)])
+def resume_edge_rule(rule_id: int):
+    """paused → live (수동 복귀). 승격이 아니므로 게이트를 다시 보지 않는다."""
+    rule = get_rule(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="rule 을 찾을 수 없습니다.")
+    if rule["status"] != "paused":
+        raise HTTPException(
+            status_code=409, detail=f"paused 상태만 복귀할 수 있습니다(현재 {rule['status']}).")
+    try:
+        set_rule_status(rule_id, "live")
+        return {"ok": True, "status": "live",
+                "note": "선정에 다시 참여합니다. 최근 성적이 나쁘면 다음 평가에서 자동으로 다시 내려갈 수 있습니다."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{rule_id}/unretire", dependencies=[Depends(require_admin)])
+def unretire_edge_rule(rule_id: int):
+    """retired → candidate 복귀 + **표본 리셋**.
+
+    `registered_at` 을 오늘로 밀어 발견창부터 새 표본으로 다시 판정한다. 과거 표본을 이어붙여
+    게이트를 다시 보면 같은 표본으로 재시험하는 꼴(optional stopping)이라 오탐률이 판정 일정
+    도입 전으로 되돌아간다. 과거 채점은 `edge_rule_daily` 에 남아 참고할 수 있다.
+    """
+    rule = get_rule(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="rule 을 찾을 수 없습니다.")
+    if rule["status"] != "retired":
+        raise HTTPException(
+            status_code=409, detail=f"retired 상태만 복귀할 수 있습니다(현재 {rule['status']}).")
+    today = str(date.today())
+    try:
+        reset_for_unretire(rule_id, today)
+        return {"ok": True, "status": "candidate", "registered_at": today,
+                "note": ("표본을 리셋했습니다 — 오늘부터의 새 표본으로 발견창부터 다시 판정합니다. "
+                         "과거 채점 기록은 상세 화면에 남아 있습니다.")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/{rule_id}/retire", dependencies=[Depends(require_admin)])
 def retire_edge_rule(rule_id: int):
-    """live/candidate → retired (성적 붕괴 또는 폐기)."""
+    """live/paused/candidate → retired (가설 폐기·판정 종결). 원장 축이라 사람만 결정한다."""
     rule = get_rule(rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="rule 을 찾을 수 없습니다.")

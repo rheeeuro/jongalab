@@ -7,7 +7,8 @@
 눌리는데(대조군 기준 시 겹침 평균 54%·일부 100%), 그게 이 테스트의 핵심 표적이다.
 """
 from core.config import EDGE_COST_PCT
-from workers.rule_evaluator import _recompute_stats, _slice_sample_days
+from core.edge_policy import DEMOTE_MIN_N
+from workers.rule_evaluator import _recompute_stats, _recent_window, _slice_sample_days
 
 
 def _day(d, matched):
@@ -210,3 +211,53 @@ def test_market_fit_is_none_without_universe_totals():
     rows = [_day(f"2026-07-{i:02d}", [_m("A", 1.0)]) for i in range(1, 7)]
     s = _recompute_stats(rows)
     assert s["beta"] is None and s["recent_alpha"] is None and s["down_day_n"] == 0
+
+
+# ── 적응형 최근 창 (_recent_window) ──
+# 창을 표본일 개수로만 고정하면 n = 표본일 x 폭 이라 **폭이 얇은 룰은 문턱을 영원히 못 넘고**
+# 자동 전이 대상에서 영구히 빠진다. 창을 뒤로 늘려 문턱을 채우는 것이 이 함수의 존재 이유다.
+
+def test_thick_rule_window_stays_at_the_minimum():
+    # 하루 3종목씩 12일 — 10일이면 이미 n=30 이라 창이 늘지 않는다(기존 동작 불변).
+    days = [(f"2026-07-{i:02d}", 3) for i in range(1, 13)]
+    assert len(_recent_window(days)) == 10
+
+
+def test_thin_rule_window_extends_until_the_sample_threshold():
+    # 하루 1종목씩 30일 — 10일 창이면 n=10 으로 문턱(20) 미달이라 20일까지 늘어난다.
+    days = [(f"2026-07-{i:02d}", 1) for i in range(1, 31)]
+    w = _recent_window(days)
+    assert len(w) == DEMOTE_MIN_N
+    assert "2026-07-30" in w and "2026-07-10" not in w   # 최신 쪽으로 붙어 있다
+
+
+def test_window_stops_at_available_history_when_threshold_unreachable():
+    # 표본이 아직 모자라면 있는 만큼만 — 문턱 미달이라 게이트가 '판정 불가'로 막는다.
+    days = [(f"2026-07-{i:02d}", 1) for i in range(1, 13)]
+    assert len(_recent_window(days)) == 12
+
+
+def test_empty_history_has_no_window():
+    assert _recent_window([]) == set()
+
+
+def test_last_sample_date_ignores_days_with_no_matches():
+    """자동 전이의 '새 정보가 있었나' 판정용 값 — updated_through 와 **달라야** 한다.
+
+    평가기는 매칭이 0 인 날에도 edge_rule_daily 행을 남기므로 updated_through 는 매 평일
+    움직인다. 그걸로 연속을 세면 alpha 가 안 바뀐 날까지 세어져 단위가 표본일이 아니라
+    달력 평일이 되고, 드문 룰이 새 표본 없이 전이한다.
+    """
+    rows = [
+        _day("2026-07-01", [_m("A", 1.0)]),
+        _day("2026-07-02", []),            # 매칭 0 — 행은 남지만 표본은 아니다
+        _day("2026-07-03", []),
+    ]
+    s = _recompute_stats(rows)
+    assert s["updated_through"] == "2026-07-03"
+    assert s["last_sample_date"] == "2026-07-01"
+
+
+def test_last_sample_date_is_none_without_any_sample():
+    s = _recompute_stats([_day("2026-07-01", []), _day("2026-07-02", [])])
+    assert s["n"] == 0 and s["last_sample_date"] is None

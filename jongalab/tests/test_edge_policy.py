@@ -1,6 +1,7 @@
 """Edge Ledger 정책(core/edge_policy.py) 단위 테스트.
 
-rule 역할(role·구 family 폴백) · 선정 시점 실행 가능성 · 승격 게이트(check_promotion)·강등 게이트(check_demotion)의 계약 고정.
+rule 역할(role·구 family 폴백) · 선정 시점 실행 가능성 · 승격 게이트(check_promotion)·강등 게이트(check_demotion)
+· 운용 전이(decide_transition)의 계약 고정.
 게이트는 라우터(409 사유)·평가기(알림·promo_eligible)·프론트(배지)가 공유하는 단일 소스라
 여기가 깨지면 세 곳이 동시에 어긋난다. 순수 로직이라 DB 무의존.
 """
@@ -11,6 +12,8 @@ from core.edge_policy import (
     selection_executable,
     check_promotion,
     check_demotion,
+    decide_transition,
+    TRANSITION_STREAK,
     PROMO_MIN_DAY_T,
     day_t_threshold,
     decision_stage,
@@ -373,6 +376,68 @@ def test_missing_alpha_is_fail_closed_not_demoted():
     # 절대 수익이 아무리 나빠도 alpha 가 없으면 후보가 아니다(자를 바꾼 계약 고정).
     assert not check_demotion(
         _live("selector", None, family="f4_laggard", recent_mean_net=-5.0))["demote_candidate"]
+
+
+# ── 운용 전이 (live ↔ paused, decide_transition) ──
+# 원장(candidate→live/retired)과 다른 축이다. 되돌릴 수 있어 자동으로 굴리며, 연속 요구의
+# 단위는 **표본일**이다(호출부가 새 표본이 있는 실행에서만 부른다).
+
+def test_transition_needs_consecutive_streak_not_single_day():
+    """한 번의 음의 신호로는 안 내려간다 — 하루짜리 깜빡임이 실매매 구성을 흔들면 안 된다."""
+    # 아래 두 단계 시나리오는 K=2 를 전제로 쓰였다 — 상수를 바꾸면 이 테스트부터 고쳐야 한다.
+    assert TRANSITION_STREAK == 2
+    rule = _live("selector", -0.5, family="f4_laggard")
+    first = decide_transition(rule, 0)
+    assert first["next_status"] is None and first["streak"] == 1
+    second = decide_transition(rule, first["streak"])
+    assert second["next_status"] == "paused" and second["streak"] == 0
+
+
+def test_opposite_signal_resets_the_streak():
+    # 음-정상-음 은 연속이 아니다. 리셋이 없으면 잡음이 누적돼 결국 전부 전이된다.
+    rule_bad = _live("selector", -0.5, family="f4_laggard")
+    rule_ok = _live("selector", 0.5, family="f4_laggard")
+    assert decide_transition(rule_ok, 1)["streak"] == 0
+    assert decide_transition(rule_bad, 0)["next_status"] is None
+
+
+def test_paused_rule_resumes_on_consecutive_normal_signal():
+    """복귀도 같은 자·같은 연속 요구 — 내려가는 쪽만 자동이면 되돌릴 수 있다고 할 수 없다."""
+    rule = {**_live("selector", 0.5, family="f4_laggard"), "status": "paused"}
+    assert decide_transition(rule, 0)["next_status"] is None
+    assert decide_transition(rule, 1)["next_status"] == "live"
+
+
+def test_paused_rule_stays_paused_while_alpha_negative():
+    rule = {**_live("selector", -0.5, family="f4_laggard"), "status": "paused"}
+    out = decide_transition(rule, 3)
+    assert out["next_status"] is None and out["streak"] == 0
+
+
+def test_insufficient_sample_freezes_state_and_streak():
+    """표본 미충족은 '괜찮다'가 아니다 — 갓 승격한 룰이 복귀 신호를 쌓아 올리면 안 되고,
+    live 룰이 무근거로 내려가서도 안 된다. 상태도 카운트도 그대로 둔다."""
+    thin = _live("selector", -0.5, family="f4_laggard", recent_n=5)
+    out = decide_transition(thin, 1)
+    assert out["next_status"] is None and out["streak"] == 1 and not out["measurable"]
+    # alpha 산출 실패(기준선 없음)도 같은 처리 — fail-closed
+    no_alpha = {**_live("selector", None, family="f4_laggard"), "status": "paused"}
+    assert decide_transition(no_alpha, 1)["streak"] == 1
+
+
+def test_benchmark_and_candidate_never_auto_transition():
+    # benchmark 는 실탄이 아니고, candidate 는 원장 축(승격 게이트)이 판정한다.
+    bench = _live("benchmark", -0.494, family="control")
+    assert decide_transition(bench, 5)["next_status"] is None
+    cand = {**_live("selector", -0.5, family="f4_laggard"), "status": "candidate"}
+    assert decide_transition(cand, 5)["next_status"] is None
+
+
+def test_veto_transition_sign_is_inverted():
+    # veto 는 제외 종목 alpha 가 **양수**일 때 내려간다(이기는 종목을 버리는 중).
+    # 음수는 손실을 제대로 걸러낸 것이라 연속으로 나와도 내리지 않는다.
+    assert decide_transition(_live("veto", -0.158), 1)["next_status"] is None
+    assert decide_transition(_live("veto", 0.42), 1)["next_status"] == "paused"
 
 
 # ── 일 클러스터 t 게이트 (selector 전용, 2026-07-28) ──

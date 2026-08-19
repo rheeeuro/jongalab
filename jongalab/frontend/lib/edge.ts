@@ -5,22 +5,28 @@
 // (라벨을 바꿀 땐 이 파일만 고치면 모든 화면에 반영).
 import type { EdgeRule } from '@/types';
 
-// ── 상태: candidate/live/retired → 쉬운 한국어 ──
+// ── 상태: candidate/live/paused/retired → 쉬운 한국어 ──
+// paused 는 되돌릴 수 있는 운용 상태(평가기가 자동으로 넣고 뺀다)이고, retired 만 영구 종결이다.
+// 두 색을 비슷하게 쓰면 "쉬는 중"이 "끝난 것"으로 읽히므로 amber/slate 로 확실히 가른다.
 export const STATUS_LABEL: Record<string, string> = {
   live: '적용 중',
   candidate: '검증 중',
+  paused: '잠시 쉬는 중',
   retired: '종료',
 };
 
 export const STATUS_BADGE: Record<string, string> = {
   live: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
   candidate: 'bg-slate-100 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300',
+  paused: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
   retired: 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500',
 };
 
 export const STATUS_HELP: Record<string, string> = {
   live: '성적 검사를 통과해서, 지금 종목을 고를 때 실제로 쓰고 있는 전략이에요.',
   candidate: '아직 실제로는 쓰지 않고, 성적만 따로 매겨보는 중이에요.',
+  paused:
+    '요즘 성적이 시장만 못해서 잠시 빼둔 전략이에요. 성적은 계속 매기고 있고, 회복되면 자동으로 다시 쓰여요.',
   retired: '성적이 좋지 않거나 이제 잘 통하지 않아서, 더는 쓰지 않는 전략이에요.',
 };
 

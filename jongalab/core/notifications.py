@@ -302,28 +302,29 @@ def build_gap_check_message(
 
 
 def send_edge_rule_alert(
-    promotions: list[dict], demotions: list[dict], exec_pending: list[dict] | None = None
+    promotions: list[dict], transitions: list[dict], exec_pending: list[dict] | None = None
 ):
-    """Edge Ledger 상태 전이 알림 — 관리자(ADMIN)에게만. 실제 전이는 수동 승인이며 이건 알림뿐.
+    """Edge Ledger 알림 — 관리자(ADMIN)에게만. **두 축이 섞여 있으니 줄의 성격이 다르다.**
 
-    promotions:   승격 후보 — 승격 게이트를 통과한 candidate. 매일 뜨지 않고 **판정일에 1회만**
-                  온다(sql/39). 어느 판정일인지는 `stage` 가 알려준다: `confirm` 은 발견 구간과
-                  겹치지 않는 새 표본에서 평균수익이 재현됐다는 뜻이고, `discovery` 는 확인창이
-                  면제되는 experimental 정책에서 발견 판정만으로 승격 가능해진 건이다.
+    promotions:   승격 후보(원장 축) — 승격 게이트를 통과한 candidate. **아직 승격 안 됐고
+                  사람이 승인해야 한다.** 매일 뜨지 않고 판정일에 1회만 온다(sql/39). 어느
+                  판정일인지는 `stage` 가 알려준다: `confirm` 은 발견 구간과 겹치지 않는 새
+                  표본에서 평균수익이 재현됐다는 뜻이고, `discovery` 는 확인창이 면제되는
+                  experimental 정책에서 발견 판정만으로 승격 가능해진 건이다.
     exec_pending: 집행 설계 필요 — 통계는 확증됐지만 선정 시점(13~15시) 실행 불가 피처를 써서
                   승격이 막힌 candidate(집행 시점 재설계 후보). 통계 탈락이 아니므로 종결이 아니다.
-    demotions:    강등 검토 — live rule 의 최근 창 성적. 판정 자는 **시장 조정 alpha**
-                  (절대 수익은 시장과 동기화되고, 초과수익은 beta=1 을 강제해 저beta 방어형
-                  룰을 죽인다 — core.edge_policy.check_demotion). **역할별 부호가 반대**다
-                  (selector 는 매수 종목 alpha<0, veto 는 제외 종목 alpha>0).
-                  승격과 달리 **판정 일정 밖이라 매 평일 재검사**된다 — 조건이 유지되는 동안
-                  같은 알림이 반복된다(그 사실을 푸터에 명시).
+    transitions:  운용 전이(운용 축) — live ↔ paused 가 **이미 자동으로 바뀐** 사후 보고다.
+                  승인 요청이 아니다. 판정 자는 **시장 조정 alpha**(절대 수익은 시장과
+                  동기화되고, 초과수익은 beta=1 을 강제해 저beta 방어형 룰을 죽인다 —
+                  core.edge_policy.decide_transition). **역할별 부호가 반대**다(selector 는 매수
+                  종목 alpha<0, veto 는 제외 종목 alpha>0). 되돌릴 수 있는 전이라 자동이며,
+                  영구 종결(retired)은 여전히 사람만 결정한다.
     각 항목: {name, family, n, mean_net, ci_low[, stage, mean_net_days, confirm_mean_net,
-    mean_exc, reason, alpha, beta, down_day_mean, down_day_n]}.
+    mean_exc, reason, alpha, beta, down_day_mean, down_day_n, from, to]}.
     전부 비면 전송하지 않는다.
     """
     exec_pending = exec_pending or []
-    if not promotions and not demotions and not exec_pending:
+    if not promotions and not transitions and not exec_pending:
         return
 
     def _pct(v) -> str:
@@ -372,6 +373,10 @@ def send_edge_rule_alert(
                 line += f" (beta {r['beta']:+.2f})"
             if r.get("down_day_mean") is not None:
                 line += f", 하락일 {_pct(r.get('down_day_mean'))}(n={r.get('down_day_n')})"
+        # 전이 사유 — **연속 확인이 됐다는 사실**이 여기 실린다(하루짜리 신호가 아니라는 근거).
+        # 집행 설계 필요 줄에서는 무엇이 막고 있는지가 실린다. 없으면 생략.
+        if r.get("reason"):
+            line += f"\n  ↳ 사유: {r['reason']}"
         return line
 
     try:
@@ -386,18 +391,28 @@ def send_edge_rule_alert(
                 "🟡 *집행 설계 필요 (통계 충족, 선정 시점 실행 불가 피처)*\n"
                 + "\n".join(_rule_line(r) for r in exec_pending)
             )
-        if demotions:
+        # 운용 전이는 **이미 반영된** 결과라 방향별로 갈라 찍는다 — 내려간 줄과 올라온 줄이
+        # 섞이면 "뭘 승인해야 하나"로 읽힌다(승인할 것이 없다).
+        paused = [r for r in transitions if r.get("to") == "paused"]
+        resumed = [r for r in transitions if r.get("to") == "live"]
+        if paused:
             sections.append(
-                "🔴 *강등 검토 (live→retired 판단)*\n"
-                + "\n".join(_rule_line(r, prefix="최근 평균순수익") for r in demotions)
+                "⏸️ *자동 일시중지 (live→paused · 이미 반영됨)*\n"
+                + "\n".join(_rule_line(r, prefix="최근 평균순수익") for r in paused)
             )
-        # 재평가 주기 안내는 실린 섹션에만 붙인다 — 승격만 온 날 강등 안내가 함께 붙으면
-        # 반대로 읽힌다('판정일에만'은 승격 판정 얘기다).
-        notes = ["_전이는 관리자 API 수동 승인 — 아래는 후보일 뿐입니다._"]
+        if resumed:
+            sections.append(
+                "▶️ *자동 복귀 (paused→live · 이미 반영됨)*\n"
+                + "\n".join(_rule_line(r, prefix="최근 평균순수익") for r in resumed)
+            )
+        # 안내는 실린 섹션에만 붙인다 — 승격만 온 날 전이 안내가 함께 붙으면 반대로 읽힌다.
+        notes = []
         if promotions or exec_pending:
+            notes.append("_승격은 관리자 승인이 필요합니다 — 아래는 후보일 뿐입니다._")
             notes.append("_승격/집행설계는 판정일 1회만 옵니다(매일 재평가 폐지, sql/39)._")
-        if demotions:
-            notes.append("_강등 검토는 판정 일정 밖(매 평일 감시) — 조건이 유지되면 매일 반복됩니다._")
+        if transitions:
+            notes.append("_일시중지·복귀는 **자동 반영된 결과 보고**입니다(승인 불필요, 되돌릴 수 있음)._")
+            notes.append("_영구 종결(retired)은 여전히 관리자만 결정합니다._")
         message = (
             "🧪 *[Edge Ledger] 상태 전이 알림*\n"
             + "\n".join(notes) + "\n"
@@ -407,7 +422,7 @@ def send_edge_rule_alert(
         count = _send_telegram_admin(message)
         logging.info(
             f"📨 Edge Ledger 알림 전송 -> {count}개 (승격후보 {len(promotions)} / "
-            f"집행설계필요 {len(exec_pending)} / 강등검토 {len(demotions)})"
+            f"집행설계필요 {len(exec_pending)} / 운용전이 {len(transitions)})"
         )
     except Exception as e:
         logging.error(f"❌ Edge Ledger 알림 실패: {e}")
