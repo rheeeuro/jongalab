@@ -29,14 +29,17 @@ export function OpinionSummary({ summary }: { summary: ContentMentionSummary }) 
         <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
           채널 {summary.channels}개
         </span>
+        {/* 플랫폼 분포 — 아이콘만으로는 읽히지 않으므로 텍스트 라벨을 함께 둔다(스크린리더·툴팁 포함). */}
         <span className="ml-auto flex items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1" title="유튜브 콘텐츠">
             <Youtube className="h-3.5 w-3.5 text-red-500" />
             <span className="tabular-nums">{summary.platform.youtube}</span>
+            <span className="sr-only">건 (유튜브)</span>
           </span>
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1" title="텔레그램 콘텐츠">
             <MessageCircle className="h-3.5 w-3.5 text-blue-500" />
             <span className="tabular-nums">{summary.platform.telegram}</span>
+            <span className="sr-only">건 (텔레그램)</span>
           </span>
         </span>
       </div>

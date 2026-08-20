@@ -120,14 +120,20 @@ def get_today_news(
 ):
     """특정 종목의 뉴스 헤드라인 목록 (최신순, 종목 상세 페이지용).
 
-    각 항목에 `is_price_report`(그날 시세를 옮긴 기사인가)를 실어 화면이 재료 기사를 먼저
-    보여주고 시세 기사는 접을 수 있게 한다 — 실측 21%가 "급등/상한가/특징주" 류라 재료가 묻힌다.
-    판별 규칙은 후속 재료 채점과 **같은 함수**를 쓴다(화면과 채점의 기준이 갈리면 안 된다).
+    각 항목에 **두 플래그**를 실어 화면이 재료 기사를 먼저 보여주고 나머지를 접게 한다.
+    - `is_price_report` — 그날 시세를 옮긴 기사인가("급등/상한가/특징주" 류). 판별은 후속 재료
+      채점과 **같은 함수**를 쓴다(화면과 채점의 기준이 갈리면 안 된다).
+    - `in_headline` — 매칭된 이름(`company_name`)이 **제목에** 있는가. `news_mention` 은 본문
+      매칭이라 대형주는 종목과 무관한 기사가 절반을 넘는다(삼성전자 3일 50건 중 제목 매칭 13건).
+      제목에 종목이 나온 기사만 본문에 두는 게 이 화면의 '재료'에 맞다.
     """
     try:
         items = get_today_news_by_stock(ticker, limit=limit, days=days)
         for it in items:
-            it["is_price_report"] = is_price_report(it.get("headline") or "")
+            headline = it.get("headline") or ""
+            name = it.get("company_name") or ""
+            it["is_price_report"] = is_price_report(headline)
+            it["in_headline"] = bool(name) and name in headline
         # total 은 limit 이전 총건수 — 화면이 "15건"을 총계처럼 내지 않게 한다.
         return {
             "success": True,

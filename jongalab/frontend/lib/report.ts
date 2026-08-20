@@ -8,7 +8,9 @@ import { hasFinalConsonant } from '@/lib/news';
 import type { ScoreBreakdown, StockReport } from '@/types';
 
 /** '은/는', '을/를' 처럼 받침에 따라 갈리는 조사 — 종목명은 받침이 있는 쪽·없는 쪽이 다 온다. */
-function josa(word: string, withFinal: string, withoutFinal: string): string {
+/** 조사 선택 — 앞말 종성 유무로 갈린다(`삼성전자가` / `하이닉스가` · `삼성전자를` / `종목을`).
+ *  화면 문구를 조립할 때 조사를 고정 문자열로 쓰면 종목마다 어색해진다. */
+export function josa(word: string, withFinal: string, withoutFinal: string): string {
   const last = word.trim().slice(-1);
   return hasFinalConsonant(last) ? withFinal : withoutFinal;
 }
@@ -35,7 +37,9 @@ export function formatBillion(v: number, withSign = false): string {
   return `${sign}${b.toLocaleString('ko-KR', { maximumFractionDigits: 0 })}억`;
 }
 
-export function formatMarketCap(v: number): string {
+/** 큰 원 금액 — 1조 이상은 `조`, 아래는 `억`. 시가총액·거래대금이 같이 놓이는 자리(종목 헤더)에서
+ *  한쪽만 억으로 두면 `1,568.3조`와 `56,017억`이 나란히 서 자릿수를 눈으로 비교할 수 없다. */
+export function formatWonCompact(v: number): string {
   if (v <= 0) return '-';
   const trillion = v / 1e12;
   if (trillion >= 1) {
@@ -43,6 +47,8 @@ export function formatMarketCap(v: number): string {
   }
   return formatBillion(v);
 }
+
+
 
 /** 무상증자 권리락일(sql/50)의 갭 기준가 — 갭은 배정비율로 낮춰진 **권리락 기준가** 대비로 측정된다.
  *  리포트가를 그대로 쓰면 등락률과 앞뒤가 안 맞으므로 화면·서술문이 같이 이 값을 쓴다. */

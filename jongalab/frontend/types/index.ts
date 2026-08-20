@@ -278,6 +278,10 @@ export interface NewsMentionItem {
   channel_name: string | null;
   created_at: string | null;
   is_price_report?: boolean;   // 재료가 아니라 그날 시세를 옮긴 기사 (화면에서 접는다)
+  // 매칭된 이름이 **제목에** 있나. news_mention 은 본문 매칭이라 대형주는 무관 기사가 절반을 넘는다
+  // — 종목 화면은 이 값이 true 인 기사만 본문에 낸다.
+  in_headline?: boolean;
+  company_name?: string | null;
 }
 
 // /api/news/stream — 뉴스 탭 헤드라인 스트림. news_mention 은 '헤드라인 × 종목' 1행이라

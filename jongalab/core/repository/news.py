@@ -183,7 +183,7 @@ def get_today_news_by_stock(stock_code: str, limit: int = 15, days: int = 1) -> 
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""
-            SELECT headline, source_url, channel_name, created_at
+            SELECT headline, source_url, channel_name, created_at, company_name
             FROM news_mention
             WHERE ticker = %s AND {day_sql}{src_sql}
             ORDER BY created_at DESC

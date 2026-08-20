@@ -16,19 +16,22 @@ import {
   StockReport,
 } from "@/types";
 import { CandlestickChart } from "@/components/CandlestickChart";
-import { ContentCard } from "@/components/ContentCard";
 import { MaterialNews } from "@/components/stock/MaterialNews";
+import { OpinionList } from "@/components/stock/OpinionList";
 import { OpinionSummary } from "@/components/stock/OpinionSummary";
 import { PickHistory } from "@/components/stock/PickHistory";
 import { SupplyPanel } from "@/components/pick/SupplyPanel";
 import { PageButton } from "@/components/ui/page-button";
 import { apiFetch } from "@/lib/api";
-import { formatBillion, formatMarketCap, formatWon, morningResult } from "@/lib/report";
+import { formatWon, formatWonCompact, josa, morningResult } from "@/lib/report";
 import { PANEL } from "@/lib/ui";
 
 const NEWS_DAYS = 3;
-const NEWS_LIMIT = 20;
-const CONTENT_PAGE = 12;
+// 관련성(제목 매칭)이 실측 20~50% 라 6줄을 채우려면 넉넉히 받아야 한다(50행 ≈ 12KB).
+const NEWS_LIMIT = 50;
+// 여론 목록은 6줄 — 데스크탑 2열에서 3행, 모바일에서 화면 한 장 반이다.
+// 목록 자체가 목적인 화면(뉴스 탭 콘텐츠 뷰)은 12건이지만, 여기선 '어느 쪽인가'가 목적이다.
+const CONTENT_PAGE = 6;
 const CANDLE_DAYS = 60;
 
 async function getProfile(ticker: string): Promise<StockProfile | null> {
@@ -236,10 +239,10 @@ export default async function StockDetailPage({
           {profile && (
             <dl className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1.5 text-xs">
               {[
-                { label: "시가총액", value: formatMarketCap(profile.market_cap) },
+                { label: "시가총액", value: formatWonCompact(profile.market_cap) },
                 {
                   label: "거래대금",
-                  value: lastValue > 0 ? `${formatBillion(lastValue)}원` : "-",
+                  value: lastValue > 0 ? `${formatWonCompact(lastValue)}원` : "-",
                 },
                 {
                   label: "PER",
@@ -277,13 +280,15 @@ export default async function StockDetailPage({
           )}
 
           <p className="mt-3 max-w-3xl text-sm leading-relaxed break-keep text-slate-500 dark:text-slate-400">
-            {lede({ name, code, reports, mentions })}
+            {lede({ name, code, sector: latest?.sector ?? null, profile, reports, opinion })}
           </p>
         </header>
 
-        {/* 데스크탑은 **짝이 고정된 2열 밴드**다 — 차트↔선정 이력, 수급↔재료 뉴스.
-            열 나눔을 브라우저에 맡기면(다단) 종목마다 데이터 조합이 달라 열끝 차가 튄다.
-            짝 중 하나만 있는 날은 남은 쪽이 전체 폭을 쓴다(빈 절반이 '카드가 빠진 자리'로 보인다).
+        {/* 데스크탑은 **짝이 고정된 2열 밴드**다 — `차트↔선정 이력` · `수급↔재료 뉴스`.
+            ⚠️ 짝의 높이를 설계로 맞춘다: 차트(≈430px)↔이력(요약을 한 줄로 낸 뒤 ≈470px) ·
+            수급(≈400px)↔뉴스(6줄 ≈500px). 뉴스를 20줄로 두면 옆 수급 카드 옆에 1,000px 짜리
+            빈 칸이 생긴다(그게 이 화면이 '이상해' 보인 이유 중 하나다).
+            짝 중 하나만 있으면 남은 쪽이 전체 폭을 쓴다(빈 절반은 '카드가 빠진 자리'로 보인다).
             모바일(<lg)은 1열이라 DOM 순서가 곧 화면 순서다: 차트 → 선정 이력 → 수급 → 뉴스 → 여론. */}
         <div className={hasReports ? "grid grid-cols-1 gap-4 lg:grid-cols-2" : undefined}>
           <section className={PANEL}>
@@ -304,10 +309,9 @@ export default async function StockDetailPage({
                 timeVisible={false}
               />
             </div>
-            <p className="mt-2 text-[11px] leading-relaxed break-keep text-slate-400 dark:text-slate-500">
-              한 봉이 하루예요. 오르면 <span className="font-bold text-red-500">빨강</span>,
-              내리면 <span className="font-bold text-blue-500">파랑</span>이고, 아래 회색
-              막대는 거래량이에요.
+            <p className="mt-2 text-[11px] break-keep text-slate-400 dark:text-slate-500">
+              한 봉이 하루 — 오르면 <span className="font-bold text-red-500">빨강</span>, 내리면{" "}
+              <span className="font-bold text-blue-500">파랑</span>, 아래 막대는 거래량이에요.
             </p>
           </section>
 
@@ -334,8 +338,9 @@ export default async function StockDetailPage({
             {hasNews && (
               <MaterialNews
                 items={newsItems}
-                total={news.total}
                 days={news.days ?? NEWS_DAYS}
+                stockName={name}
+                stockCode={code}
               />
             )}
           </div>
@@ -357,15 +362,13 @@ export default async function StockDetailPage({
             )}
 
             {contentItems.length > 0 && (
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
-                {contentItems.map((item) => (
-                  <ContentCard key={item.id} item={item} />
-                ))}
+              <div className="mt-3">
+                <OpinionList items={contentItems} code={code} />
               </div>
             )}
 
             {pagination && pagination.total_pages > 1 && (
-              <div className="flex items-center justify-center gap-3 pt-5">
+              <div className="flex items-center justify-center gap-3 pt-4">
                 <PageButton
                   href={`/stocks/${code}?page=${pagination.current_page - 1}`}
                   disabled={!pagination.has_prev_page}
@@ -418,44 +421,62 @@ export default async function StockDetailPage({
   );
 }
 
-/** 리드 문단 — 검색 유입용 줄글. 타일이 숫자로 이미 말한 것을 그대로 반복하지 않고,
- *  '이 화면이 이 종목에 대해 무엇을 아는가'를 한두 문장으로 잇는다. */
+/** 리드 문단 — 검색 유입용 줄글. 타일이 숫자로 이미 낸 것을 되풀이하지 않고, **값이 있는 문장**만 쓴다
+ *  (안내 문구는 문장 자리를 차지하고 정보를 주지 않는다).
+ *  ① 무슨 종목인가 ② 우리가 몇 번 골랐고 아침 결과가 어땼나 ③ 콘텐츠 여론이 어느 쪽인가. */
 function lede({
   name,
   code,
+  sector,
+  profile,
   reports,
-  mentions,
+  opinion,
 }: {
   name: string;
   code: string;
+  sector: string | null;
+  profile: StockProfile | null;
   reports: StockReport[];
-  mentions: number;
+  opinion: ContentMentionSummary | null;
 }): string {
-  const parts: string[] = [
-    `${name}(${code})에 대해 종가랩이 모아 둔 자료예요.`,
-  ];
+  const parts: string[] = [];
+
+  const cap = profile && profile.market_cap > 0 ? formatWonCompact(profile.market_cap) : null;
+  parts.push(
+    sector && cap
+      ? `${name}(${code})${josa(name, "은", "는")} ${sector} 업종이고 시가총액은 ${cap} 규모예요.`
+      : cap
+        ? `${name}(${code})의 시가총액은 ${cap} 규모예요.`
+        : `${name}(${code}) 종목 자료예요.`,
+  );
 
   if (reports.length > 0) {
     const measured = reports
       .map((r) => morningResult(r)?.pct)
       .filter((v): v is number => typeof v === "number");
     const last = reports[0];
+    const wins = measured.filter((v) => v > 0).length;
     parts.push(
-      `가장 가까운 선정일은 ${last.report_date}이고, 그날 수급은 ${last.supply_grade}등급이었어요.`,
+      `종가랩은 최근 이 종목을 ${reports.length}번 종가베팅 후보로 골랐고, 가장 가까운 선정일은 ${last.report_date}(수급 ${last.supply_grade}등급)이에요.`,
     );
     if (measured.length > 0) {
       const avg = measured.reduce((a, b) => a + b, 0) / measured.length;
       parts.push(
-        `아침 결과가 나온 ${measured.length}번의 평균은 ${avg > 0 ? "+" : ""}${avg.toFixed(2)}%예요.`,
+        `아침 결과가 나온 ${measured.length}번 중 ${wins}번이 올랐고 평균은 ${avg > 0 ? "+" : ""}${avg.toFixed(2)}%예요.`,
       );
     }
   } else {
     parts.push("종가베팅 후보로 뽑힌 기록은 아직 없어요.");
   }
 
-  if (mentions > 0) {
+  if (opinion && opinion.total > 0) {
+    const { 호재: good, 악재: bad } = opinion.stance;
+    const called = good + bad + opinion.stance.중립;
+    // 언급 **건수**는 헤더 칩과 아래 요약 스트립이 이미 낸다 — 여기선 방향만 말한다.
     parts.push(
-      "유튜브·텔레그램 콘텐츠가 이 종목을 어느 방향으로 말했는지도 아래에 모아 뒀어요.",
+      called > 0
+        ? `최근 ${opinion.days}일 유튜브·텔레그램 콘텐츠에서는 이 종목을 호재로 본 의견이 ${good}건, 악재로 본 의견이 ${bad}건이었어요.`
+        : `최근 ${opinion.days}일 유튜브·텔레그램 콘텐츠에서 ${opinion.total}번 언급됐어요.`,
     );
   }
 

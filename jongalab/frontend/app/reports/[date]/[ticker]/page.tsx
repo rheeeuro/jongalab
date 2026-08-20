@@ -6,7 +6,7 @@ import { apiFetch, getEdgeRules } from "@/lib/api";
 import { humanizeMaterialReason, splitHeadlineUrl } from "@/lib/news";
 import {
   formatBillion,
-  formatMarketCap,
+  formatWonCompact,
   formatWon,
   gapBasePrice,
   morningSentence,
@@ -253,7 +253,7 @@ export default async function StockReportPage({
                 label: "거래대금",
                 value: `${formatBillion(r.trading_value)}원`,
               },
-              { label: "시가총액", value: formatMarketCap(r.market_cap) },
+              { label: "시가총액", value: formatWonCompact(r.market_cap) },
             ].map(({ label, value, tone }) => (
               <div key={label} className="flex items-baseline gap-1">
                 <dt className="font-medium text-slate-400 dark:text-slate-500">

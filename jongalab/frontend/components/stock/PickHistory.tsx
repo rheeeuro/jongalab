@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Crown, FileBarChart, FlaskConical } from "lucide-react";
 import { StockReport } from "@/types";
 import { morningResult } from "@/lib/report";
-import { CARD, CARD_HOVER, INSET, PANEL } from "@/lib/ui";
+import { CARD, CARD_HOVER, PANEL } from "@/lib/ui";
 
 /** 아침 결과 요약 — 갭이 측정된 회차만 모아 평균·최고·최저를 낸다.
  *  측정 전(당일 선정분)까지 분모에 넣으면 평균이 실제보다 0 쪽으로 눌린다. */
@@ -40,6 +40,7 @@ function signed(v: number, digits = 1): string {
 export function PickHistory({ reports }: { reports: StockReport[] }) {
   if (reports.length === 0) return null;
   const summary = gapSummary(reports);
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 
   return (
     <section className={PANEL}>
@@ -53,33 +54,25 @@ export function PickHistory({ reports }: { reports: StockReport[] }) {
         </span>
       </div>
 
+      {/* 성적 요약은 **헤더 아래 한 줄**이다 — 안쪽 블록(`INSET`)으로 두면 카드가 116px 길어져
+          짝(일봉 차트)보다 커진다. 값은 아침 결과가 측정된 회차만 모은 것이다. */}
       {summary && (
-        <div className={`${INSET} mt-3 px-3 py-2.5`}>
-          <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-            아침 결과가 나온 {summary.n}회 평균
-          </p>
-          <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            <span
-              className={`text-xl font-black tabular-nums ${toneClass(summary.avg)}`}
-            >
-              {signed(summary.avg, 2)}
+        <p className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+          <span>아침 결과 {summary.n}회 평균</span>
+          <span className={`text-lg font-black tabular-nums ${toneClass(summary.avg)}`}>
+            {signed(summary.avg, 2)}
+          </span>
+          <span className="text-[11px]">
+            최고{" "}
+            <span className={`font-bold tabular-nums ${toneClass(summary.best)}`}>
+              {signed(summary.best, 2)}
+            </span>{" "}
+            · 최저{" "}
+            <span className={`font-bold tabular-nums ${toneClass(summary.worst)}`}>
+              {signed(summary.worst, 2)}
             </span>
-            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-              최고{" "}
-              <span className={`font-bold tabular-nums ${toneClass(summary.best)}`}>
-                {signed(summary.best, 2)}
-              </span>{" "}
-              · 최저{" "}
-              <span className={`font-bold tabular-nums ${toneClass(summary.worst)}`}>
-                {signed(summary.worst, 2)}
-              </span>
-            </span>
-          </div>
-          <p className="mt-1 text-[11px] leading-relaxed break-keep text-slate-400 dark:text-slate-500">
-            선정된 날 종가에 사서 다음 거래일 첫 가격에 팔았다고 가정한 등락이에요(수수료·세금
-            제외).
-          </p>
-        </div>
+          </span>
+        </p>
       )}
 
       <ul className="mt-3 space-y-2">
@@ -102,6 +95,11 @@ export function PickHistory({ reports }: { reports: StockReport[] }) {
                   {r.rule_names && (
                     <span title="실험실 룰이 고른 종목" className="flex shrink-0">
                       <FlaskConical className="h-3.5 w-3.5 text-violet-500" />
+                    </span>
+                  )}
+                  {r.report_date === today && (
+                    <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-extrabold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
+                      오늘
                     </span>
                   )}
                   <span className="ml-auto text-xs font-medium text-slate-400 dark:text-slate-500">
@@ -148,6 +146,12 @@ export function PickHistory({ reports }: { reports: StockReport[] }) {
           );
         })}
       </ul>
+
+      <p className="mt-2.5 text-[11px] leading-relaxed break-keep text-slate-400 dark:text-slate-500">
+        <span className="font-bold">당일</span>은 리포트를 만든 시각(장 마감 무렵)의 등락이라 위
+        현재가 등락과 다를 수 있어요. <span className="font-bold">다음날 아침</span>은 그날 종가에
+        사서 다음 거래일 첫 가격에 팔았다고 가정한 등락이에요(수수료·세금 제외).
+      </p>
     </section>
   );
 }

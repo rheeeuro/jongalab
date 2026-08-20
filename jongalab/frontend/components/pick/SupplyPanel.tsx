@@ -73,13 +73,14 @@ export function SupplyPanel({
         <h2 className="flex items-center gap-2 text-lg font-extrabold text-slate-900 dark:text-slate-100">
           <TrendingUp className="h-4.5 w-4.5 text-purple-800 dark:text-purple-300" />
           수급
+        </h2>
+        {/* 기준일·등급·연속일은 모두 '그 리포트일의 값' 이라 한 그룹으로 묶는다(제목에 붙이지 않는다). */}
+        <div className="flex items-center gap-1.5">
           {note && (
             <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
               {note}
             </span>
           )}
-        </h2>
-        <div className="flex items-center gap-1.5">
           <span
             className={`rounded-full px-2 py-0.5 text-[11px] font-extrabold ${gradeChip}`}
           >
