@@ -45,9 +45,13 @@ def to_int(v) -> int:
 
 
 class KiwoomDataClient:
-    def __init__(self, base_url: str | None = None):
+    def __init__(self, base_url: str | None = None, nxt_cache: bool = False):
         self.base_url = (base_url or KIWOOM_BASE_URL).rstrip("/")
         self._feed = None  # 선택적 실시간 피드(core.realtime_feed) — 없으면 전부 REST
+        # nxt_cache=True 면 종목별 NXT 상장 여부를 이 인스턴스에 기억한다(읽기 전용 조회 경로 전용).
+        # nxtEnable 은 한 요청 동안 바뀌지 않아 같은 종목을 두 번 조회할 이유가 없다.
+        # 기본값 False = 매번 조회(종전 동작) — 자금 경로(워커)는 캐시 없이 그대로 쓴다.
+        self._nxt_cache: dict[str, bool] | None = {} if nxt_cache else None
 
     def attach_feed(self, feed) -> None:
         """실시간 WS 피드를 주입한다(덕 타이핑 — get_fresh(stk_cd, prefer_nxt) 만 요구).
@@ -89,13 +93,21 @@ class KiwoomDataClient:
         return resp.json()
 
     def is_nxt_enabled(self, stk_cd: str) -> bool:
-        """NXT(넥스트레이드) 거래 가능 종목인지. 조회 실패 시 False(보수적)."""
+        """NXT(넥스트레이드) 거래 가능 종목인지. 조회 실패 시 False(보수적).
+
+        `nxt_cache=True` 인스턴스에서는 종목당 한 번만 조회한다. 실패는 캐시하지 않는다
+        (일시적 오류가 그 인스턴스 수명 내내 False 로 굳지 않도록)."""
+        if self._nxt_cache is not None and stk_cd in self._nxt_cache:
+            return self._nxt_cache[stk_cd]
         try:
             d = self.get_stock_detail_info(stk_cd)
         except Exception as e:
             logger.warning("NXT 여부 조회 실패 [%s]: %s", stk_cd, e)
             return False
-        return str(d.get("nxtEnable", "")).upper() == "Y"
+        enabled = str(d.get("nxtEnable", "")).upper() == "Y"
+        if self._nxt_cache is not None:
+            self._nxt_cache[stk_cd] = enabled
+        return enabled
 
     def get_current_price(self, stk_cd: str) -> int:
         """현재가(원, 양수). 조회 실패 시 0."""

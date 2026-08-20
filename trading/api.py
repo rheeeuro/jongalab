@@ -8,6 +8,9 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Depends, Request
@@ -35,6 +38,7 @@ from core.kiwoom_data_client import KiwoomDataClient, to_int
 from core.kiwoom_order_client import KiwoomOrderClient
 from core.seed_allocator import allocate, conviction_from_signal
 from core.ex_rights import get_next_session_ex_rights
+from core.market_calendar import next_trading_day
 from core.futures_gate import sector_keep_factors, effective_keep, gated_shares
 from core.macro_gate import macro_keep, month_events
 from core.price_stream import get_price_stream
@@ -62,7 +66,24 @@ def require_auth(request: Request):
         raise HTTPException(status_code=401, detail="인증이 필요합니다.")
 
 
-app = FastAPI(title="Trading Execution API", dependencies=[Depends(require_auth)])
+def _warm_market_calendar() -> None:
+    """거래일 달력(XKRX) 선로드 — 실패해도 무해(첫 조회 때 다시 로드된다)."""
+    try:
+        next_trading_day(datetime.now().date())
+    except Exception as e:
+        logger.warning("거래일 달력 워밍업 실패 — 첫 조회 시점에 로드됩니다: %s", e)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # XKRX 달력 첫 로드가 2.5초쯤 걸려 재시작 직후 첫 /buy-preview(권리락 조회 경유)를 그만큼
+    # 늦춘다. exchange_calendars 가 인스턴스를 캐시하므로 기동 시 백그라운드로 한 번만 만들어 둔다.
+    threading.Thread(target=_warm_market_calendar, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Trading Execution API", dependencies=[Depends(require_auth)],
+              lifespan=lifespan)
 
 
 # ── 요청 바디 ──
@@ -146,12 +167,17 @@ def admin_login(b: LoginBody):
 # ── 조회 (대시보드) ──
 @app.get("/positions")
 def positions():
-    """보유 포지션 + 현재가 평가(미실현손익). 현재가 조회 실패 종목은 0 처리."""
+    """보유 포지션 + 현재가 평가(미실현손익). 현재가 조회 실패 종목은 0 처리.
+
+    현재가는 종목별 REST 조회(정규장 외엔 NXT 여부+NXT 일봉 2콜)라 순차로 돌면 보유 종목 수만큼
+    홈 화면 로딩이 늘어난다. 표시용 조회이고 종목 간 순서 의존이 없어 4개씩 동시에 조회한다.
+    """
     rows = position_repo.get_open_positions()
     if rows:
-        dc = KiwoomDataClient()
-        for p in rows:
-            cur, is_nxt = dc.get_display_price(p["stk_cd"])
+        dc = KiwoomDataClient(nxt_cache=True)  # NXT 여부는 종목당 1콜
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            prices = list(pool.map(lambda r: dc.get_display_price(r["stk_cd"]), rows))
+        for p, (cur, is_nxt) in zip(rows, prices):
             p["cur_prc"] = cur
             p["is_nxt"] = is_nxt
             p["eval_amt"] = cur * p["qty"]
@@ -368,9 +394,8 @@ def buy_preview(date: str | None = None):
     lev_map = (leverage_map_repo.get_active_map()
                if risk_config_repo.get_risk_config().get("LEVERAGE_ENABLED", 0) else {})
 
-    # 1) blocklist 제외 후 거래소·점수·현재가 분류 (executor 와 동일)
-    dc = KiwoomDataClient()
-    classified = []  # {sig, is_nxt, price}
+    # 1) blocklist·권리락 제외 + 레버리지 치환 (조회 없음)
+    targets = []
     for sig in signals:
         stk = sig["stk_cd"]
         if stk in block or stk in ex_rights:
@@ -378,23 +403,35 @@ def buy_preview(date: str | None = None):
         m = lev_map.get(stk)
         if m and m.get("etf_cd"):
             sig = {**sig, "stk_cd": m["etf_cd"], "stk_nm": m.get("etf_nm") or m["etf_cd"]}
-            stk = sig["stk_cd"]
+        targets.append(sig)
+
+    # 2) 거래소·현재가 분류 (executor 와 동일 판정) — 종목별 병렬 조회.
+    #    종목당 REST 2콜(콜당 0.17s, 대부분 키움 서버 스로틀 대기)이라 순차로 돌면 9종목에 3~5초가
+    #    걸려 대시보드 첫 로딩을 통째로 붙잡는다. 읽기 전용이고 종목 간 순서 의존이 없어 동시에 4개씩
+    #    조회한다(키움 데이터 서버에 걸는 부하 상한 — 같은 창에서 signal_executor 도 조회한다).
+    dc = KiwoomDataClient(nxt_cache=True)  # NXT 여부는 종목당 1콜 (현재가 조회 내부에서도 쓴다)
+
+    def _classify(sig: dict) -> dict:
+        stk = sig["stk_cd"]
+        try:
+            is_nxt = dc.is_nxt_enabled(stk)  # 먼저 조회해 캐시를 채운다(아래 현재가 조회가 재사용)
+        except Exception as e:
+            logger.warning("buy-preview NXT 여부 조회 실패 [%s]: %s", stk, e)
+            is_nxt = False
         try:
             price = dc.get_market_price(stk)
         except Exception as e:
             logger.warning("buy-preview 현재가 조회 실패 [%s]: %s", stk, e)
             price = 0
-        try:
-            is_nxt = dc.is_nxt_enabled(stk)
-        except Exception as e:
-            logger.warning("buy-preview NXT 여부 조회 실패 [%s]: %s", stk, e)
-            is_nxt = False
-        classified.append({
+        return {
             "sig": sig,
             "score": max(float(sig.get("score") or 0), 0),
             "price": price,
             "is_nxt": is_nxt,
-        })
+        }
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        classified = list(pool.map(_classify, targets))  # 입력 순서 유지
 
     total_score = sum(c["score"] for c in classified)
     try:
@@ -418,7 +455,7 @@ def buy_preview(date: str | None = None):
     # 거시 이벤트 게이트 — 보유 창의 sev3 예정 이벤트(FOMC·CPI·고용) keep. 두 거래소 공통(executor 와 동일).
     m_keep, macro_diag = macro_keep("preview")
 
-    # 2) 거래소별 시드 = 가용현금 × (거래소 점수합 / 전체 점수합), 그 안에서 확신도 비례 배분
+    # 3) 거래소별 시드 = 가용현금 × (거래소 점수합 / 전체 점수합), 그 안에서 확신도 비례 배분
     #    executor 와 동일하게 게이트를 반영한다: 배분 뒤 선물(섹터별)×거시(공통) keep 으로 수량 감액.
     #    가격·현금·야간선물은 호출 시점 실시간값이라 실제 집행과 다를 수 있다(미리보기).
     venues = []

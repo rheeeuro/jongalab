@@ -1,8 +1,8 @@
 import { fmtDate, todayYYYYMMDD } from "@/lib/format";
 
-// app/page.tsx 는 /health·/summary·/positions·/day·/names·/buy-preview 를 서버에서 모두
-// await 한 뒤에야 렌더된다(키움 호출 포함 → 초기 로딩 지연). 그 사이 이 loading.tsx 가
-// 즉시 표시된다. 데이터가 없어도 확정인 것(오늘 날짜·섹션 타이틀·라벨)은 실제 값으로 그리고,
+// app/page.tsx 는 /health·/summary·/positions·/day·/names 를 서버에서 모두 await 한 뒤에야
+// 렌더된다. 그 사이 이 loading.tsx 가 즉시 표시된다. (느린 /buy-preview 는 페이지 안에서
+// <Suspense> 로 분리돼 있어 이 스켈레톤을 붙잡지 않는다.) 데이터가 없어도 확정인 것(오늘 날짜·섹션 타이틀·라벨)은 실제 값으로 그리고,
 // 값이 오는 부분만 스켈레톤 바로 둬서 실제 페이지와의 시프트를 최소화한다.
 export default function Loading() {
   return (

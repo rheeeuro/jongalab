@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+
 import { apiFetch } from "@/lib/api";
 import { won, wonExact, pnlClass, pct, fmtDate, todayYYYYMMDD } from "@/lib/format";
 import type { HealthStatus, Position, DayDetail, DailySummary, NameMap, BuyPreview } from "@/types";
@@ -6,16 +8,17 @@ import RoundTrips from "@/components/RoundTrips";
 export const dynamic = "force-dynamic";
 
 export default async function TodayPage() {
-  // 매수 예정 탭은 매수 윈도우대(15:00~20:00)에만 노출 — 그 밖엔 키움 호출도 생략.
-  // (KRX 15:00~15:20 / NXT 19:30~19:50 을 포함하는 구간. 매수 완료로 pending 이 비면 탭은 자동으로 사라짐)
+  // 매수 예정 카드는 매수 윈도우대(15:00~20:00)에만 노출 — 그 밖엔 키움 호출도 생략.
+  // (KRX 15:00~15:20 / NXT 19:30~19:50 을 포함하는 구간. 매수 완료로 pending 이 비면 카드는 자동으로 사라짐)
   const inPreviewWindow = new Date().getHours() >= 15 && new Date().getHours() < 20;
-  const [health, summary, positions, day, names, preview] = await Promise.all([
+  // /buy-preview 는 아래 <Suspense> 안에서 따로 기다린다 — 여기 넣으면 종목별 키움 조회가
+  // 끝날 때까지 페이지 전체가 안 뜬다.
+  const [health, summary, positions, day, names] = await Promise.all([
     apiFetch<HealthStatus | null>("/health", null),
     apiFetch<DailySummary | null>("/summary", null),
     apiFetch<Position[]>("/positions", []),
     apiFetch<DayDetail | null>("/day", null),
     apiFetch<NameMap>("/names", {}),
-    inPreviewWindow ? apiFetch<BuyPreview | null>("/buy-preview", null) : Promise.resolve(null),
   ]);
 
   const pnl = summary?.realized_pnl ?? 0;
@@ -30,11 +33,6 @@ export default async function TodayPage() {
   const posTotal = positions.reduce((s, p) => s + (p.eval_amt ?? (p.cur_prc ?? 0) * p.qty), 0); // 평가금액 합계
   const live = health?.mode === "live";
   const auto = !health?.kill_switch; // 킬스위치 OFF = 자동매매 작동중
-  const previewVenues = (preview?.venues ?? []).filter((v) => v.stocks.length > 0);
-  const previewTotal = previewVenues.reduce((s, v) => s + v.invested, 0); // 예상 매수금액 합계
-  const previewCount = previewVenues.reduce((s, v) => s + v.count, 0); // 매수 예정 종목 수
-  // 윈도우대 안 + 아직 집행 대기(pending) 종목이 있을 때만 노출. 매수가 끝나면 pending 이 비어 사라짐.
-  const showPreview = inPreviewWindow && previewVenues.length > 0;
 
   return (
     <main className="mx-auto w-full max-w-2xl px-5 pt-8">
@@ -101,99 +99,12 @@ export default async function TodayPage() {
         </Card>
       )}
 
-      {/* 오늘 매수 예정 — pending 시그널을 거래소별로 시드 배분한 예상 수량(실시간 미리보기).
-          매수 윈도우대(15~20시)에 아직 집행 대기 종목이 있을 때만 노출.
-          데드라인이 지난 거래소(v.closed)는 수량 0 · '윈도우 종료'로 표시한다 — 장 마감 후 회차에
-          새로 뜬 KRX 전용 종목이 매수 예정처럼 보이던 문제(2026-08-05 GS건설). */}
-      {showPreview && (
-        <Card title="오늘 매수 예정" count={previewCount} total={previewTotal}>
-          <div className="space-y-4">
-            <p className="-mt-1 text-xs text-slate-400 tabular-nums">
-              가용현금 {wonExact(preview?.cash ?? 0)} 기준 예상 배분
-            </p>
-            {/* 게이트 상태 — 시드가 왜 줄었는지(거시), 감액 없어도 오늘 밤 이벤트는 안내 */}
-            {(preview?.macro?.events?.length ?? 0) > 0 &&
-              ((preview?.macro?.keep ?? 1) < 1 ? (
-                <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
-                  오늘 밤{" "}
-                  {preview!.macro.events!
-                    .filter((e) => e.severity >= 3)
-                    .map((e) => `${e.name}(${e.time})`)
-                    .join("·")}{" "}
-                  — 시드 ×{preview!.macro.keep} 축소
-                </p>
-              ) : (
-                <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
-                  오늘 밤 {preview!.macro.events!.map((e) => `${e.name}(${e.time})`).join("·")} 발표
-                  예정 — 감액 없음(관찰)
-                </p>
-              ))}
-            {previewVenues.map((v) => (
-              <div key={v.exchange}>
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none ${
-                        v.exchange === "NXT"
-                          ? "bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300"
-                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                      }`}
-                    >
-                      {v.exchange}
-                    </span>
-                    <span className="text-xs text-slate-400 tabular-nums">{v.window}</span>
-                  </div>
-                  <span className="min-w-0 truncate text-right text-xs text-slate-400 tabular-nums">
-                    {v.closed ? "윈도우 종료 — 오늘 집행 안 됨" : `시드 ${wonExact(v.seed)}`}
-                  </span>
-                </div>
-                <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {v.stocks.map((s) => {
-                    const buying = s.shares >= 1;
-                    return (
-                      <li
-                        key={s.stk_cd}
-                        // 게이트 감액 사유(축별 등락·강도·섹터 keep·수량 변화)는 hover 로만 보여준다 —
-                        // 목록 스타일을 건드리지 않으려고 별도 줄 없이 title 로 붙였다.
-                        title={s.keep_reason ?? undefined}
-                        className={`flex items-center justify-between gap-2 py-3 ${buying ? "" : "opacity-50"}`}
-                      >
-                        <div className="min-w-0">
-                          <p className="flex items-center gap-1.5 truncate font-semibold">
-                            {s.rank_no != null && (
-                              <span className="shrink-0 text-xs font-bold text-slate-400 tabular-nums">
-                                {s.rank_no}
-                              </span>
-                            )}
-                            <span className="truncate">{nm(s.stk_cd)}</span>
-                          </p>
-                          <p className="text-xs text-slate-400 tabular-nums">
-                            {s.stk_cd} · {s.score.toFixed(1)}점
-                          </p>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          {buying ? (
-                            <>
-                              <p className="font-semibold tabular-nums">{s.shares}주</p>
-                              <p className="text-xs text-slate-400 tabular-nums">
-                                {wonExact(s.cost)}
-                              </p>
-                            </>
-                          ) : (
-                            <p className="text-xs text-slate-400">{s.note ?? "매수 안 함"}</p>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
-            <p className="text-[11px] leading-relaxed text-slate-400">
-              현재가·가용현금 기준 예상치입니다. 실제 수량은 매수 윈도우(KRX 15:00 / NXT 19:30) 시점에 확정돼요.
-            </p>
-          </div>
-        </Card>
+      {/* 오늘 매수 예정 — /buy-preview 는 pending 종목마다 키움 시세·NXT 여부를 조회해 1초 이상
+          걸린다. 페이지 렌더를 막지 않도록 Suspense 로 떼어내 스켈레톤을 먼저 보여준다. */}
+      {inPreviewWindow && (
+        <Suspense fallback={<PreviewSkeleton />}>
+          <BuyPreviewCard names={names} />
+        </Suspense>
       )}
 
       {/* 보유 중 — 없으면 카드 숨김 */}
@@ -240,6 +151,128 @@ export default async function TodayPage() {
         </p>
       )}
     </main>
+  );
+}
+
+/* ---------- 오늘 매수 예정 (스트리밍) ---------- */
+
+/** 매수 윈도우대에만 렌더된다. 아직 집행 대기(pending) 종목이 없으면 아무것도 그리지 않아
+ *  매수가 끝나면 카드가 스스로 사라진다. 종목명은 부모가 이미 받아온 /names 를 재사용한다. */
+async function BuyPreviewCard({ names }: { names: NameMap }) {
+  const preview = await apiFetch<BuyPreview | null>("/buy-preview", null);
+  const nm = (code: string) => names[code] || code;
+  const previewVenues = (preview?.venues ?? []).filter((v) => v.stocks.length > 0);
+  if (previewVenues.length === 0) return null;
+  const previewTotal = previewVenues.reduce((s, v) => s + v.invested, 0); // 예상 매수금액 합계
+  const previewCount = previewVenues.reduce((s, v) => s + v.count, 0); // 매수 예정 종목 수
+
+  return (
+    <Card title="오늘 매수 예정" count={previewCount} total={previewTotal}>
+      <div className="space-y-4">
+        <p className="-mt-1 text-xs text-slate-400 tabular-nums">
+          가용현금 {wonExact(preview?.cash ?? 0)} 기준 예상 배분
+        </p>
+        {/* 게이트 상태 — 시드가 왜 줄었는지(거시), 감액 없어도 오늘 밤 이벤트는 안내 */}
+        {(preview?.macro?.events?.length ?? 0) > 0 &&
+          ((preview?.macro?.keep ?? 1) < 1 ? (
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+              오늘 밤{" "}
+              {preview!.macro.events!
+                .filter((e) => e.severity >= 3)
+                .map((e) => `${e.name}(${e.time})`)
+                .join("·")}{" "}
+              — 시드 ×{preview!.macro.keep} 축소
+            </p>
+          ) : (
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+              오늘 밤 {preview!.macro.events!.map((e) => `${e.name}(${e.time})`).join("·")} 발표
+              예정 — 감액 없음(관찰)
+            </p>
+          ))}
+        {previewVenues.map((v) => (
+          <div key={v.exchange}>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none ${
+                    v.exchange === "NXT"
+                      ? "bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300"
+                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  }`}
+                >
+                  {v.exchange}
+                </span>
+                <span className="text-xs text-slate-400 tabular-nums">{v.window}</span>
+              </div>
+              <span className="min-w-0 truncate text-right text-xs text-slate-400 tabular-nums">
+                {v.closed ? "윈도우 종료 — 오늘 집행 안 됨" : `시드 ${wonExact(v.seed)}`}
+              </span>
+            </div>
+            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+              {v.stocks.map((s) => {
+                const buying = s.shares >= 1;
+                return (
+                  <li
+                    key={s.stk_cd}
+                    // 게이트 감액 사유(축별 등락·강도·섹터 keep·수량 변화)는 hover 로만 보여준다 —
+                    // 목록 스타일을 건드리지 않으려고 별도 줄 없이 title 로 붙였다.
+                    title={s.keep_reason ?? undefined}
+                    className={`flex items-center justify-between gap-2 py-3 ${buying ? "" : "opacity-50"}`}
+                  >
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-1.5 truncate font-semibold">
+                        {s.rank_no != null && (
+                          <span className="shrink-0 text-xs font-bold text-slate-400 tabular-nums">
+                            {s.rank_no}
+                          </span>
+                        )}
+                        <span className="truncate">{nm(s.stk_cd)}</span>
+                      </p>
+                      <p className="text-xs text-slate-400 tabular-nums">
+                        {s.stk_cd} · {s.score.toFixed(1)}점
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      {buying ? (
+                        <>
+                          <p className="font-semibold tabular-nums">{s.shares}주</p>
+                          <p className="text-xs text-slate-400 tabular-nums">
+                            {wonExact(s.cost)}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-xs text-slate-400">{s.note ?? "매수 안 함"}</p>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+        <p className="text-[11px] leading-relaxed text-slate-400">
+          현재가·가용현금 기준 예상치입니다. 실제 수량은 매수 윈도우(KRX 15:00 / NXT 19:30) 시점에 확정돼요.
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+/** 매수 예정 카드 도착 전 자리표시 — 타이틀은 실제 값이라 도착 시 시프트가 최소다. */
+function PreviewSkeleton() {
+  return (
+    <Card title="오늘 매수 예정">
+      <div className="animate-pulse space-y-3 py-2">
+        <div className="h-3 w-40 rounded bg-slate-100 dark:bg-slate-800" />
+        <div className="h-3 w-24 rounded bg-slate-100 dark:bg-slate-800" />
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex items-center justify-between gap-2">
+            <div className="h-8 w-32 rounded bg-slate-100 dark:bg-slate-800" />
+            <div className="h-8 w-20 rounded bg-slate-100 dark:bg-slate-800" />
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 

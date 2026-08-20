@@ -193,6 +193,13 @@ watchdog 은 **jongalab 통합 스케줄러의 dead-man's switch 도 겸한다**
 홈(당일 손익·매수·보유·매수 프리뷰) · 모니터(워커 하트비트·활성 플랜) · 히스토리(월/일 주문) ·
 캘린더(월간 손익) · 설정(킬스위치·리스크 한도·블록리스트·레버리지 ETF). 관리자 비밀번호 로그인(httpOnly 쿠키).
 
+**홈 탭 로딩**: 홈은 `/health`·`/summary`·`/positions`·`/day`·`/names` 를 서버에서 병렬 await 한 뒤
+렌더하고 그 사이 `app/loading.tsx` 스켈레톤이 뜬다. 종목별 키움 조회가 붙는 `/buy-preview` 는
+`<Suspense>` 로 떼어내 나머지 카드가 먼저 뜨고 도착하면 채워진다(`BuyPreviewCard`). 백엔드에서도
+종목별 시세·NXT 조회를 **4개씩 동시에** 돌리고, NXT 여부는 `KiwoomDataClient(nxt_cache=True)` 로
+종목당 1콜만 쓴다(현재가 조회가 내부에서 같은 값을 재사용). 거래일 달력(XKRX)은 `trading-api` 기동 시
+백그라운드로 선로드한다 — 재시작 직후 첫 `/buy-preview` 가 권리락 조회에서 달력 로드를 기다리지 않게.
+
 **모니터 탭 실시간 시세(SSE)**: `GET /monitor/stream`(`core/price_stream.py`) → Next 프록시 → 브라우저
 `EventSource`(`useLivePrices`). 1초마다 바뀐 것만 보내고 15초 무변화면 `: ping`.
 - **가격만 보낸다.** 스탑선·활동 로그·주문은 계속 15초 `/monitor` 폴링이 출처다(표시용 스트림이 자금 경로
