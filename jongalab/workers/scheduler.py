@@ -129,18 +129,21 @@ JOBS = [
     # 하루 안이면 언제 돌아도 무방(라벨은 news_at 기준이라 실행 시각과 무관) → 유예 6h.
     Job("sector_news_labeler", UV_RUN + ["workers/sector_news_labeler.py"],
         timeout=1800, grace=21600, minute="30", hour="20"),
-    # 평일 매수 직전 같은 라벨러를 **최신부터** 한 번 더 — KRX(15:20)·NXT(19:50) 판단 시점에
-    # 그날 거시·섹터 기사가 라벨을 갖고 있게 한다. 20:30 실행만 있으면 라벨이 항상 매수 뒤에
-    # 생겨 뉴스 축을 검정조차 할 수 없다. 라벨은 여전히 관측 전용(시드·점수·veto 무영향).
-    # 상한이 작은 이유: 그날 분량만 훑으면 되고 백로그 소화는 20:30 실행 몫이다.
+    # 평일 매수 직전 같은 라벨러를 **그날 00시 이후 전량** 한 번 더 — KRX(15:20)·NXT(19:50)
+    # 판단 시점에 그날 거시·섹터 기사가 라벨을 갖고 있게 한다. 20:30 실행만 있으면 라벨이 항상
+    # 매수 뒤에 생겨 뉴스 축을 검정조차 할 수 없다. 라벨은 여전히 관측 전용(시드·점수·veto 무영향).
+    # 상한 1500 은 하루치(실측 1,700~2,000건 중 절반씩 두 회차)를 덮는 안전값이고, 포화하면
+    # 워커가 경고를 남긴다 — 상한이 그날 전량을 자르면 뉴스 톤 축의 표본 정의가 조용히 바뀐다.
     # 유예 20분 — 매수 창을 넘겨 지각 실행하는 건 이 잡의 목적이 아니라 스킵이 맞다.
     # 두 잡으로 나눈 이유: cron 필드는 교차곱이라 hour="14,19"+minute="30,0" 이면 14:00·19:30
     # 까지 4번 돈다. 또 잡 이름이 APScheduler id 라 이름을 겹칠 수 없다.
     Job("sector_news_labeler_pre_krx",
-        UV_RUN + ["workers/sector_news_labeler.py", "--newest-first", "--limit", "300"],
+        UV_RUN + ["workers/sector_news_labeler.py",
+                  "--since-today", "--newest-first", "--limit", "1500"],
         timeout=900, grace=1200, minute="30", hour="14", day_of_week="mon-fri"),
     Job("sector_news_labeler_pre_nxt",
-        UV_RUN + ["workers/sector_news_labeler.py", "--newest-first", "--limit", "300"],
+        UV_RUN + ["workers/sector_news_labeler.py",
+                  "--since-today", "--newest-first", "--limit", "1500"],
         timeout=900, grace=1200, minute="0", hour="19", day_of_week="mon-fri"),
     # 매일 20:50 일간 변경사항 저널(GPT 요약 + 관리자 텔레그램). 집계 창이 날짜로 고정이라
     # 지각 실행해도 내용이 같다 → 유예는 자정을 넘기지 않는 선(3h)에서 넉넉히.

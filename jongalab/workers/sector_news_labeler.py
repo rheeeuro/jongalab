@@ -7,9 +7,12 @@ reason='no_match')` 에 쌓인다(2026-07-30~). 이 워커가 그 코퍼스를 �
 
 실행은 목적이 다른 두 종류다(판정·적재 경로는 하나 — 라벨 정의가 갈라지지 않게):
   · **백로그 소화**(매일 20:30, 상한 NEWS_SECTOR_MAX_ROWS) — 오래된 것부터. 표본의 연속성이 목적.
-  · **매수 전 최신화**(평일 14:30·19:00, `--newest-first`) — 최신부터. KRX 15:20 / NXT 19:50 매수
-    판단 시점에 **그날 나온 거시·섹터 기사가 라벨을 갖고 있게** 하는 것이 목적이다. 20:30 실행만
-    있으면 라벨은 언제나 매수 뒤에 생겨, 뉴스 축은 검정조차 할 수 없다(사후에만 존재하는 데이터).
+  · **매수 전 전량 소화**(평일 14:30·19:00, `--since-today --newest-first`) — 그날 00시 이후
+    미라벨 기사를 **전부**, 최신부터. KRX 15:20 / NXT 19:50 매수 판단 시점에 **그날 나온 거시·섹터
+    기사가 라벨을 갖고 있게** 하는 것이 목적이다. 20:30 실행만 있으면 라벨은 언제나 매수 뒤에
+    생겨, 뉴스 축은 검정조차 할 수 없다(사후에만 존재하는 데이터).
+    상한은 하루치(1,700~2,000건)를 덮는 안전값이고, 조회가 상한에 닿으면 경고를 남긴다 —
+    상한 포화는 '그날 전량'이라는 이 실행의 전제가 깨졌다는 뜻이다(경위: docs/history/news-pipeline.md).
     ⚠️ 라벨은 여전히 **관측 전용**이다 — 이 실행이 추가돼도 시드·점수·veto 는 읽지 않는다.
 
 흐름:
@@ -26,12 +29,13 @@ reason='no_match')` 에 쌓인다(2026-07-30~). 이 워커가 그 코퍼스를 �
 수동 실행:
   uv run workers/sector_news_labeler.py --dry-run        # 프리필터 통과율만 확인(LLM 미호출)
   uv run workers/sector_news_labeler.py --limit 3000     # 백로그 일괄 소화
-  uv run workers/sector_news_labeler.py --newest-first   # 최신 기사부터(매수 전 최신화)
+  uv run workers/sector_news_labeler.py --since-today --newest-first   # 그날 분량만(매수 전)
 """
 import argparse
 import logging
 import sys
 from collections import Counter
+from datetime import datetime, time as dtime
 
 from core.config import (
     NEWS_SECTOR_ENABLED,
@@ -62,17 +66,26 @@ def _row(src: dict, headline: str, labels: dict | None, model: str | None) -> di
 
 
 def run(limit: int, batch_size: int, dry_run: bool = False,
-        newest_first: bool = False) -> int:
+        newest_first: bool = False, since_today: bool = False) -> int:
     """1회 실행. 반환: 적재한 라벨 행 수(dry-run 은 0).
 
     newest_first: 최신 기사부터 라벨한다(매수 전 실행용). 기본 False = 오래된 것부터(백로그 소화).
+    since_today: 그날 00시 이후 기사로 범위를 좁힌다(매수 전 실행용) — 백로그가 밀려도 오늘치가
+      상한을 두고 백로그와 경쟁하지 않게 한다.
     """
-    rows = news_sector_repo.get_unlabeled_headlines(limit, newest_first=newest_first)
+    since = datetime.combine(datetime.now().date(), dtime.min) if since_today else None
+    rows = news_sector_repo.get_unlabeled_headlines(limit, since=since, newest_first=newest_first)
     if not rows:
         logger.info("라벨 대상 미매칭 뉴스 없음 — 종료")
         return 0
-    logger.info("조회 순서: %s (%s ~ %s)", "최신부터" if newest_first else "오래된 것부터",
+    logger.info("조회 범위: %s / 순서: %s (%s ~ %s)",
+                "오늘 00시 이후" if since_today else "전체 백로그",
+                "최신부터" if newest_first else "오래된 것부터",
                 rows[0]["created_at"], rows[-1]["created_at"])
+    if len(rows) >= limit:
+        # 상한 포화 = 조회 범위 일부가 이번 실행에서 잘렸다. 매수 전 실행에선 '그날 전량'이라는
+        # 전제가 깨진 것이라 뉴스 톤 축의 표본 정의가 조용히 달라진다.
+        logger.warning("상한 %d 포화 — 잘린 기사가 있다. 매수 전 실행이면 그날 전량 전제가 깨진다", limit)
 
     topical: list[dict] = []      # LLM 판정 대상 {idx, headline, src}
     skipped: list[dict] = []      # 프리필터 탈락 저장 행
@@ -126,13 +139,15 @@ def main() -> int:
                         help="프리필터 통과율만 확인(LLM 미호출·미적재)")
     parser.add_argument("--newest-first", action="store_true",
                         help="최신 기사부터 라벨(매수 전 실행용). 기본은 오래된 것부터(백로그 소화)")
+    parser.add_argument("--since-today", action="store_true",
+                        help="그날 00시 이후 기사만(매수 전 실행용). 기본은 전체 백로그")
     args = parser.parse_args()
 
     if not NEWS_SECTOR_ENABLED:
         logger.info("NEWS_SECTOR_ENABLED=0 — 비활성")
         return 0
 
-    run(args.limit, args.batch_size, args.dry_run, args.newest_first)
+    run(args.limit, args.batch_size, args.dry_run, args.newest_first, args.since_today)
     return 0
 
 

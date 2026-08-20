@@ -143,7 +143,7 @@ jongalab/
 | ⏰ `rule_evaluator` | 평일 09:40 | **Edge Ledger 일별 채점(2-pass)**. pass1: **retired 포함 전 rule** 을 유니버스+`market_snapshot` 에 적용 → `exit_label` 결과 → `mean_net = 평균 − EDGE_COST_PCT` → `edge_rule_daily` upsert(catch-up: 라벨 미도래는 재시도, 14일 초과 시 n=0 sentinel 종결) + `registered_at` 이후 표본만으로 stats 재계산(`n_days`·`mean_net_days`(일 등가중, 쏠림 진단)·`t_days`·초과 계열·**시장 회귀 계열**·화면용 `promo_eligible`/`promo_blockers`/`promo_policy`/`decision_stage`). 시장 회귀(`_market_fit`)는 (그날 룰 일수익, 그날 자기제외 유니버스 평균)을 회귀해 `beta`·`alpha`·`t_alpha`·`recent_alpha`·`down_day_mean` 을 낸다 — **`beta` 는 누적 표본, `alpha` 만 최근 창**(10거래일로 beta 까지 추정하면 se≈0.29 라 판정 불가). 최소 5거래일·시장 분산>0 미만이면 전부 None(fail-closed). `recent_alpha` 만 전이 판정이 쓰고 나머지는 화면·수동 검토용. **최근 창은 적응형**(`_recent_window`) — 표본일 10개가 기본이되 `DEMOTE_MIN_N` 을 못 채우면 뒤로 늘린다. 창을 표본일 개수로만 고정하면 `n = 표본일 × 폭(1일당 매칭 종목 수)` 이라 **폭이 얇은 룰은 문턱을 영원히 못 넘어** 자동 전이 대상에서 영구히 빠진다(두꺼운 룰은 10일에서 이미 문턱을 넘어 창이 늘지 않는다). 조건 판정은 **서버만** 하고 화면은 렌더링만 한다. pass2: stats 가 신선해진 뒤 **두 축을 따로** 처리 — 원장 축은 `check_promotion` → 텔레그램 알림(승격 후보·집행 설계 필요는 **판정일에만**, `strict` 는 확인창 판정일 / `experimental` 은 라우터가 판정 일정을 면제하므로 **발견 판정일**. 줄의 `[확인창 확증]`/`[발견 통과 · 실험 적용]` 표기가 근거를 구분한다), 운용 축은 `decide_transition` 으로 **`live ↔ paused` 를 직접 전이시키고**(승인 없음) 결과를 사후 보고한다. 연속 카운트는 `stats.flip_streak` 에 남고 **새 표본이 있는 실행에서만** 갱신된다. 전이 알림엔 판정값 `alpha`·`beta`·하락일 성적과 두 가중을 병기하고, 부호가 갈리면 ⚠️쏠림 표시. 승격·retire 는 관리자 API 수동 |
 | ⏰ `weight_tuner` | 토 08:00 | 지난주 실현손익(`SCORE_LOGIC_MIN_DATE`=2026-07-07 이전 주는 스킵) → GPT 가중치 제안 → backtest 검증: IMPROVES=pending(승인 대상) / 그 외=archived(비적용·표시용) + [건강지표] 로깅(스프레드·점수↔손익 상관 — **양수 전환 시 튜닝 재개 신호**) |
 | ⏰ `macro_event_check` | 월 08:20 | `macro_event` 캘린더 고갈 감시 — **severity≥3**(실제로 감액하는 계열) 마지막 이벤트가 3주 내면 exit 1 + 경보(시드를 잊으면 게이트가 '이벤트 없음'으로 조용히 무력화된다). sev2 는 감액에 안 쓰여 감시 대상이 아니다(전체를 보면 더 멀리 시드된 sev2 가 sev3 고갈을 가린다). 연말마다 다음 해 일정 수동 시드 |
-| ⏰ `sector_news_labeler` | 매일 20:30(백로그) + 평일 14:30·19:00(`--newest-first`) | 미매칭 뉴스(`content_skip` no_match) → `news_sector_label`. **관측 전용.** 프리필터 → 통과분만 벌크 판정. **프리필터 탈락분도 `scope='무관'` 으로 적재**(안 남기면 같은 행이 계속 조회돼 백로그가 안 줄고 통과율도 못 잰다). LLM 실패 배치는 적재하지 않고 다음 실행 재시도. **실행 두 종류**: 20:30 은 **오래된 것부터**(백로그 소화 — 표본의 연속성이 목적, 매일인 이유는 코퍼스가 주말에도 쌓이기 때문) / 14:30·19:00 은 **최신부터**(`sector_news_labeler_pre_krx`·`_pre_nxt`, limit 300) — KRX 15:20·NXT 19:50 매수 판단 시점에 그날 거시·섹터 기사가 라벨을 갖고 있게 한다. 20:30 만 있으면 라벨이 언제나 매수 뒤에 생겨 뉴스 축을 검정조차 할 수 없다. `--limit`/`--batch-size`/`--dry-run`/`--newest-first` |
+| ⏰ `sector_news_labeler` | 매일 20:30(백로그) + 평일 14:30·19:00(`--since-today --newest-first`) | 미매칭 뉴스(`content_skip` no_match) → `news_sector_label`. **관측 전용.** 프리필터 → 통과분만 벌크 판정. **프리필터 탈락분도 `scope='무관'` 으로 적재**(안 남기면 같은 행이 계속 조회돼 백로그가 안 줄고 통과율도 못 잰다). LLM 실패 배치는 적재하지 않고 다음 실행 재시도. **실행 두 종류**: 20:30 은 **오래된 것부터**(백로그 소화 — 표본의 연속성이 목적, 매일인 이유는 코퍼스가 주말에도 쌓이기 때문) / 14:30·19:00 은 **그날 00시 이후 전량을 최신부터**(`sector_news_labeler_pre_krx`·`_pre_nxt`, `--since-today`, limit 1500) — KRX 15:20·NXT 19:50 매수 판단 시점에 그날 거시·섹터 기사가 라벨을 갖고 있게 한다. 20:30 만 있으면 라벨이 언제나 매수 뒤에 생겨 뉴스 축을 검정조차 할 수 없다. 범위를 오늘로 좁히는 건 밀린 백로그와 상한을 두고 경쟁하지 않게 하기 위해서고, **상한 포화 시 경고 로그**를 남긴다(포화하면 '그날 전량'이라는 전제가 깨져 뉴스 톤 축의 표본 정의가 조용히 바뀐다). `--limit`/`--batch-size`/`--dry-run`/`--newest-first`/`--since-today` |
 | ⏰ `journal` | 매일 20:50(일간) + 토 10:00(주간) | **변경사항 저널** — git 커밋을 GPT 로 사용자 관점 안내문으로 바꿔 `docs/journal/{daily/YYMMDD,weekly/YYMM-n}.md` 에 저장 + 관리자 텔레그램 전송(스레드·링크드인 게시글 초안). 집계 창은 **날짜로 고정**(일간 D = D-1 20:50~D 20:50, 주간 = 직전 토~금 일간 파일 7개 재요약)이라 지각 실행해도 내용이 같고 하루가 한 파일에만 들어간다. 커밋 없는 날은 파일을 만들지 않고 exit 0. 저널 프롬프트는 워커가 직접 갖는다(`core/prompts.py` 는 콘텐츠 분석 전용 가드 파일). 산출물은 git 미추적(`.gitignore`). `--backfill`(과거 일괄, 알림 없음)·`--date`·`--force`·`--no-notify` |
 | `kis_night_futures_ws` | 평일 18:00~새벽 | KIS WS 야간선물 체결 → ① `kis_night_future` 단일행 현재가(2초, trading futures_gate 소비) ② `kis_night_future_bar` **1분봉 이력**(전 체결 집계 — 샘플링하면 고저가 깎인다). 체결 없는 분은 봉을 만들지 않는다. 세션 종료·끊김 시 진행 중 봉 flush, 분봉 저장 실패는 스트림을 죽이지 않는다 |
 | (토큰) `kis_token_refresh` | 매일 07:00 | 키움+KIS 토큰 갱신 |
@@ -178,14 +178,14 @@ closing_bet (평일 08:10~19:40, 30분 — :10/:40)
   ├─► daily_stock_report  (유니버스 전체 = 연구 표본. 기본 조회는 selected=1, 연구는 include_unselected)
   └─► trade_signal (pending, selected 만) ─► trading 도메인이 집행
 
-14:30 sector_news_labeler(최신) ─► KRX 매수 전 그날 거시·섹터 라벨 최신화(관측 전용)
+14:30 sector_news_labeler(오늘 전량) ─► KRX 매수 전 그날 00시 이후 거시·섹터 라벨(관측 전용)
 14:30 after_hours_labels --risk-only ─► T-1 확정 리스크 라벨(공매도·신용·대차) 선반영
 14:30 gap_check --market-snap  ─► market_snapshot 1행 조기 적재
                                  (위 둘이 선정 시점 rule 이 그 값을 볼 수 있게 하는 회차 —
                                   19:50 회차와 같은 값인 축만 edge_policy 가 선정에 허용)
 15:20 gap_check --base-krx     ─► KRX 기준가(state)
 17:50 after_hours_labels       ─► 시간외·리스크 라벨 + market_snapshot breadth
-19:00 sector_news_labeler(최신) ─► NXT 매수 전 라벨 최신화
+19:00 sector_news_labeler(오늘 전량) ─► NXT 매수 전 라벨 최신화(상한 1500, 포화 시 경고)
 19:50 gap_check --base-nxt     ─► NXT 기준가 + 유니버스 NXT 스냅샷 + market_snapshot 1행
                                  (뉴스 톤 `news_macro_tone`/`news_sector_tone` 도 이때 = 매수 시점 값)
 20:30 sector_news_labeler      ─► 미매칭 뉴스 섹터·거시 라벨 백로그 소화(관측 전용)
