@@ -607,6 +607,8 @@ def _overlay_extended(grouped: dict) -> None:
     대상은 실제로 장 밖 거래가 있는 미국 상장 ETF/ADR(SKHY·EWY·KORU — `fetch_us_extended`
     와 같은 소스, 60s 캐시 공유). 지수(^GSPC 등)는 프리/애프터 시세 자체가 없고,
     선물·환율·코인은 사실상 24시간 거래라 `price` 가 이미 최신값이다.
+    시장 탭 카드는 이 필드가 있고 `market_state` 가 REGULAR 가 아니면 그쪽을 주값으로 올린다
+    (표시 규칙은 frontend `AnimatedMarketIndexCard`).
 
     ⚠️ 이 필드는 `_with_last_good` 캐시에 넣지 않는다 — 정규장이 열리면 값이 사라져야 하는데
     마지막 값을 붙들면 장중에 지난밤 시간외가 남는다.
