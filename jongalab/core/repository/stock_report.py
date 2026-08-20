@@ -249,11 +249,16 @@ def get_stock_report(report_date: str, stock_code: str) -> dict | None:
 
 
 def get_stock_report_history(stock_code: str, days: int = 3) -> list[dict]:
-    """특정 종목의 최근 N일 리포트 조회 (수급 동향용)"""
+    """특정 종목의 최근 N회 **선정** 리포트 조회 (종목 상시 페이지의 '선정 이력').
+
+    ⚠️ `selected=1` 만 본다 — `daily_stock_report` 에는 비선정 후보(유니버스 전체)도 들어 있어
+    필터 없이 뽑으면 15·16위 후보가 '선정 이력'으로 보이고, 그 회차는 `gap_*` 라벨도 없어
+    아침 결과가 영구 '대기'로 남는다(gap_check 는 선정 상위만 라벨한다).
+    """
     with get_db() as (conn, cursor):
         cursor.execute(
             """SELECT * FROM daily_stock_report
-               WHERE stock_code = %s
+               WHERE stock_code = %s AND selected = 1
                ORDER BY report_date DESC
                LIMIT %s""",
             (stock_code, days),

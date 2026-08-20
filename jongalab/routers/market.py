@@ -1,14 +1,15 @@
 """시장 데이터 라우트 (주가, 지수, 주도주, 거시 이벤트)"""
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from core.repository import get_youtube_sources
 from core.repository import macro_event
 from core.market_calendar import holidays_in_month
 from core.market_data import (
     fetch_stock_price,
-    fetch_stock_history,
+    fetch_stock_candles,
+    fetch_stock_profile,
     fetch_stock_name,
     fetch_market_indices,
     fetch_index_ohlc,
@@ -34,12 +35,24 @@ def get_stock_name(ticker: str):
     return {"name": fetch_stock_name(ticker)}
 
 
-@router.get("/stock-history/{ticker}")
-def get_stock_history(ticker: str):
-    """최근 7일 주가 데이터 가져오기 (차트 오버레이용)"""
+@router.get("/stock-profile/{ticker}")
+def get_stock_profile(ticker: str):
+    """종목 프로필 (종목명 + 시세 + 시총·PER/PBR·1년 고저) — 상시 종목 페이지 헤더용.
+
+    유니버스 밖 종목도 헤더를 채워야 해서 키움 TR 한 번으로 이름·시세·팩트를 함께 낸다.
+    """
     try:
-        return fetch_stock_history(ticker)
+        return fetch_stock_profile(ticker)
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/stock-history/{ticker}")
+def get_stock_history(ticker: str, days: int = Query(60, ge=5, le=250)):
+    """최근 N거래일 **일봉 OHLCV** (종목 상세 캔들 차트용)"""
+    try:
+        return fetch_stock_candles(ticker, days=days)
+    except Exception:
         return []
 
 

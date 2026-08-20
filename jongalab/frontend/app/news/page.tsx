@@ -1,8 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import {
-  ChevronLeft,
-  ChevronRight,
   MessagesSquare,
   Newspaper,
 } from "lucide-react";
@@ -23,6 +20,7 @@ import { NewsStream } from "@/components/news/NewsStream";
 import { MentionPulse } from "@/components/news/MentionPulse";
 import { ContentCard } from "@/components/ContentCard";
 import { ViewSegment } from "@/components/ViewSegment";
+import { PageButton } from "@/components/ui/page-button";
 import { apiFetch } from "@/lib/api";
 
 export const metadata: Metadata = {
@@ -332,38 +330,5 @@ async function ContentView({ page }: { page: number }) {
         )}
       </section>
     </div>
-  );
-}
-
-function PageButton({
-  href,
-  disabled,
-  direction,
-}: {
-  href: string;
-  disabled: boolean;
-  direction: "prev" | "next";
-}) {
-  const Icon = direction === "prev" ? ChevronLeft : ChevronRight;
-  const className = `flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
-    disabled
-      ? "cursor-not-allowed bg-slate-100 text-slate-300 dark:bg-slate-800 dark:text-slate-600"
-      : "bg-slate-900 text-white hover:opacity-90 dark:bg-white dark:text-slate-900"
-  }`;
-  if (disabled) {
-    return (
-      <span className={className} aria-disabled>
-        <Icon className="h-4 w-4" />
-      </span>
-    );
-  }
-  return (
-    <Link
-      href={href}
-      className={className}
-      aria-label={direction === "prev" ? "이전" : "다음"}
-    >
-      <Icon className="h-4 w-4" />
-    </Link>
   );
 }

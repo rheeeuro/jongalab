@@ -31,9 +31,10 @@ function toTimestamp(timeStr: string): UTCTimestamp {
   // "2025-09-17T13:20" → UTC timestamp (seconds)
   // lightweight-charts는 UTC 기준으로 표시하므로,
   // KST 시간값을 그대로 UTC로 넣어 차트에 한국 시간이 보이게 함
+  // 일봉("2025-09-17")은 시각이 없어 장 시작(09:00) 기준으로 놓는다.
   const [datePart, timePart] = timeStr.split("T");
   const [year, month, day] = datePart.split("-").map(Number);
-  const [hour, minute] = timePart.split(":").map(Number);
+  const [hour, minute] = timePart ? timePart.split(":").map(Number) : [9, 0];
   return (Date.UTC(year, month - 1, day, hour, minute, 0) / 1000) as UTCTimestamp;
 }
 
@@ -42,11 +43,13 @@ export function CandlestickChart({
   initialRangeDays = 7,
   fit = false,
   height = 400,
+  timeVisible = true,
 }: {
   data: CandleData[];
   initialRangeDays?: number;
   fit?: boolean; // true 면 가져온 전 구간을 꽉 차게(분봉 시장 차트용). false 면 최근 N일 줌.
   height?: number; // 차트가 본문의 일부인 화면(종목 리포트)은 낮춰 쓴다 — 기본값은 시장 차트 기준.
+  timeVisible?: boolean; // 일봉은 false — 시:분 눈금이 붙으면 같은 날짜가 여러 칸으로 읽힌다.
 }) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -78,7 +81,7 @@ export function CandlestickChart({
       },
       timeScale: {
         borderColor: isDark ? "#334155" : "#e2e8f0",
-        timeVisible: true,
+        timeVisible,
         secondsVisible: false,
       },
     });
@@ -181,7 +184,7 @@ export function CandlestickChart({
         chartRef.current = null;
       }
     };
-  }, [data, initialRangeDays, fit, height]);
+  }, [data, initialRangeDays, fit, height, timeVisible]);
 
   if (!data.length) {
     return (

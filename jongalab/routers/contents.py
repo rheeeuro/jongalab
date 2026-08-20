@@ -1,45 +1,38 @@
 """콘텐츠 분석 라우트"""
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from typing import Optional
+from fastapi import APIRouter, Query
 
-from core.repository import get_contents_paginated, get_contents_by_ticker, get_mention_stats
+from core.repository import get_contents_paginated, get_content_mention_summary, get_mention_stats
 
 router = APIRouter(prefix="/api", tags=["contents"])
-
-
-class StockCall(BaseModel):
-    name: str
-    ticker: Optional[str] = None
-    stance: Optional[str] = None       # 호재 | 악재 | 중립
-    conviction: Optional[str] = None   # 상 | 중 | 하
-    horizon: Optional[str] = None      # 단기 | 중기 | 장기
-    reason: Optional[str] = None
-
-
-class ContentAnalysis(BaseModel):
-    id: int
-    external_id: str
-    source_name: str
-    title: str
-    analysis_content: str
-    sentiment_score: Optional[int] = 50
-    platform: str
-    source_url: Optional[str] = None
-    created_at: str
-    tldr: Optional[str] = None
-    tags: Optional[List[str]] = None
-    stock_calls: Optional[List[StockCall]] = None
 
 
 @router.get("/contents")
 def get_contents(
     page: int = Query(1, description="현재 페이지 번호"),
     limit: int = Query(12, description="페이지 당 항목 수"),
+    ticker: Optional[str] = Query(None, description="이 종목을 언급한 콘텐츠만"),
 ):
+    """콘텐츠 분석 목록 (뉴스 탭 · 종목 상세 공용, 최근 7일).
+
+    `ticker` 를 주면 그 종목 언급분만. 종목별 전량 조회는 두지 않는다 — 언급이 많은 대형주에서
+    화면이 카드 100장 이상을 한 번에 받는다(그게 종목 상세가 무거웠던 원인이다).
+    """
     try:
-        result = get_contents_paginated(page, limit)
+        result = get_contents_paginated(page, limit, ticker=ticker)
         return {"success": True, **result}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/contents/mention-summary")
+def get_contents_mention_summary(
+    ticker: str = Query(..., description="종목코드"),
+    days: int = Query(7, ge=1, le=30, description="집계 윈도우 (일)"),
+):
+    """종목 여론 요약 — 건수·채널 수·플랫폼·평균 감성·방향 분포 (종목 상세 요약 줄용)."""
+    try:
+        return {"success": True, "data": get_content_mention_summary(ticker, days=days)}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -57,10 +50,3 @@ def get_contents_mention_stats(
         return {"success": False, "error": str(e)}
 
 
-@router.get("/contents/{ticker}", response_model=List[ContentAnalysis])
-def get_ticker_contents(ticker: str):
-    """특정 티커(종목)와 관련된 콘텐츠 조회"""
-    try:
-        return get_contents_by_ticker(ticker)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))

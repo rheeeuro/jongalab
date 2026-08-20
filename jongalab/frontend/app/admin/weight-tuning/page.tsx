@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Check, X, Loader2, ArrowRight, TrendingUp, TrendingDown } from "lucide-react";
+import { StockLink } from "@/components/ui/stock-link";
 import type { WeightTuningProposal, WeightTuningSample, WeightBacktest } from "@/types";
 
 const WEIGHT_LABELS: Record<string, string> = {
@@ -379,9 +380,12 @@ function DatasetTable({ rows }: { rows: WeightTuningSample[] }) {
                     ) : r.outcome === "LOSS" ? (
                       <TrendingDown className="h-3 w-3 text-blue-500 shrink-0" />
                     ) : null}
-                    <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[96px]">
+                    <StockLink
+                      code={r.stk_cd}
+                      className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[96px]"
+                    >
                       {r.name || r.stk_cd}
-                    </span>
+                    </StockLink>
                   </div>
                 </td>
                 <td

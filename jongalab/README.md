@@ -91,13 +91,18 @@ jongalab/
 | `/api/news/heat` | 집계(count) | 뉴스가 몰린 종목. 기본 정렬은 건수가 아니라 **자기 기저 대비 배수**(`surprise` = 건수 ÷ 직전 7일 일평균, 분모 하한 1) — 건수 정렬만 쓰면 시총 랭킹이 된다. `?date=` 면 그 날 하루, 없으면 최근 `?hours=`. 하한·정렬축은 호출부가 고른다: `min_count`(노이즈 하한) · `min_surprise`(평소 수준 제외) · `sort=count`(**`min_surprise` 와 짝지어** 쓴다 — 뉴스 탭 사이드 랭킹이 이 조합) |
 | `/api/news/materials?date=` | 집계 | 그 날 뉴스가 있던 유니버스 종목의 재료 라벨(비선정 포함 — 뉴스 화면의 축은 '그 날 뜬 재료') |
 | `/api/news/stream?date=&limit=&offset=` | **표시(sec_news)** | 그 날 증권 섹션 기사 최신순 + `total`/`price_total`/`has_more`. **거르기·세기를 여기서 한다** — `hide_price`(기본 True, 시세 기사 제외) · `q`(제목 검색) · `ticker`(종목 칩). `total` 은 '그 날 전체'가 아니라 **지금 조건으로 나열되는 수**다(화면 헤더·'더 보기' 카운터·표시 건수를 한 수로 맞춘다). 종목 칩은 사명 매칭 결과라 **없는 기사가 많다(실측 64% — 시황·환율·정책)** |
-| `/api/news/{ticker}` | 표시(text) | 종목별 당일 헤드라인 |
+| `/api/news/{ticker}?days=&limit=` | 표시(text) | 종목별 헤드라인. `days=1`(기본)은 당일, 종목 상시 페이지는 `days=3` 으로 받는다 — 장 마감 후·주말에 당일 0건이면 화면 섹션이 사라진다. `total`(limit 이전 총건수)을 함께 내려 목록이 잘렸는지 화면이 알 수 있게 한다. ⚠️ 이 `total` 은 **표시(text) 게이트** 기준이라 리포트의 `news_count`(집계 게이트)와 다른 수다 — 화면에 총계 숫자로 내지 않는다 |
 | `/api/market-index-history/{symbol}?range=` | — | 지수/심볼 캔들 히스토리 |
+| `/api/stock-profile/{ticker}` | — | 종목명 + 시세 + 시총·PER/PBR·1년 고저·외국인 비율 (키움 ka10001 **한 번**). 종목 상시 페이지 헤더가 유니버스 밖 종목에도 같은 헤더를 채우려면 TR 하나로 끝나야 해서 시세와 팩트를 같이 낸다. 표시용 종목명은 이 응답의 `stk_nm` 이다(`ticker_dictionary` 이름은 콘텐츠 매칭용 별칭) |
+| `/api/stock-history/{ticker}?days=` | — | **일봉 OHLCV**(기본 60거래일, `value`=거래대금 원). 종목 상세 캔들 차트용 |
+| `/api/contents?ticker=&page=&limit=` | 표시 | 콘텐츠 분석 목록(최근 7일, 페이지네이션). `ticker` 로 그 종목 언급분만 — **종목별 전량 조회는 두지 않는다**(대형주는 7일 100건 이상이라 화면이 카드를 그만큼 받는다) |
+| `/api/contents/mention-summary?ticker=&days=` | 집계 | 종목 여론 요약 — 건수·채널 수·플랫폼 분포·평균 감성·방향(호재/악재/중립) 분포. 방향은 `stock_calls` 에서 **그 종목 항목만** 센다 |
 | `/api/macro-events` | — | `?days=`(향후) / `?month=YYYY-MM`(그 달 전체·과거 포함) |
 | `/api/market-holidays?month=` | — | 그 달 KRX 휴장 평일 + 한글 이름 |
 | `/api/us-extended` | — | US 프록시 정규장+프리/애프터(trading 게이트가 소비) |
 | `/api/stock-report/record-summary?days=` | 집계 | 최근 N 거래일 선정 종목 누적 성적(승률·평균 갭·평균 실체결·최고/최악일). 모집단은 `gap-stats` 와 같은 **selected=1 + 갭 체크 완료**(rank_no 로 자르지 않는다). ⚠️ `exec_leg_ret` 은 매매 경로 가동 이후 구간에만 있어 갭과 창이 다르므로 `exec_days`·`exec_from_date`·`exec_to_date` 를 함께 내려보낸다 |
 | `/api/stock-report/{date}` | 표시 | 그 날 **선정 종목**(`selected=1`). 정렬은 **규칙 수 내림차순 → rank_no 오름차순**(`repository.stock_report.RULE_COUNT_SQL`) — 화면·텔레그램이 이 순서를 그대로 쓰고 다시 정렬하지 않는다. 유니버스 전체를 보는 경로(`include_unselected=True`, 엣지 연구용)는 `rule_names` 가 선정 종목에만 있어 **rank_no 순을 유지**한다 |
+| `/api/stock-report/history/{code}?limit=` | 표시 | 그 종목의 최근 N회 **선정** 리포트(`selected=1`). 비선정 후보를 섞으면 화면의 '선정 이력'이 거짓이 되고 그 회차는 `gap_*` 라벨이 없어 아침 결과가 영구 '대기'로 남는다. 응답에서 `hourly_candles`·`news_headlines` 는 뺀다(목록 한 줄에 쓰지 않는데 응답 대부분을 차지) |
 | `/api/stock-report/{date}/{code}` | 표시 | 종목 상세 — 리포트 행 + 그날 콘텐츠 분석 + **`score_breakdown`**(종합점수 구성, `core/backtest.score_breakdown`). 구성은 **현재 가중치로 재계산**한 값이라 튜닝 이후 조회한 과거 리포트는 저장된 `score` 와 합이 다를 수 있다(화면이 그 차이를 밝힌다). 화면이 가중치 미러를 갖지 않게 서버가 낸다 |
 | `/api/stock-report/top-picks?dates=` | 표시 | 날짜별 **대표 추천 종목**(성적 달력용) = `selected=1` 중 위와 같은 정렬의 첫 종목. 예전엔 `rank_no=1`(selected 필터 없음)이라 추천에 없는 종목이 대표로 나왔다 |
 | `/api/job-runs` | admin | 스케줄러 잡 실행 이력 |

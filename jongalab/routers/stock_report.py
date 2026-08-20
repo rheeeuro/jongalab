@@ -280,9 +280,17 @@ def list_report_dates(limit: int = Query(30, description="최대 조회 일수")
 
 @router.get("/stock-report/history/{stock_code}", response_model=List[StockReport])
 def list_reports_by_stock(stock_code: str, limit: int = Query(5, description="최대 조회 일수")):
-    """특정 종목의 최근 N일 리포트 목록 (최신순)"""
+    """특정 종목의 최근 N일 리포트 목록 (최신순) — 상시 종목 페이지의 '선정 이력' 줄용.
+
+    ⚠️ `hourly_candles`·`news_headlines` 는 응답에서 뺀다 — 목록 한 줄을 그리는 데 쓰지 않는데
+    1시간봉 5일치가 응답의 대부분을 차지한다(모델 기본값 `[]` 로 내려간다). 필요해지면 상세
+    엔드포인트(`/stock-report/{date}/{code}`)를 쓴다. 경위: docs/history/frontend-ui.md
+    """
     try:
         results = get_stock_report_history(stock_code, days=limit)
+        for row in results:
+            row.pop("hourly_candles", None)
+            row.pop("news_headlines", None)
         return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

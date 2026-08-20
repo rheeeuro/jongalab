@@ -470,12 +470,68 @@ def fetch_stock_price(ticker: str, date: str | None = None) -> dict:
     return {"ticker": ticker, **q}
 
 
-def fetch_stock_history(ticker: str, period: str = "7d") -> list[dict]:
-    """최근 주가 히스토리 (차트 오버레이용, 키움 일봉)"""
+def fetch_stock_profile(ticker: str) -> dict:
+    """종목 프로필 — 시세 + 종목명·시가총액·PER/PBR·1년 고저 위치 (키움 ka10001 **한 번**).
+
+    상시 종목 페이지(`/stocks/{ticker}`) 헤더가 쓴다. 리포트가 없는 종목(유니버스 밖)에도
+    같은 헤더를 채우려면 이 TR 하나로 끝나는 게 조건이라 시세와 팩트를 함께 낸다.
+    표시용 종목명은 **키움 `stk_nm`** 이다 — `ticker_dictionary` 의 이름은 콘텐츠 매칭용
+    별칭(예: '하이닉스')이라 화면 제목으로 쓰면 리포트 화면(SK하이닉스)과 이름이 갈린다.
+    """
+    code = _norm_code(ticker)
+    if not code:
+        return {"error": "데이터를 찾을 수 없습니다."}
+
+    try:
+        info = _get_kiwoom().get_stock_basic_info(code)
+    except Exception:
+        return {"error": "데이터를 찾을 수 없습니다."}
+
+    price = abs(_parse_num(info.get("cur_prc")))
+    if price == 0:
+        return {"error": "데이터를 찾을 수 없습니다."}
+
+    change = _parse_num(info.get("pred_pre"))
+    pct = _parse_num(info.get("flu_rt"))
+    if pct == 0 and change != 0:
+        prev = price - change
+        if prev:
+            pct = change / prev * 100
+
+    def _pos(key: str) -> float:
+        return abs(_parse_num(info.get(key)))
+
+    return {
+        "ticker": ticker,
+        "name": (info.get("stk_nm") or "").strip() or ticker,
+        "price": price,
+        "change": round(change, 2),
+        "change_percent": round(pct, 2),
+        "open": _pos("open_pric"),
+        "high": _pos("high_pric"),
+        "low": _pos("low_pric"),
+        "volume": _pos("trde_qty"),
+        # mac(시가총액)은 억원 단위로 온다 — 화면 포맷터가 '원' 기준이라 여기서 환산한다.
+        "market_cap": int(_pos("mac") * 1e8),
+        "per": _parse_num(info.get("per")),
+        "pbr": _parse_num(info.get("pbr")),
+        # 250거래일(≈1년) 최고/최저와 현재가의 최고가 대비 위치(%). 신고가 근접 여부를 헤더에서 읽게 한다.
+        "high_1y": _pos("250hgst"),
+        "low_1y": _pos("250lwst"),
+        "high_1y_gap_pct": _parse_num(info.get("250hgst_pric_pre_rt")),
+        "foreign_rate": _parse_num(info.get("for_exh_rt")),
+    }
+
+
+def fetch_stock_candles(ticker: str, days: int = 60) -> list[dict]:
+    """최근 N거래일 일봉 OHLCV (키움 ka10081) — 종목 상세 캔들 차트용.
+
+    `time` 은 `CandlestickChart` 규약(`YYYY-MM-DD`, 일봉은 시각 없음)에 맞춘다.
+    `value` 는 거래대금(원) — 키움 `trde_prica` 는 백만원 단위다.
+    """
     code = _norm_code(ticker)
     if not code:
         return []
-    count = int(re.sub(r"\D", "", period) or "7")
 
     try:
         data = _get_kiwoom().get_daily_chart(code)
@@ -486,14 +542,19 @@ def fetch_stock_history(ticker: str, period: str = "7d") -> list[dict]:
     rows = sorted(
         [c for c in candles if c.get("dt")],
         key=lambda c: c["dt"], reverse=True,
-    )[:count]
+    )[:days]
 
     result = []
     for c in reversed(rows):
         dt = c["dt"]
         result.append({
-            "date": f"{dt[:4]}-{dt[4:6]}-{dt[6:8]}",
-            "price": abs(_parse_num(c.get("cur_prc"))),
+            "time": f"{dt[:4]}-{dt[4:6]}-{dt[6:8]}",
+            "open": abs(_parse_num(c.get("open_pric"))),
+            "high": abs(_parse_num(c.get("high_pric"))),
+            "low": abs(_parse_num(c.get("low_pric"))),
+            "close": abs(_parse_num(c.get("cur_prc"))),
+            "volume": abs(_parse_num(c.get("trde_qty"))),
+            "value": int(abs(_parse_num(c.get("trde_prica"))) * 1e6),
         })
     return result
 

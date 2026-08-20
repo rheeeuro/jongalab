@@ -25,15 +25,24 @@ def _parse_json_columns(row: dict) -> None:
         row["tldr"] = ""
 
 
-def get_contents_paginated(page: int = 1, limit: int = 12) -> dict:
-    """페이지네이션된 콘텐츠 목록 조회"""
+def get_contents_paginated(page: int = 1, limit: int = 12, ticker: str | None = None) -> dict:
+    """페이지네이션된 콘텐츠 목록 조회 (ticker 지정 시 그 종목을 언급한 콘텐츠만).
+
+    종목 상세도 이 함수를 쓴다 — 종목별 전량 조회를 따로 두면 언급이 많은 대형주에서
+    화면이 카드 100장 이상을 한 번에 받는다.
+    """
     with get_db() as (conn, cursor):
         offset = (page - 1) * limit
 
         where_clause = "WHERE created_at >= NOW() - INTERVAL 7 DAY"
+        where_params: tuple = ()
+        if ticker:
+            where_clause += " AND related_tickers LIKE %s"
+            where_params = (f"%{ticker}%",)
 
         cursor.execute(
             f"SELECT COUNT(*) as total_count FROM content_analysis {where_clause}",
+            where_params,
         )
         total_count = cursor.fetchone()["total_count"]
 
@@ -47,7 +56,7 @@ def get_contents_paginated(page: int = 1, limit: int = 12) -> dict:
             ORDER BY created_at DESC
             LIMIT %s OFFSET %s
             """,
-            (limit, offset),
+            (*where_params, limit, offset),
         )
         result = cursor.fetchall()
 
@@ -80,24 +89,68 @@ def get_contents_paginated(page: int = 1, limit: int = 12) -> dict:
         }
 
 
-def get_contents_by_ticker(ticker: str) -> list[dict]:
-    """특정 티커 관련 콘텐츠 조회"""
+def get_content_mention_summary(ticker: str, days: int = 7) -> dict:
+    """특정 종목의 최근 콘텐츠 여론 요약 — 건수·채널 수·플랫폼 분포·평균 감성·방향(stance) 분포.
+
+    목록을 페이지로 자르면 "그래서 여론이 어느 쪽인가"를 첫 화면에서 알 수 없다. 그 한 줄을
+    집계로 낸다. 방향은 `stock_calls` 안에서 **이 종목 항목만** 골라 센다 —
+    한 콘텐츠가 여러 종목을 다루고 종목마다 방향이 다르다.
+    """
     with get_db() as (conn, cursor):
         cursor.execute(
-            """
-            SELECT * FROM content_analysis
-            WHERE created_at >= NOW() - INTERVAL 7 DAY
+            f"""
+            SELECT source_name, platform, sentiment_score, stock_calls, created_at
+            FROM content_analysis
+            WHERE created_at >= NOW() - INTERVAL {int(days)} DAY
               AND related_tickers LIKE %s
             ORDER BY created_at DESC
             """,
             (f"%{ticker}%",),
         )
-        results = cursor.fetchall()
-        for row in results:
-            if isinstance(row["created_at"], datetime):
-                row["created_at"] = row["created_at"].isoformat()
-            _parse_json_columns(row)
-        return results
+        rows = cursor.fetchall()
+
+    stance = {"호재": 0, "악재": 0, "중립": 0}
+    platform = {"youtube": 0, "telegram": 0}
+    channels: set[str] = set()
+    scores: list[int] = []
+    latest = None
+
+    for row in rows:
+        if row.get("source_name"):
+            channels.add(row["source_name"])
+        if row.get("platform") in platform:
+            platform[row["platform"]] += 1
+        if row.get("sentiment_score") is not None:
+            scores.append(int(row["sentiment_score"]))
+        created = row.get("created_at")
+        if latest is None and created is not None:
+            latest = created.isoformat() if isinstance(created, datetime) else str(created)
+
+        raw = row.get("stock_calls")
+        calls = raw
+        if isinstance(raw, str) and raw:
+            try:
+                calls = json.loads(raw)
+            except Exception:
+                calls = []
+        for call in calls or []:
+            if not isinstance(call, dict):
+                continue
+            if (call.get("ticker") or "").split(".")[0] != ticker:
+                continue
+            key = call.get("stance") if call.get("stance") in stance else "중립"
+            stance[key] += 1
+
+    return {
+        "ticker": ticker,
+        "days": days,
+        "total": len(rows),
+        "channels": len(channels),
+        "platform": platform,
+        "avg_sentiment": round(sum(scores) / len(scores)) if scores else None,
+        "stance": stance,
+        "latest_at": latest,
+    }
 
 
 def is_content_processed(external_id: str) -> bool:

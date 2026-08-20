@@ -2,6 +2,7 @@ import { SectorReport } from "@/types";
 import { DateStepper, formatReportDate } from "@/components/pick/DateStepper";
 import { PickList } from "@/components/pick/PickList";
 import { SeedAllocator } from "@/components/pick/SeedAllocator";
+import { StockLink } from "@/components/ui/stock-link";
 import {
   apiFetch,
   getReportDates,
@@ -219,9 +220,12 @@ function SectorSection({ sectors }: { sectors: SectorReport[] }) {
                       key={stk.stk_cd}
                       className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium dark:bg-slate-800"
                     >
-                      <span className="text-slate-700 dark:text-slate-300">
+                      <StockLink
+                        code={stk.stk_cd}
+                        className="text-slate-700 dark:text-slate-300"
+                      >
                         {stk.stk_nm}
-                      </span>
+                      </StockLink>
                       <span
                         className={
                           stkUp

@@ -600,3 +600,57 @@ export interface MacroEvent {
 export interface MacroEventsResponse {
   events: MacroEvent[];
 }
+
+// ── 종목 상시 페이지 (`/stocks/{ticker}`) ──
+// 헤더 한 줄을 채우는 프로필. 유니버스 밖 종목에도 같은 헤더를 내기 위해 키움 TR 한 번으로 온다
+// (/api/stock-profile/{ticker}). name 은 표시용 정식 종목명(콘텐츠 매칭용 별칭이 아니다).
+export interface StockProfile {
+  ticker: string;
+  name: string;
+  price: number;
+  change: number;
+  change_percent: number;
+  open: number;
+  high: number;
+  low: number;
+  volume: number;
+  market_cap: number;          // 원
+  per: number;
+  pbr: number;
+  high_1y: number;             // 250거래일 최고가
+  low_1y: number;
+  high_1y_gap_pct: number;     // 현재가의 1년 최고가 대비 위치(%) — 음수면 그만큼 아래
+  foreign_rate: number;        // 외국인 소진율(%)
+  error?: string;
+}
+
+// /api/stock-history/{ticker} — 일봉 OHLCV (value = 거래대금, 원)
+export interface StockCandle {
+  time: string;                // YYYY-MM-DD
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  value: number;
+}
+
+// /api/contents/mention-summary — 종목 여론 요약(최근 N일 집계)
+export interface ContentMentionSummary {
+  ticker: string;
+  days: number;
+  total: number;
+  channels: number;
+  platform: { youtube: number; telegram: number };
+  avg_sentiment: number | null;
+  stance: { 호재: number; 악재: number; 중립: number };
+  latest_at: string | null;
+}
+
+// /api/news/{ticker} — total 은 limit 이전 총건수(목록이 잘렸는지 화면이 알아야 한다)
+export interface NewsMentionResponse {
+  success: boolean;
+  data: NewsMentionItem[];
+  total?: number;
+  days?: number;
+}

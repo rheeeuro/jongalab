@@ -7,7 +7,7 @@ repository 패키지 — 기존 import 호환을 위한 재-export
 
 from core.repository.content import (
     get_contents_paginated,
-    get_contents_by_ticker,
+    get_content_mention_summary,
     is_content_processed,
     mark_content_skipped,
     bump_analysis_timeout,
@@ -26,6 +26,7 @@ from core.repository.news import (
     get_today_news_count_by_stock,
     get_today_news_stats_by_stock,
     get_today_news_by_stock,
+    count_news_by_stock,
     get_news_heat,
     delete_old_news_mentions,
 )

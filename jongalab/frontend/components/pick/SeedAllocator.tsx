@@ -3,6 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Wallet } from "lucide-react";
 import { StockReport } from "@/types";
+import { StockLink } from "@/components/ui/stock-link";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -325,9 +326,12 @@ function AllocationRow({
     <li className="flex items-center justify-between gap-3 py-2.5">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="truncate text-sm font-extrabold text-slate-900 dark:text-slate-100">
+          <StockLink
+            code={r.stock_code}
+            className="truncate text-sm font-extrabold text-slate-900 dark:text-slate-100"
+          >
             {r.stock_name}
-          </span>
+          </StockLink>
           <span className="shrink-0 text-[10px] font-bold text-slate-400">
             {r.stock_code}
           </span>

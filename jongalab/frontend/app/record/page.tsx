@@ -193,6 +193,7 @@ export default async function ReportsArchivePage({
         dateStr: cell.dateStr,
         isToday: cell.dateStr === todayStr,
         buyStock: cell.pick?.stock_name ?? "",
+        buyCode: cell.pick?.stock_code ?? "",
         themes: (topThemes[cell.dateStr] ?? []).slice(0, 3),
         gap:
           gap && gap.total > 0

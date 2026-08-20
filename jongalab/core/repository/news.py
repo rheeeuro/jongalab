@@ -168,16 +168,24 @@ def get_today_news_stats_by_stock(stock_code: str) -> dict:
     }
 
 
-def get_today_news_by_stock(stock_code: str, limit: int = 15) -> list[dict]:
-    """오늘 수집된 특정 종목의 뉴스 헤드라인 목록 (최신순, 표시·요약용)."""
+def get_today_news_by_stock(stock_code: str, limit: int = 15, days: int = 1) -> list[dict]:
+    """특정 종목의 뉴스 헤드라인 목록 (최신순, 표시·요약용).
+
+    `days=1`(기본)은 오늘 하루 — 종가베팅 워커가 쓰는 기준이다. 상시 종목 페이지는 장 마감 후·주말에
+    오늘 뉴스가 0건이라 화면이 비므로 `days` 를 늘려 최근 며칠을 함께 받는다(총건수는 `count_news_by_stock`).
+    """
     code = stock_code.split(".")[0].split("_")[0]
     src_sql, src_params = _source_filter("text")
+    day_sql = (
+        "DATE(created_at) = CURDATE()" if int(days) <= 1
+        else f"created_at >= CURDATE() - INTERVAL {int(days) - 1} DAY"
+    )
     with get_db() as (conn, cursor):
         cursor.execute(
             f"""
             SELECT headline, source_url, channel_name, created_at
             FROM news_mention
-            WHERE ticker = %s AND DATE(created_at) = CURDATE(){src_sql}
+            WHERE ticker = %s AND {day_sql}{src_sql}
             ORDER BY created_at DESC
             LIMIT %s
             """,
@@ -188,6 +196,26 @@ def get_today_news_by_stock(stock_code: str, limit: int = 15) -> list[dict]:
             if isinstance(row.get("created_at"), datetime):
                 row["created_at"] = row["created_at"].isoformat()
         return results
+
+
+def count_news_by_stock(stock_code: str, days: int = 1) -> int:
+    """같은 조건의 뉴스 총건수 — 목록이 `limit` 에 걸렸는지 화면이 알 수 있게 한다."""
+    code = stock_code.split(".")[0].split("_")[0]
+    src_sql, src_params = _source_filter("text")
+    day_sql = (
+        "DATE(created_at) = CURDATE()" if int(days) <= 1
+        else f"created_at >= CURDATE() - INTERVAL {int(days) - 1} DAY"
+    )
+    with get_db() as (conn, cursor):
+        cursor.execute(
+            f"""
+            SELECT COUNT(*) AS c FROM news_mention
+            WHERE ticker = %s AND {day_sql}{src_sql}
+            """,
+            (code, *src_params),
+        )
+        row = cursor.fetchone()
+        return int(row["c"]) if row else 0
 
 
 def get_news_since(stock_code: str, since_dt: datetime, limit: int = 30) -> list[dict]:

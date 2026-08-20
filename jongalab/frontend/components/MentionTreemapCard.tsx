@@ -2,7 +2,9 @@
 
 import { MentionStats } from "@/types";
 import { Flame } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useMemo } from "react";
+import { stockCode } from "@/components/ui/stock-link";
 import { ResponsiveContainer, Treemap, Tooltip } from "recharts";
 
 interface TreemapNode {
@@ -71,6 +73,7 @@ function sentimentDot(score: number | null | undefined): string {
 
 function TreemapContent(props: ContentProps) {
   const { x = 0, y = 0, width = 0, height = 0, depth = 0, name, ticker, avgSentiment, fill, stroke } = props;
+  const router = useRouter();
 
   if (depth === 1) {
     // 섹터 컨테이너 — 진한 외곽선만 (속은 children이 덮음)
@@ -95,8 +98,13 @@ function TreemapContent(props: ContentProps) {
     const tileStroke = stroke || "#fff";
     const showLabel = width > 50 && height > 28;
     const dotR = Math.min(5, Math.max(3, width / 30));
+    // 타일 = 종목 하나. SVG 라 `Link` 를 쓸 수 없어 클릭으로 종목 페이지로 보낸다(코드 없으면 그대로).
+    const code = stockCode(ticker);
     return (
-      <g>
+      <g
+        onClick={code ? () => router.push(`/stocks/${code}`) : undefined}
+        style={code ? { cursor: "pointer" } : undefined}
+      >
         <rect
           x={x}
           y={y}
@@ -302,7 +310,9 @@ export function MentionTreemapCard({ stats }: { stats: MentionStats | null }) {
             <span className="flex items-center gap-1">
               <span className="inline-block w-2.5 h-2.5 rounded-full bg-blue-600" /> 매도 우세
             </span>
-            <span className="ml-auto opacity-60">우상단 점이 평균 감성을 나타냅니다</span>
+            <span className="ml-auto opacity-60">
+              우상단 점이 평균 감성 · 타일을 누르면 종목 페이지로 가요
+            </span>
           </div>
         </>
       )}

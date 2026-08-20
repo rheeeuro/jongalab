@@ -51,8 +51,9 @@ export function gapBasePrice(r: StockReport): number {
   return ratio ? Math.round(r.current_price / (1 + ratio)) : r.current_price;
 }
 
-/** 다음 거래일 아침 결과 — 정규장(KRX)이 있으면 그쪽, 없으면 장 시작 전(NXT). */
-function morningResult(r: StockReport): { venue: string; pct: number; price: number } | null {
+/** 다음 거래일 아침 결과 — 정규장(KRX)이 있으면 그쪽, 없으면 장 시작 전(NXT).
+ *  이 우선순위를 화면마다 다르게 정하면 같은 리포트가 화면마다 다른 결과를 낸다. */
+export function morningResult(r: StockReport): { venue: string; pct: number; price: number } | null {
   if (typeof r.gap_krx_pct === 'number' && r.gap_krx_price != null) {
     return { venue: '정규장', pct: r.gap_krx_pct, price: r.gap_krx_price };
   }

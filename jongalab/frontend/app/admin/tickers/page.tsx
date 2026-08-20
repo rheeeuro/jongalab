@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { TickerDictionary } from "@/types";
 import { Badge } from "@/components/ui/badge";
+import { StockLink } from "@/components/ui/stock-link";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -347,9 +348,11 @@ export default function TickerDictionaryPage() {
                           {item.company_name}
                         </td>
                         <td className="p-4">
-                          <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded font-mono text-slate-700 dark:text-slate-300">
-                            {item.ticker_symbol}
-                          </code>
+                          <StockLink code={item.ticker_symbol} className="no-underline">
+                            <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded font-mono text-slate-700 dark:text-slate-300 underline decoration-slate-300 decoration-dotted underline-offset-2 dark:decoration-slate-600">
+                              {item.ticker_symbol}
+                            </code>
+                          </StockLink>
                         </td>
                         <td className="p-4 text-xs text-slate-600 dark:text-slate-300">
                           {item.sector ? (

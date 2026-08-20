@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
+import { StockLink } from "@/components/ui/stock-link";
 
 export type CalendarGap = { wins: number; losses: number; total: number };
 
@@ -15,6 +16,7 @@ export type CalendarCellData = {
   dateStr: string;
   isToday: boolean;
   buyStock: string;
+  buyCode: string;
   themes: string[];
   gap: CalendarGap | null;
   events: CalendarEvent[];
@@ -142,9 +144,14 @@ export function ReportCalendarGrid({
               <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-extrabold text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
                 매수
               </span>
-              <span className="text-sm font-extrabold text-slate-900 dark:text-slate-100">
+              {/* 달력 셀(데스크탑)은 `button` 이라 링크를 넣을 수 없어, 이 패널의 종목명이
+                  종목 페이지로 가는 유일한 길이다(날짜 리포트는 셀 클릭·아래 버튼이 담당). */}
+              <StockLink
+                code={selectedCell.buyCode}
+                className="text-sm font-extrabold text-slate-900 dark:text-slate-100"
+              >
                 {selectedCell.buyStock}
-              </span>
+              </StockLink>
             </div>
           )}
 
