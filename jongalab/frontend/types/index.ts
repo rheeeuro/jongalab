@@ -299,7 +299,10 @@ export interface NewsStreamItem {
 export interface NewsStreamResponse {
   success: boolean;
   data: NewsStreamItem[];
-  total: number;        // 그 날 전체 기사 수 (페이지가 아니라 전체)
+  // ⚠️ 지금 조건(hide_price·q·ticker)으로 **나열되는** 기사 수다. '그 날 전체'가 아니다 —
+  // 화면 헤더·'더 보기' 카운터·실제 표시 건수를 한 수로 맞추려고 서버가 거르고 센다.
+  total: number;
+  price_total?: number; // 숨긴 시세 기사 수 (토글 라벨용)
   has_more: boolean;
 }
 

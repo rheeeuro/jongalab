@@ -8,7 +8,7 @@
    지키던 게이트를 우회하는 두 번째 뉴스 유입로가 생긴다. 재료 집계가 필요하면
    `repository/news.py` 를 쓴다 — 그쪽은 소스 필터를 전부 통과한다.
 
-news_mention 과 달리 **기사 1행**이라 화면 페이징이 SQL 한 번으로 정확하다
+news_mention 과 달리 **기사 1행**이라 그 날 기사 수가 곧 행 수다
 (news_mention 은 '헤드라인 × 종목' 이라 `get_news_stream` 이 파이썬에서 다시 접어야 했다).
 """
 import json
@@ -50,31 +50,45 @@ def save_sec_news(rows: list[dict]) -> int:
     return inserted
 
 
-def get_sec_news_stream(
-    date: str, limit: int = 40, offset: int = 0
-) -> tuple[list[dict], int]:
-    """그 날 증권 기사를 최신순 반환 (뉴스 탭 헤드라인 스트림).
+def get_sec_news_day(
+    date: str,
+    q: str | None = None,
+    ticker: str | None = None,
+    cap: int = 2000,
+) -> list[dict]:
+    """그 날 증권 기사를 **필터 적용해 전부** 최신순 반환 (뉴스 탭 헤드라인 스트림).
 
-    반환: (기사 목록, 그 날 전체 기사 수). 목록 항목은 `get_news_stream` 과 **같은 shape**
-    이라 화면(NewsStream)·타입(NewsStreamItem)은 소스가 바뀐 걸 모른다:
+    페이징을 SQL 에서 하지 않는다 — 화면이 시세 기사를 기본으로 숨기고 그 판별은 파이썬
+    정규식(`is_price_report`)이라 SQL 이 세지 못한다. LIMIT 을 걸면 총계·'더 보기' 카운터·
+    화면 건수가 서로 다른 수가 된다. 하루 ~1,000건이라 한 날을 통째로 읽어도 부담이 없고,
+    그러면 세 숫자가 같은 모집단에서 나온다. 페이지 자르기는 호출부(라우터)가 한다.
+
+    `q` 는 제목 부분 일치, `ticker` 는 종목 칩(JSON) 포함 여부다. `cap` 은 폭주 방어용 상한.
+
+    목록 항목은 `get_news_stream` 과 **같은 shape** 이라 화면(NewsStream)·타입
+    (NewsStreamItem)은 소스가 바뀐 걸 모른다:
       {headline, source_url, channel_name, created_at(ISO), stocks: [{ticker, name}]}
     `channel_name` 에 언론사를, `created_at` 에 발행 시각을 싣는다 — 화면이 이미 그 두
     필드를 발행처·시각으로 읽고 있다(lib/news.ts splitHeadlineMeta).
     """
+    where = ["DATE(published_at) = %s"]
+    params: list = [date]
+    if q and q.strip():
+        where.append("headline LIKE %s")
+        params.append(f"%{_escape_like(q.strip())}%")
+    if ticker and ticker.strip():
+        # tickers 는 [{"ticker","name"}] JSON 이라 종목코드 문자열이 그대로 들어 있다.
+        where.append("tickers LIKE %s")
+        params.append(f'%"{_escape_like(ticker.strip())}"%')
+
     with get_db() as (conn, cursor):
         cursor.execute(
-            "SELECT COUNT(*) AS total FROM sec_news WHERE DATE(published_at) = %s",
-            (date,),
-        )
-        total = int((cursor.fetchone() or {}).get("total") or 0)
-
-        cursor.execute(
-            """SELECT headline, source_url, press, published_at, tickers
+            f"""SELECT headline, source_url, press, published_at, tickers
                  FROM sec_news
-                WHERE DATE(published_at) = %s
+                WHERE {" AND ".join(where)}
                 ORDER BY published_at DESC, id DESC
-                LIMIT %s OFFSET %s""",
-            (date, int(limit), int(offset)),
+                LIMIT %s""",
+            (*params, int(cap)),
         )
         rows = cursor.fetchall()
 
@@ -96,7 +110,12 @@ def get_sec_news_stream(
                           if isinstance(published_at, datetime) else published_at,
             "stocks": raw if isinstance(raw, list) else [],
         })
-    return out, total
+    return out
+
+
+def _escape_like(value: str) -> str:
+    """LIKE 패턴 이스케이프 — 사용자 검색어의 `%`·`_` 가 와일드카드로 새지 않게."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def delete_old_sec_news(days: int = 30) -> int:

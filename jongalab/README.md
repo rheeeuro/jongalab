@@ -88,9 +88,9 @@ jongalab/
 
 | 엔드포인트 | 계층 | 내용 |
 |---|---|---|
-| `/api/news/heat` | 집계(count) | 뉴스가 몰린 종목. 정렬은 건수가 아니라 **자기 기저 대비 배수**(`surprise` = 건수 ÷ 직전 7일 일평균, 분모 하한 1) — 건수 정렬은 시총 랭킹이 된다. `?date=` 면 그 날 하루, 없으면 최근 `?hours=` |
+| `/api/news/heat` | 집계(count) | 뉴스가 몰린 종목. 기본 정렬은 건수가 아니라 **자기 기저 대비 배수**(`surprise` = 건수 ÷ 직전 7일 일평균, 분모 하한 1) — 건수 정렬만 쓰면 시총 랭킹이 된다. `?date=` 면 그 날 하루, 없으면 최근 `?hours=`. 하한·정렬축은 호출부가 고른다: `min_count`(노이즈 하한) · `min_surprise`(평소 수준 제외) · `sort=count`(**`min_surprise` 와 짝지어** 쓴다 — 뉴스 탭 사이드 랭킹이 이 조합) |
 | `/api/news/materials?date=` | 집계 | 그 날 뉴스가 있던 유니버스 종목의 재료 라벨(비선정 포함 — 뉴스 화면의 축은 '그 날 뜬 재료') |
-| `/api/news/stream?date=&limit=&offset=` | **표시(sec_news)** | 그 날 증권 섹션 기사 최신순 + `total`/`has_more`. 종목 칩은 사명 매칭 결과라 **없는 기사가 많다(실측 64% — 시황·환율·정책)** |
+| `/api/news/stream?date=&limit=&offset=` | **표시(sec_news)** | 그 날 증권 섹션 기사 최신순 + `total`/`price_total`/`has_more`. **거르기·세기를 여기서 한다** — `hide_price`(기본 True, 시세 기사 제외) · `q`(제목 검색) · `ticker`(종목 칩). `total` 은 '그 날 전체'가 아니라 **지금 조건으로 나열되는 수**다(화면 헤더·'더 보기' 카운터·표시 건수를 한 수로 맞춘다). 종목 칩은 사명 매칭 결과라 **없는 기사가 많다(실측 64% — 시황·환율·정책)** |
 | `/api/news/{ticker}` | 표시(text) | 종목별 당일 헤드라인 |
 | `/api/market-index-history/{symbol}?range=` | — | 지수/심볼 캔들 히스토리 |
 | `/api/macro-events` | — | `?days=`(향후) / `?month=YYYY-MM`(그 달 전체·과거 포함) |

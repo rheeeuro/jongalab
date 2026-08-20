@@ -29,7 +29,7 @@ export const metadata: Metadata = {
   title: "뉴스 - 오늘의 종목 재료",
   description:
     "그날 종목이 왜 움직였는지, 뉴스에서 찾은 이유(재료)와 기사 제목을 모아 봐요. 유튜브·텔레그램에서 무슨 얘기가 나왔는지도 정리해 줘요.",
-  // ?view=·?date=·?page= 변형은 기본 경로로 통합해 중복 색인을 방지한다.
+  // ?view=·?date=·?page=·?ns= 변형은 기본 경로로 통합해 중복 색인을 방지한다.
   alternates: { canonical: "/news" },
 };
 
@@ -39,6 +39,10 @@ type View = "news" | "content";
 
 const STREAM_PAGE = 40;
 const BUZZ_LIMIT = 15;
+/** 사이드 랭킹 노이즈 하한 — 2건짜리 종목이 목록을 채우면 '뉴스가 몰린' 랭킹이 아니다. */
+const BUZZ_MIN_COUNT = 3;
+/** 평소 수준(1.5배 미만)인 종목은 뺀다 — 안 빼면 건수 정렬이 시총 랭킹이 된다. */
+const BUZZ_MIN_SURPRISE = 1.5;
 const CONTENT_PAGE = 12;
 
 async function getMaterials(date: string): Promise<NewsMaterialRow[]> {
@@ -49,22 +53,42 @@ async function getMaterials(date: string): Promise<NewsMaterialRow[]> {
   return res?.data ?? [];
 }
 
+/**
+ * 사이드 랭킹 데이터 — **배수로 걸러 건수로 정렬**한다.
+ * 배수 정렬만 쓰면 분모 하한 탓에 직전 7일 0건인 2~3건 종목이 상단을 채우고 그 날 기사가
+ * 가장 많은 종목이 아래로 밀린다(실측·근거: docs/history/frontend-ui.md 2026-08-20).
+ */
 async function getHeat(date: string): Promise<NewsHeatItem[]> {
   const res = await apiFetch<{ success: boolean; data: NewsHeatItem[] } | null>(
-    `/api/news/heat?date=${date}&limit=${BUZZ_LIMIT}`,
+    `/api/news/heat?date=${date}&limit=${BUZZ_LIMIT}` +
+      `&min_count=${BUZZ_MIN_COUNT}&min_surprise=${BUZZ_MIN_SURPRISE}&sort=count`,
     null,
   );
   return res?.data ?? [];
 }
 
+/** 헤드라인 첫 페이지 — 시세 기사 제외는 **서버가** 한다(총계와 표시 건수를 맞추려고). */
 async function getStream(
   date: string,
-): Promise<{ items: NewsStreamItem[]; total: number; hasMore: boolean }> {
+  ticker?: string,
+  limit: number = STREAM_PAGE,
+): Promise<{
+  items: NewsStreamItem[];
+  total: number;
+  priceTotal: number;
+  hasMore: boolean;
+}> {
   const res = await apiFetch<NewsStreamResponse | null>(
-    `/api/news/stream?date=${date}&limit=${STREAM_PAGE}`,
+    `/api/news/stream?date=${date}&limit=${limit}&hide_price=1` +
+      (ticker ? `&ticker=${ticker}` : ""),
     null,
   );
-  return { items: res?.data ?? [], total: res?.total ?? 0, hasMore: Boolean(res?.has_more) };
+  return {
+    items: res?.data ?? [],
+    total: res?.total ?? 0,
+    priceTotal: res?.price_total ?? 0,
+    hasMore: Boolean(res?.has_more),
+  };
 }
 
 async function getContents(
@@ -95,6 +119,7 @@ function todayStr(): string {
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TICKER_RE = /^[0-9A-Za-z]{4,12}$/;
 
 /**
  * 뉴스 탭 — **뉴스**(기사 기반 재료)와 **콘텐츠**(유튜브·텔레그램 분석)를 세그먼트로 나눈다.
@@ -103,8 +128,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  *
  * 뉴스 뷰는 그 날의 뉴스판을 **요약 → 종목별 재료 → 원문 헤드라인** 순으로 보여준다.
  *
- * 구성 세 층: **요약 타일**(`NewsSummaryStrip`) → **종목별 재료 단일 목록 + 필터/정렬**
+ * 구성 세 층: **요약 카드**(`NewsSummaryStrip`) → **종목별 재료 단일 목록 + 필터/정렬**
  * (`MaterialBoard`) → **원문 헤드라인 스트림**(`NewsStream`). 날짜 이동은 `NewsDateNav`.
+ *   · 모바일 순서는 재료 목록 → 사이드 랭킹 → 헤드라인이다. 랭킹을 스트림 뒤에 두면
+ *     40건 목록을 지나야 나와서 사실상 도달하지 못한다(그래서 그리드 배치를 명시한다).
  *   · 재료를 등급 그룹으로 미리 가르지 않는다 — 절반 이상이 '판정 보류'로 떨어져 가장 큰 그룹이
  *     "판정 못 함"이 된다. 등급은 필터 칩으로만 쓴다.
  *   · 후보 밖 종목은 `NewsBuzzRail`(뉴스량 랭킹)이 덮는다. 재료 목록은 후보 종목만 다뤄서
@@ -112,8 +139,8 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  *   · 헤드라인 소스는 **네이버 증권 섹션**(`sec_news`)이다. 종합 속보 채널을 모집단으로 쓰면
  *     주식과 무관한 기사가 섞인다(sql/49 — 라벨·rule 표본은 그대로 `news_mention`).
  *
- * ⚠️ 지속성 라벨은 **candidate rule 표본(관찰 전용·미검증)**이다. 면책 문구는 모바일 첫 화면을
- * 먹지 않도록 접이식 안내에 두되, 문구 자체는 줄이지 않는다.
+ * ⚠️ 지속성 라벨은 **candidate rule 표본(관찰 전용·미검증)**이다. 면책 문구는 등급 칩이 보이는
+ * 자리(`MaterialBoard` 목록 위)의 접이식 안내로 두되, 문구 자체는 줄이지 않는다.
  *
  * 재설계 경위·실측 수치: docs/history/frontend-ui.md · docs/history/news-pipeline.md
  *
@@ -122,27 +149,29 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export default async function NewsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; date?: string; page?: string }>;
+  searchParams: Promise<{
+    view?: string;
+    date?: string;
+    page?: string;
+    ns?: string;
+  }>;
 }) {
   const sp = await searchParams;
   const view: View = sp.view === "content" ? "content" : "news";
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-5 pb-24 sm:px-6 sm:py-8 lg:pb-10">
-      <header>
-        <div className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
-          <Newspaper className="h-4 w-4 text-emerald-500" />
-          <span>오늘의 재료</span>
+      {/* 첫 화면(375×667)에서 크롬이 콘텐츠를 밀어내지 않게 헤더를 눌러 둔다 — 눈썹 줄
+          ('오늘의 재료')은 h1·부제와 겹쳐 지웠고, 세그먼트는 sm 부터 h1 과 같은 줄에 앉는다. */}
+      <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl dark:text-slate-100">
+            뉴스
+          </h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            기사에서 찾은 종목이 오를 이유(재료)와, 유튜브·텔레그램 이야기를 나눠서 보여줘요.
+          </p>
         </div>
-        <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 sm:text-4xl dark:text-slate-100">
-          뉴스
-        </h1>
-        <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
-          기사에서 찾은 종목이 오를 이유(재료)와, 유튜브·텔레그램 이야기를 나눠서 보여줘요.
-        </p>
-      </header>
-
-      <div className="mt-4">
         <ViewSegment
           active={view}
           options={[
@@ -155,11 +184,11 @@ export default async function NewsPage({
             },
           ]}
         />
-      </div>
+      </header>
 
       <div className="mt-5">
         {view === "news" ? (
-          <NewsView date={sp.date} />
+          <NewsView date={sp.date} streamTicker={sp.ns} />
         ) : (
           <ContentView page={Number(sp.page) || 1} />
         )}
@@ -168,54 +197,55 @@ export default async function NewsPage({
   );
 }
 
-async function NewsView({ date: requestedDate }: { date?: string }) {
+async function NewsView({
+  date: requestedDate,
+  streamTicker,
+}: {
+  date?: string;
+  /** 재료 목록에서 '이 종목 기사만' 으로 넘어온 종목코드 (`?ns=`) */
+  streamTicker?: string;
+}) {
   const dates = await getReportDates();
   const requested =
     requestedDate && DATE_RE.test(requestedDate) ? requestedDate : null;
   // 기본은 '가장 최근 리포트일'이다. 오늘로 고정하면 휴장일·장 시작 전에 통째로 빈 화면이 된다.
   const date = requested ?? dates[0] ?? todayStr();
+  const ticker = streamTicker && TICKER_RE.test(streamTicker) ? streamTicker : undefined;
 
-  const [rows, heat, stream] = await Promise.all([
+  const [rows, heat, stream, dayCount] = await Promise.all([
     getMaterials(date),
     getHeat(date),
-    getStream(date),
+    getStream(date, ticker),
+    // 요약 카드의 기사 수는 **그 날 전체**여야 한다 — `?ns=` 필터는 스트림에만 걸리는데
+    // 같은 응답을 요약에 재사용하면 "모아 온 기사 9건" 처럼 하루 규모가 종목 규모로 줄어든다.
+    ticker ? getStream(date, undefined, 1) : null,
   ]);
+  const dayStream = dayCount ?? stream;
 
   const isToday = date === todayStr();
+  const tickerLabel = rows.find((r) => r.stock_code === ticker)?.stock_name;
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-          {isToday ? "오늘" : formatKoDate(date)} 종목이 움직인 이유와 모아 온 기사예요
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-bold text-slate-400 dark:text-slate-500">
+          {isToday ? "오늘" : formatKoDate(date)} 기준
         </p>
         <NewsDateNav date={date} dates={dates} />
       </div>
 
-      {/* 면책은 접이식으로 — 첫 화면을 먹지 않되 '미검증'은 닫힌 상태에서도 보이게 한다.
-          details/summary(CSS-only)라 서버 컴포넌트를 유지한다. */}
-      <details className="mt-3 rounded-2xl bg-white px-4 py-3 dark:bg-slate-900/60">
-        <summary className="cursor-pointer list-none text-xs font-bold text-slate-400 transition-colors hover:text-slate-600 dark:hover:text-slate-300">
-          ⚠️ 재료 등급은 아직 검증되지 않은 실험이에요 — 어떻게 정하나요?
-        </summary>
-        <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-          후보 종목에 뉴스가 있으면 AI가 그 내용을 읽고 <b>이 이야기가 더 이어질지</b> 판단해요.
-          앞으로 남은 일정이 있고 결과가 아직 안 나왔으면 &lsquo;연속&rsquo;, 결과가 이미 다
-          나오고 남은 일정도 없으면 &lsquo;소진&rsquo;이에요. 무엇 때문에 움직였는지 딱 집을 수
-          없으면 억지로 고르지 않고 비워 둬요.
-          <br />
-          <span className="font-bold text-slate-400 dark:text-slate-500">
-            이 등급은 &ldquo;사라는 신호&rdquo;가 아니고, 실제 매매에도 쓰지 않아요(성적만 기록하고 있어요).
-          </span>
-        </p>
-      </details>
-
-      <div className="mt-5 mb-6">
-        <NewsSummaryStrip rows={rows} articleCount={stream.total} />
+      <div className="mt-3 mb-6">
+        <NewsSummaryStrip
+          rows={rows}
+          articleCount={dayStream.total}
+          priceCount={dayStream.priceTotal}
+        />
       </div>
 
+      {/* 자리를 명시한다 — 자동 배치에 맡기면 사이드 레일의 grid area 가 1행으로 잘려
+          sticky 가 재료 목록 높이에서 멈춘다. 모바일은 1열이라 DOM 순서대로 흐른다. */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-8">
-        <div className="min-w-0 space-y-8">
+        <div className="min-w-0 lg:col-start-1 lg:row-start-1">
           {rows.length === 0 ? (
             <p className="rounded-2xl bg-white p-6 text-center text-sm font-medium text-slate-400 dark:bg-slate-900/60">
               이 날은 뉴스가 붙은 후보 종목이 없어요.
@@ -223,18 +253,24 @@ async function NewsView({ date: requestedDate }: { date?: string }) {
           ) : (
             <MaterialBoard rows={rows} date={date} />
           )}
+        </div>
 
+        <aside className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:sticky lg:top-20 lg:self-start">
+          <NewsBuzzRail items={heat} date={date} />
+        </aside>
+
+        <div className="min-w-0 lg:col-start-1 lg:row-start-2">
           <NewsStream
             date={date}
             initial={stream.items}
             total={stream.total}
+            priceTotal={stream.priceTotal}
             hasMore={stream.hasMore}
+            ticker={ticker}
+            tickerLabel={tickerLabel}
+            clearTickerHref={`/news?date=${date}#headlines`}
           />
         </div>
-
-        <aside className="min-w-0 lg:sticky lg:top-20 lg:self-start">
-          <NewsBuzzRail items={heat} />
-        </aside>
       </div>
     </>
   );

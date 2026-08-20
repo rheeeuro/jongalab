@@ -309,7 +309,14 @@ def get_news_days_by_stocks(
 _SURPRISE_FLOOR = 1.0
 
 
-def get_news_heat(hours: int = 24, limit: int = 20, date: str | None = None) -> list[dict]:
+def get_news_heat(
+    hours: int = 24,
+    limit: int = 20,
+    date: str | None = None,
+    min_count: int = 1,
+    min_surprise: float = 0.0,
+    sort: str = "surprise",
+) -> list[dict]:
     """뉴스가 몰린 종목 순위 (홈 '오늘 새로 뜬 재료' 카드 + 뉴스 탭 사이드 랭킹).
 
     **정렬은 건수가 아니라 자기 기저 대비 배수(surprise)다.** 건수 랭킹은 사실상 시총
@@ -323,6 +330,14 @@ def get_news_heat(hours: int = 24, limit: int = 20, date: str | None = None) -> 
 
     유니버스에 든 종목이면 재료 지속성 라벨(durability/catalyst/summary)을 함께 실어
     카드가 '무슨 재료인지'까지 보여줄 수 있게 한다(유니버스 밖 종목은 NULL).
+
+    **하한·정렬축은 호출부가 고른다.** 배수 정렬만으로는 분모 하한(`_SURPRISE_FLOOR=1`) 탓에
+    직전 7일 0건인 2~3건 종목이 상단을 채우고, 그 날 기사가 가장 많은 종목은 아래로 밀린다.
+      · `min_count` — 이 건수 미만 제외(노이즈 하한)
+      · `min_surprise` — 이 배수 미만 제외("평소 수준"인 대형주 상시 노출을 막는다)
+      · `sort="count"` — 남은 종목을 건수 순으로. **`min_surprise` 와 짝지어 쓴다** —
+        단독으로 쓰면 예전에 기각된 시총 랭킹이 된다.
+    필터는 정렬·`limit` 자르기보다 **먼저** 걸어야 상한에 노이즈가 자리를 먹지 않는다.
     """
     src_sql, src_params = _source_filter("count")
     # 서브쿼리(기저)와 본 쿼리에 각각 별칭이 다른 같은 필터를 붙인다.
@@ -370,7 +385,14 @@ def get_news_heat(hours: int = 24, limit: int = 20, date: str | None = None) -> 
         row["in_universe"] = 1 if row.get("rank_no") is not None else 0
         row.pop("rank_no", None)
 
-    results.sort(key=lambda r: (-r["surprise"], -r["mention_count"], r["last_at"] or ""))
+    results = [
+        r for r in results
+        if int(r["mention_count"]) >= int(min_count) and r["surprise"] >= float(min_surprise)
+    ]
+    if sort == "count":
+        results.sort(key=lambda r: (-int(r["mention_count"]), -r["surprise"], r["last_at"] or ""))
+    else:
+        results.sort(key=lambda r: (-r["surprise"], -r["mention_count"], r["last_at"] or ""))
     return results[:int(limit)]
 
 

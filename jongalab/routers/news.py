@@ -9,7 +9,7 @@ from datetime import datetime
 from fastapi import APIRouter, Query
 
 from core.news_material_judge import is_price_report
-from core.repository import get_news_heat, get_sec_news_stream, get_today_news_by_stock
+from core.repository import get_news_heat, get_sec_news_day, get_today_news_by_stock
 from core.repository.stock_report import get_news_material_rows
 
 router = APIRouter(prefix="/api/news", tags=["news"])
@@ -20,15 +20,30 @@ def get_news_heat_ranking(
     hours: int = Query(24, ge=1, le=168, description="집계 윈도우 (시간, date 미지정 시)"),
     limit: int = Query(20, ge=1, le=100, description="상위 종목 수"),
     date: str | None = Query(None, description="특정 날짜 하루 집계 YYYY-MM-DD (뉴스 탭)"),
+    min_count: int = Query(1, ge=1, le=100, description="이 건수 미만 종목 제외 (노이즈 하한)"),
+    min_surprise: float = Query(0.0, ge=0, le=100, description="이 배수 미만 종목 제외"),
+    sort: str = Query("surprise", pattern="^(surprise|count)$", description="정렬축"),
 ):
-    """뉴스가 몰린 종목 순위 — **자기 기저 대비 배수(surprise) 정렬**.
+    """뉴스가 몰린 종목 순위 — 기본은 **자기 기저 대비 배수(surprise) 정렬**.
 
-    건수 정렬은 시총 랭킹이 되어(대형주 상단 고정) 카드가 정보를 주지 못했다. 상세는
+    건수 정렬은 그것만 쓰면 시총 랭킹이 되어(대형주 상단 고정) 카드가 정보를 주지 못한다.
+    그래서 `sort=count` 는 **`min_surprise` 와 함께** 쓰는 조합을 전제로 한다 —
+    "평소보다 늘어난 종목만 남기고, 그 안에서 건수 순"(뉴스 탭 사이드 랭킹). 상세는
     core.repository.news.get_news_heat 주석 참조. 유니버스 종목이면 재료 라벨도 함께 온다.
     `date` 를 주면 그 날짜 하루 집계(뉴스 탭 날짜 이동), 없으면 최근 `hours` 시간(홈 카드).
     """
     try:
-        return {"success": True, "data": get_news_heat(hours=hours, limit=limit, date=date)}
+        return {
+            "success": True,
+            "data": get_news_heat(
+                hours=hours,
+                limit=limit,
+                date=date,
+                min_count=min_count,
+                min_surprise=min_surprise,
+                sort=sort,
+            ),
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -38,6 +53,9 @@ def get_news_headline_stream(
     date: str | None = Query(None, description="날짜 YYYY-MM-DD (기본: 오늘)"),
     limit: int = Query(40, ge=1, le=100, description="한 페이지 기사 수"),
     offset: int = Query(0, ge=0, description="건너뛸 기사 수 (더 보기)"),
+    q: str | None = Query(None, max_length=50, description="제목 검색어"),
+    ticker: str | None = Query(None, max_length=20, description="이 종목 칩이 붙은 기사만"),
+    hide_price: bool = Query(True, description="시세 기사 제외 (화면 기본값과 같다)"),
 ):
     """그 날 **증권 섹션 기사**를 최신순 반환 (뉴스 탭 헤드라인 스트림).
 
@@ -49,18 +67,29 @@ def get_news_headline_stream(
     화면만 건드리고 라벨·rule·veto 표본에는 닿지 않는다.
 
     각 기사에 `is_price_report`("급등/상한가/특징주" 류인가)를 실어 화면이 시세 기사를
-    기본으로 숨길 수 있게 한다 — 판별은 후속 재료 채점과 **같은 함수**.
+    구분할 수 있게 하고, **제외 자체는 여기서 한다**(`hide_price`, 기본 True). 화면이
+    받은 페이지에서 걸러내면 총계(그 날 전체)·'더 보기' 카운터·실제 표시 건수가 서로 다른
+    수가 되기 때문이다. `total` 은 **지금 조건으로 나열되는 기사 수**이고, 숨긴 시세 기사
+    수는 `price_total` 로 따로 준다. 판별은 후속 재료 채점과 **같은 함수**.
+
+    `q`(제목 검색)·`ticker`(종목 칩) 필터도 총계에 함께 반영된다 — 하루 545건을 '더 보기'로만
+    훑는 것 외에 방법이 없던 문제(2026-08-20 점검)를 여기서 받는다.
     """
     try:
         report_date = date or datetime.now().strftime("%Y-%m-%d")
-        items, total = get_sec_news_stream(report_date, limit=limit, offset=offset)
-        for it in items:
+        rows = get_sec_news_day(report_date, q=q, ticker=ticker)
+        for it in rows:
             it["is_price_report"] = is_price_report(it.get("headline") or "")
+        price_total = sum(1 for it in rows if it["is_price_report"])
+        listed = [it for it in rows if not it["is_price_report"]] if hide_price else rows
+        total = len(listed)
+        page = listed[offset:offset + limit]
         return {
             "success": True,
-            "data": items,
+            "data": page,
             "total": total,
-            "has_more": offset + len(items) < total,
+            "price_total": price_total,
+            "has_more": offset + len(page) < total,
         }
     except Exception as e:
         return {"success": False, "error": str(e)}

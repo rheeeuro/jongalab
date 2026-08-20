@@ -32,7 +32,7 @@ from core.repository.news import (
 
 from core.repository.sec_news import (
     save_sec_news,
-    get_sec_news_stream,
+    get_sec_news_day,
     delete_old_sec_news,
 )
 
