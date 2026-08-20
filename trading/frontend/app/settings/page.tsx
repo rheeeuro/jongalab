@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Save, RotateCcw, Loader2, ArrowLeft } from "lucide-react";
+import { Save, RotateCcw, Loader2, ArrowLeft, Clock } from "lucide-react";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -219,7 +219,9 @@ export default function RiskSettingsPage() {
           대시보드
         </Link>
         <h1 className="mt-2 text-xl font-bold sm:text-2xl">자동매매 설정</h1>
-        <p className="mt-1 text-sm text-slate-500">다음 집행부터 적용됩니다.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          다음 집행부터 적용됩니다. 시드 배율은 마감 시각이 있습니다(아래 참고).
+        </p>
       </div>
 
       {/* 화면 테마 */}
@@ -270,6 +272,34 @@ export default function RiskSettingsPage() {
         가용현금 기준 최초 시드에 곱하는 배율입니다(5% 단위, 0~100%). 레짐·거시·선물 감액보다 먼저 적용됩니다.
         예: 50% → 시드의 절반만 최초 투입. 100% 는 현행 동작(감액 없음).
       </p>
+
+      {/* 마감 시각 안내 — 배분 시점(창 시작)과 데드라인 재조회 사이에 창이 5분뿐이라
+          "언제까지 바꿔야 하나"를 값 바로 아래에서 알려준다. 시각은 signal_executor.VENUES 와 짝. */}
+      <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-900/20">
+        <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-800 dark:text-amber-300">
+          <Clock className="h-3.5 w-3.5 shrink-0" />
+          언제까지 바꿔야 하나
+        </p>
+        <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-amber-800/90 dark:text-amber-200/80">
+          <li>
+            <b>올릴 때</b> — KRX <b className="tabular-nums">15:10</b> / NXT{" "}
+            <b className="tabular-nums">19:40</b> 이전. 그 뒤엔 반영되지 않습니다(축소만 가능).
+          </li>
+          <li>
+            <b>줄일 때</b> — KRX <b className="tabular-nums">15:18</b> / NXT{" "}
+            <b className="tabular-nums">19:48</b> 까지. 확정된 수량을 비율만큼 깎습니다.
+          </li>
+          <li>
+            KRX <b className="tabular-nums">15:13~15:15</b> / NXT{" "}
+            <b className="tabular-nums">19:43~19:45</b> 는 피하세요 — 수량을 확정하는 중이라 반영
+            결과가 갈립니다.
+          </li>
+        </ul>
+        <p className="mt-1.5 text-[11px] leading-relaxed text-amber-700/80 dark:text-amber-200/60">
+          줄이는 비율은 <b>배분 시점 대비</b>입니다. 이미 50% 로 배분됐으면 50% 로 다시 저장해도
+          변화가 없고, 절반 더 줄이려면 25% 로 내려야 합니다.
+        </p>
+      </div>
 
       {/* 액션 — 모바일에서 풀폭 터치 타깃 */}
       <div className="mt-5 flex gap-2">

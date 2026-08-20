@@ -176,17 +176,17 @@ def _monitor_phase(now: datetime):
     """현재 시각이 어느 폴링 단계인지 — (phase, in_window). 평일만 가동.
 
     sell  = 매도 모니터(monitor 워커)   08:00~09:30
-    buy_krx = KRX 종가 매수(signal_executor --venue krx)  15:00~15:20
-    buy_nxt = NXT 종가 매수(signal_executor --venue nxt)  19:30~19:50
+    buy_krx = KRX 종가 매수(signal_executor --venue krx)  15:10~15:20
+    buy_nxt = NXT 종가 매수(signal_executor --venue nxt)  19:40~19:50
     """
     if now.weekday() >= 5:
         return None, False
     hm = (now.hour, now.minute)
     if (8, 0) <= hm <= (9, 30):
         return "sell", True
-    if (15, 0) <= hm <= (15, 20):
+    if (15, 10) <= hm <= (15, 20):
         return "buy_krx", True
-    if (19, 30) <= hm <= (19, 50):
+    if (19, 40) <= hm <= (19, 50):
         return "buy_nxt", True
     return None, False
 
@@ -195,7 +195,7 @@ def _monitor_phase(now: datetime):
 def monitor():
     """자동매매 폴링 모니터 상태 — '모니터' 탭 실시간 뷰.
 
-    매도 모니터(monitor, 08:00~09:30)와 매수 집행(signal_executor, KRX 15:00 / NXT 19:30)
+    매도 모니터(monitor, 08:00~09:30)와 매수 집행(signal_executor, KRX 15:10 / NXT 19:40)
     워커의 가동 여부(하트비트 기준)와 함께, 보유 포지션을 스탑선(settle_plan)·하드손절가
     (평단×(1-HARD_STOP_LOSS_PCT/100))로 평가하고, 폴링 활동 로그(매도 스탑·매수 집행)와
     최근 주문 로그를 묶어 반환한다.
@@ -349,7 +349,7 @@ def _keep_reason(stk_cd: str, futures_diag: dict | None, macro_diag: dict, m_kee
 def buy_preview(date: str | None = None):
     """오늘 매수 예정 종목 미리보기 (KRX/NXT 거래소별 시드 배분·예상 수량).
 
-    pending 시그널을 NXT 상장 여부로 KRX(15:00~15:20)/NXT(19:30~19:50) 윈도우에 나누고,
+    pending 시그널을 NXT 상장 여부로 KRX(15:10~15:20)/NXT(19:40~19:50) 윈도우에 나누고,
     가용현금(100stk_ord_alow_amt)을 거래소 점수비례로 분할해 seed_allocator 로 종목별 예상
     수량을 계산한다. signal_executor 와 동일 로직이지만 **읽기 전용** — DB/주문은 건드리지 않는다.
     가격·현금·NXT 여부는 호출 시점의 실시간 값이라 실제 집행 결과와 다를 수 있다(미리보기).
@@ -361,7 +361,7 @@ def buy_preview(date: str | None = None):
     trade_date = date or datetime.now().strftime("%Y%m%d")
     signals = signal_repo.get_pending_signals(trade_date)
     block = blocklist_repo.get_codes()
-    # 권리락 스킵도 executor 와 같이 반영한다 — 신호는 19:30 집행 전까지 pending 으로 남아 있어서
+    # 권리락 스킵도 executor 와 같이 반영한다 — 신호는 19:40 집행 전까지 pending 으로 남아 있어서
     # 여기서 빼지 않으면 "안 살 종목이 매수 예정에 뜬다"(권리락 종목 사례).
     ex_rights = get_next_session_ex_rights()
     # 레버리지 대체매수 — 대시보드는 실제 매수 대상인 ETF 로 미리보기 표시(executor 와 동일 치환).
@@ -423,8 +423,9 @@ def buy_preview(date: str | None = None):
     #    가격·현금·야간선물은 호출 시점 실시간값이라 실제 집행과 다를 수 있다(미리보기).
     venues = []
     now = datetime.now()
-    for exchange, want_nxt, window, deadline in (("KRX", False, "15:00~15:20", (15, 20)),
-                                                 ("NXT", True, "19:30~19:50", (19, 50))):
+    # 창 표기는 표시용 — 실제 집행 창의 단일 소스는 signal_executor.VENUES 다(바꿀 때 같이 맞출 것).
+    for exchange, want_nxt, window, deadline in (("KRX", False, "15:10~15:20", (15, 20)),
+                                                 ("NXT", True, "19:40~19:50", (19, 50))):
         # 데드라인이 지난 거래소는 오늘 집행되지 않는다 — 배분·게이트 조회를 건너뛰고 '집행 불가'로 표시.
         closed = now > datetime.strptime(trade_date, "%Y%m%d").replace(hour=deadline[0],
                                                                        minute=deadline[1])
@@ -534,7 +535,7 @@ def audit(limit: int = 50):
 
 def _trade_window(start: str, end: str) -> tuple[str, str]:
     """한 매매 사이클 시각 구간 (YYYYMMDDHHMMSS, 포함). 매수날≠매도날이면 매수날 15:00~매도날 10:00.
-    종가베팅은 오후(15:00 KRX/19:30 NXT) 매수·오전(08:05 NXT/09:05 KRX) 청산이라 이 구간이 한
+    종가베팅은 오후(15:10 KRX/19:40 NXT) 매수·오전(08:05 NXT/09:05 KRX) 청산이라 이 구간이 한
     사이클(매수→청산)을 딱 감싼다. 같은 종목을 여러 날 매매해도 인접 사이클이 섞이지 않는다.
     (이 구간 밖엔 종목별 감사 이벤트가 없어 로그도 동일하다.) 같은 날이면 그 날 전체."""
     if start == end:

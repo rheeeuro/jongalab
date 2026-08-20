@@ -74,10 +74,10 @@ trading/
 ```
 [jongalab closing_bet] → trade_signal(pending)
         │   ※ closing_bet 이 30분마다 재실행되며 후보에서 빠진 잔여 pending 을 expired 로 정리하므로
-        │     jongalab 쪽 veto 는 자금 경로 코드 없이 19:30 NXT 매수를 취소한다.
+        │     jongalab 쪽 veto 는 자금 경로 코드 없이 19:40 NXT 매수를 취소한다.
         │     KRX 15:20 기체결분은 되돌릴 수 없어 익일 news_guard 담당.
         │
-signal_executor (KRX 15:00 / NXT 19:30 창 시작)
+signal_executor (KRX 15:10 / NXT 19:40 창 시작 — 같은 분에 뜨는 closing_bet 회차 완료를 기다린다)
   · 블록리스트 제외 → 권리락 제외 → (레버리지 토글 on 이면 ETF 치환) → 거래소 분류 → 시드 산정
     → 최초 시드 배율(risk_config SEED_INIT_MULT, 게이트보다 먼저)
     → 확신도 산정 → seed_allocator 표 비례 배분 → futures_gate × macro_gate(수량·시드 감액)

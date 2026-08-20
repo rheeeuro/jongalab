@@ -16,7 +16,7 @@
 [소비] closing_bet 이 선정 시점에 stock_event 를 읽어 daily_stock_report 의
   disc_count/disc_bad_type/disc_good_type 을 굽고, live veto rule(veto_disclosure_bad)이
   disc_bad_type 을 보고 후보에서 제외한다. 저녁 재실행(19:00)에서 제외된 종목은
-  push_trade_signals 가 pending 시그널을 expired 로 정리하므로 19:30 NXT 매수에서 자동 탈락한다.
+  push_trade_signals 가 pending 시그널을 expired 로 정리하므로 19:40 NXT 매수에서 자동 탈락한다.
 
 [실패 안전] 키 미설정·API 오류는 exit 0 로 조용히 끝낸다(수집 공백 = disc_* NULL =
   veto 미개입). 종가베팅 선정은 공시 수집 성패와 무관하게 그대로 돌아간다.
@@ -80,7 +80,7 @@ def _resolve_ex_rights(filings: list[dict], date_yyyymmdd: str) -> list[dict]:
     트리거는 두 가지이고 조회는 하나다(fricDecsn):
       · `무상증자` 결정 공시 — 정상 경로(권리락 2~3주 전에 미리 채워진다)
       · `권리락` 공시 — 결정 공시를 놓친 종목의 보완 경로(수집 시작 전 결정분 등).
-        권리락 1~2영업일 전에 오므로 NXT 19:30 매수는 막을 수 있다.
+        권리락 1~2영업일 전에 오므로 NXT 19:40 매수는 막을 수 있다.
     권리락일 = 신주배정기준일(nstk_asstd) **직전 영업일**. 근거는 sql/48 주석(실측 3건).
 
     조회 실패·기준일 없음은 그 종목을 그냥 건너뛴다(미개입 — 캘린더에 없으면 매수는 정상 진행).

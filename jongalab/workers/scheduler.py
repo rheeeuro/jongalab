@@ -86,17 +86,17 @@ JOBS = [
     # 평일 09:40 Edge Ledger 채점. catch-up 설계 → 유예 6h.
     Job("rule_evaluator", UV_RUN + ["workers/rule_evaluator.py"],
         timeout=1200, grace=21600, minute="40", hour="9", day_of_week="mon-fri"),
-    # 평일 08:20~20:50 매 30분 DART 공시 수집(:20/:50 — closing_bet :00/:30 직전 갱신).
+    # 평일 08:00~20:30 매 30분 DART 공시 수집(:00/:30 — closing_bet :10/:40 직전 10분 갱신).
     # 멱등 적재라 지각 실행도 무해하지만, 늦게 도는 건 의미가 없어 유예 10분.
     Job("disclosure_collector", UV_RUN + ["workers/disclosure_collector.py"],
-        timeout=600, grace=600, minute="20,50", hour="8-20", day_of_week="mon-fri"),
-    # 매일 08:45~20:45 매 30분 네이버 증권 뉴스 수집(:15/:45 — closing_bet :00/:30 및
-    # disclosure_collector :20/:50 과 어긋나게). 멱등 적재라 지각 실행도 무해하지만 늦게 도는 건
+        timeout=600, grace=600, minute="0,30", hour="8-20", day_of_week="mon-fri"),
+    # 매일 08:25~20:55 매 30분 네이버 증권 뉴스 수집(:25/:55 — closing_bet :10/:40 직전 15분 및
+    # disclosure_collector :00/:30 과 어긋나게). 멱등 적재라 지각 실행도 무해하지만 늦게 도는 건
     # 의미가 없어 유예 10분. 실측 38종목 14초라 타임아웃은 넉넉히 5분.
     # 휴장일도 도는 이유: 당일 기사만 적재하는 구조라 연휴 재료를 그날 안 담으면 영영 못 담고,
     # 그러면 재개장일 선정 시점에 라벨이 빈다(근거: docs/history/news-pipeline.md).
     Job("naver_news_collector", UV_RUN + ["workers/naver_news_collector.py"],
-        timeout=300, grace=600, minute="15,45", hour="8-20"),
+        timeout=300, grace=600, minute="25,55", hour="8-20"),
     # 매일 08:05~20:35 매 30분 증권 섹션 뉴스 수집(뉴스 탭 표시용, :05/:35 — 위 세 잡과 어긋나게).
     # 멱등 적재라 지각 실행도 무해하지만 늦게 도는 건 의미가 없어 유예 10분. 실측 2~3페이지
     # ×20건이라 한 사이클 5초 안쪽 — 타임아웃은 상한(8페이지) 기준으로 넉넉히 3분.

@@ -88,8 +88,8 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
     # 호가 미시구조 스냅샷 (2026-07-22, sql/33) — ka10004 선정 시점 수집. 연속장 중만 유효.
     "ob_imbalance", "ob_fpr_imbalance", "ob_spread_pct",
     # DART 공시 사건 라벨 (2026-07-28, sql/36) — disclosure_collector(30분 주기)가 적재한
-    # stock_event 를 closing_bet 선정 시점에 집계. 매 실행 재계산이라 저녁 재실행(19:00)에는
-    # 장 마감 후 공시(15:30~18:00)까지 반영된다 → NXT 매수(19:30) 직전 veto 가 실제로 동작.
+    # stock_event 를 closing_bet 선정 시점에 집계. 매 실행 재계산이라 저녁 재실행(19:10)에는
+    # 장 마감 후 공시(15:30~18:00)까지 반영된다 → NXT 매수(19:40) 직전 veto 가 실제로 동작.
     "disc_count", "disc_bad_type", "disc_good_type",
     # 리스크 라벨 (2026-08-13, sql/64) — 값이 **T-1 확정치**다. 매수 직전 14:30 회차
     # (scheduler `after_hours_risk_pre_buy`, `--risk-only`)가 채우고, closing_bet 이 오늘 행의
@@ -135,14 +135,14 @@ def selection_executable(predicate: list) -> tuple[bool, list[str]]:
 # 선정 레이어 말고 **집행 레이어**에서 평가되는 rule 을 위한 두 번째 화이트리스트.
 # 배경: NXT 매수는 19:50 데드라인 단일 주문이고, `signal_executor` 가 그 순간 종목마다
 # NXT 현재가를 이미 조회한다(체결 참고가). 즉 **19:50 야간 갭은 주문 직전에 알 수 있다** —
-# 선정 시점(13~15시·19:30 회차)엔 NULL 이라 SELECTION_TIME_COLS 에는 못 들어가지만,
+# 선정 시점(13~15시·19:40 회차)엔 NULL 이라 SELECTION_TIME_COLS 에는 못 들어가지만,
 # 집행기가 그 값을 채워 predicate 를 평가할 수 있다.
 # 이 구분이 없으면 19:50 값을 쓰는 rule 은 통계가 아무리 강해도 영구 승격 불가가 되고, 그 가설을
 # 쓰려면 원장을 우회한 하드코딩이 필요해진다(= 채점·강등 감시 소실).
 # 확장 경위: docs/history/edge-ledger.md
 #
 # ⚠️ **집행 레이어 rule 은 종목을 추가하지 못한다 — 화이트리스트로만 동작한다.**
-# 후보 풀·시드 배분이 19:30 에 이미 확정된 뒤라 빈 슬롯을 채울 대상이 없다. 그래서
+# 후보 풀·시드 배분이 19:40 에 이미 확정된 뒤라 빈 슬롯을 채울 대상이 없다. 그래서
 # role=selector 여도 실효 의미는 "선정된 NXT 종목 중 매칭분만 매수"(reduce-only)다.
 # 대가: 하이브리드 대체가 안 되므로 **거른 몫의 시드가 논다**. 그 전제로 측정해야 한다.
 EXECUTION_TIME_COLS: frozenset[str] = SELECTION_TIME_COLS | frozenset({

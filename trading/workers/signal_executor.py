@@ -1,8 +1,8 @@
 """종가베팅 매수 집행 워커 (거래소별 2회, 종가 매수).
 
 종목의 NXT 상장 여부(ka10100 nxtEnable)에 따라 각 거래소의 종가에 매수한다:
-  --venue krx (15:00~15:20)  → NXT 불가 종목을 KRX 종가(15:20 동시호가)에 매수
-  --venue nxt (19:30~19:50)  → NXT 가능 종목을 NXT 종가(19:50)에 매수
+  --venue krx (15:10~15:20)  → NXT 불가 종목을 KRX 종가(15:20 동시호가)에 매수
+  --venue nxt (19:40~19:50)  → NXT 가능 종목을 NXT 종가(19:50)에 매수
 
 매수 타이밍(종가 단일 매수): 윈도우 시작에 시드를 한 번 배분해 종목별 매수 수량을 확정한 뒤,
 데드라인(15:20/19:50)에 전 종목을 시장가/IOC 로 매수한다. 윈도우 동안은 하트비트만 남긴다
@@ -87,8 +87,8 @@ def _beat(payload: dict) -> None:
 # wait_until: closing_bet(같은 분 동시 기동) 완료를 이 시각까지 기다린다. 미감지 시 기존 시그널로 진행
 #   (윈도우 전체를 놓치지 않도록). closing_bet 소요시간(보통 수 분)을 고려해 데드라인 전 여유를 둔다.
 VENUES = {
-    "krx": {"exchange": "KRX", "start": (15, 0),  "wait_until": (15, 12), "deadline": (15, 20)},   # KRX 종가 직전 정규장, NXT 불가 종목
-    "nxt": {"exchange": "NXT", "start": (19, 30), "wait_until": (19, 42), "deadline": (19, 50)},  # NXT 종가 직전, NXT 가능 종목
+    "krx": {"exchange": "KRX", "start": (15, 10), "wait_until": (15, 17), "deadline": (15, 20)},   # KRX 종가 직전 정규장, NXT 불가 종목
+    "nxt": {"exchange": "NXT", "start": (19, 40), "wait_until": (19, 47), "deadline": (19, 50)},  # NXT 종가 직전, NXT 가능 종목
 }
 
 
@@ -293,7 +293,7 @@ def _nxt_gap_pct(nxt_price: int, krx_close: int) -> float | None:
 def _rescale_by_seed_mult(cands: list[dict], applied_mult: float, venue: str) -> None:
     """데드라인 직전 `SEED_INIT_MULT` 재조회 → 낮아졌으면 미집행 수량을 그 비율만큼 축소.
 
-    수량은 윈도우 시작(15:00/19:30)에 확정되므로, 그 뒤 대시보드에서 시드를 줄여도 당일
+    수량은 윈도우 시작(15:10/19:40)에 확정되므로, 그 뒤 대시보드에서 시드를 줄여도 당일
     매수엔 반영되지 않는다. 사람이 장중에 노출을 줄이는 유일한 수동 레버라 데드라인 직전에
     한 번 더 읽어 **비율(현재/적용시점)** 만큼 깎는다.
 
@@ -559,7 +559,7 @@ def main() -> int:
 
     # 4-0) 집행 레이어 rule 준비 — **데드라인 전에** 원장·리포트 행·KRX 종가를 미리 받아둔다.
     #      19:50 루프에 DB·API 호출을 더하면 주문이 늦어지고, 이 값들은 그때 이미 고정이다
-    #      (KRX 종가는 15:30 확정, 리포트 행은 19:30 선정분, live rule 은 관리자 수동 전이).
+    #      (KRX 종가는 15:30 확정, 리포트 행은 19:40 선정분, live rule 은 관리자 수동 전이).
     #      갭만 주문 직전에 실시간으로 계산해 predicate 에 먹인다(core/edge_execution.decide).
     #      토글이 off 면 원장 조회조차 하지 않는다 — 현행 동작 그대로.
     gap_filter = args.venue == "nxt" and bool(

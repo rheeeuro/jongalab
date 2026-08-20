@@ -262,7 +262,7 @@ class ClosingBetStrategy:
         """그 회차 시점의 야간 갭(%) + NXT 상장 여부. 창 밖·조회 실패·재료 부재는 (None, None).
 
         **선정 레이어가 야간갭 rule 을 쓸 수 있게 하는 유일한 경로다.** DB 의 `nxt_gap_pct` 는
-        `gap_check --base-nxt`(19:50)가 채우는데, NXT 매수 신호는 **19:30 회차**가 넘기므로
+        `gap_check --base-nxt`(19:50)가 채우는데, NXT 매수 신호는 **19:40 회차**가 넘기므로
         DB 값을 기다리면 선정은 영원히 NULL 을 본다(무음). 그래서 그 시점 값을 직접 재서
         룰 평가 dict 에만 넣는다.
 
@@ -1060,11 +1060,14 @@ class ClosingBetStrategy:
 
 if __name__ == "__main__":
     from core.market_calendar import exit_if_outside_window
-    # cron: 0,30 8-20 * * 1-5. 휴장일·운영시간대(08:30~20시, NXT 종료까지) 밖이면 종료.
-    # 운영 시작은 08:30 — cron 의 08:00 틱은 분 단위로 한 번 더 막는다(window 헬퍼는 시 단위).
-    exit_if_outside_window(8, 20)
-    if datetime.now().hour == 8 and datetime.now().minute < 30:
-        logger.info("운영 시작(08:30) 전 — 워커를 실행하지 않고 종료합니다.")
+    # cron: 10,40 8-19 * * 1-5. 휴장일·운영시간대(08:10~19시) 밖이면 종료.
+    # ⚠️ 상한 19시는 안전장치다 — 20시 이후 회차가 돌면 매수(19:50)가 끝난 뒤 selected 를
+    # 아무도 실행할 수 없는 목록으로 갈아치운다. autorestart:false cron 이라 사람이 20:30 에
+    # pm2 restart 해도 이 가드가 막는다. 근거: docs/history/selection-scoring.md
+    exit_if_outside_window(8, 19)
+    # 운영 시작은 08:10 — 08:00~08:09 수동 기동은 분 단위로 한 번 더 막는다(window 헬퍼는 시 단위).
+    if datetime.now().hour == 8 and datetime.now().minute < 10:
+        logger.info("운영 시작(08:10) 전 — 워커를 실행하지 않고 종료합니다.")
         raise SystemExit(0)
     strategy = ClosingBetStrategy()
     strategy.run()
