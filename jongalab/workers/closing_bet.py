@@ -32,7 +32,7 @@ from core.repository.stock_report import (
     get_today_news_labels,
     get_today_risk_labels,
 )
-from core.repository.market_snapshot import get_market_snapshots
+from core.repository.market_snapshot import get_market_snapshots, slot_for_now
 from core.repository.sector_report import save_sector_reports
 from core.repository.content import get_today_content_by_stock
 from core.repository.news import (
@@ -858,8 +858,9 @@ class ClosingBetStrategy:
         점수·rank_no·저장은 이 함수가 건드리지 않는다(대조군 평가·프론트 표시 불변).
         선정 시점엔 NXT 스냅샷(19:50)이 없어 그 피처 기반 rule 은 매칭될 수 없다 — 그런 rule 의
         live 승격 자체를 edge_policy 실행 가능성 게이트가 막는다(집행 레이어로 내려간다).
-        당일 market_snapshot 은 14:30 회차가 굽고, 그중 **선정에 쓸 수 있는 축**만 같은 게이트가
-        허용한다(SELECTION_TIME_MARKET_COLS).
+        당일 market_snapshot 은 **이 회차 시각의 선정 슬롯**만 읽는다(주간 1430 / NXT 회차 1935).
+        채점도 같은 슬롯을 보므로 시각에 따라 값이 달라지는 축(선물·VIX·환율·지수)도 쓸 수 있다
+        (허용 목록은 edge_policy). 야간선물 축은 1935 슬롯에만 존재한다.
         역할(selector/veto/benchmark) 판정은 core.edge_policy.rule_role 단일 소스.
         """
         mode = EDGE_SELECTION_MODE
@@ -891,16 +892,18 @@ class ClosingBetStrategy:
         selection_reports = [{**r, "rank_no": i} for i, r in enumerate(reports, 1)]
         negative_pool = sum(1 for r in reports if (r.get("change_pct") or 0) < 0)
 
-        # 당일 시장 스냅샷 — 14:30 회차(gap_check --market-snap)가 구운 행. 그 전이면 None 이고
-        # market.* predicate 는 NULL 매칭 실패로 흘러 선정을 흔들지 않는다(fail-open).
-        # ⚠️ 이 행의 실시간 축(선물·VIX·환율·코스피)은 19:50 에 덮어써지는 잠정값이라
-        # **선정에 쓸 수 있는 축은 edge_policy.SELECTION_TIME_MARKET_COLS 로 제한**된다
-        # (미국 정규장 확정치 2종 — 14:30 이든 19:50 이든 같은 값).
-        today_iso = datetime.now().date().isoformat()
+        # 당일 시장 스냅샷 — **이 회차 시각의 선정 슬롯**만 읽는다(19:35 이후 회차=NXT 매수는
+        # 1935, 그 전은 1430). 채점(rule_evaluator)도 rule 이 동작하는 레이어의 같은 슬롯을
+        # 보므로 '채점 표본 = 선정에 쓴 값'이 된다. 관측 슬롯(1950)은 주문보다 뒤에 굽히므로
+        # 읽지 않는다. 행이 없으면 None 이고 market.* predicate 는 NULL 매칭 실패로 흘러
+        # 선정을 흔들지 않는다(fail-open).
+        now = datetime.now()
+        today_iso = now.date().isoformat()
+        slot = slot_for_now(now)
         try:
-            market = get_market_snapshots([today_iso]).get(today_iso)
+            market = get_market_snapshots([today_iso], slot=slot).get(today_iso)
         except Exception as e:
-            logger.warning(f"당일 시장 스냅샷 조회 실패(market 축 없이 진행): {e}")
+            logger.warning(f"당일 시장 스냅샷[{slot}] 조회 실패(market 축 없이 진행): {e}")
             market = None
 
         selected_codes, rule_names_by_code, veto_log = select_signals(

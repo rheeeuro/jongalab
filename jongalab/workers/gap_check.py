@@ -9,7 +9,7 @@
   --base-nxt  19:50  당일 유니버스 전체의 KRX 확정 종가 + NXT 기준가 수집.
                      → state 파일(top-10 갭 체크용, 기존 동작 불변)
                      → daily_stock_report NXT 스냅샷 UPDATE(엣지 연구용, F3의 눈)
-                     → market_snapshot 1행 upsert(F2·레짐 연구용)
+                     → market_snapshot 관측 슬롯(1950) upsert
   --check-nxt 08:03  NXT 종목 갭 확정 → DB(gap_nxt_*) 저장. 알림 없음. (실매매 경로, top-10)
   --check-krx 09:03  KRX 종목 갭 확정(+ 08:03 실패분 NXT 재시도) → DB(gap_krx_*) 저장
                      → 텔레그램 알림은 여기서 하루 한 번만 전송.
@@ -40,7 +40,9 @@ from core.repository.stock_report import (
     save_nxt_snapshot,
     save_nxt_open_labels,
 )
-from core.repository.market_snapshot import save_market_snapshot
+from core.repository.market_snapshot import (
+    save_market_snapshot, SLOT_KRX, SLOT_NXT, SLOT_OBS,
+)
 from core.repository.ex_rights import get_tickers_on
 from core.market_data import fetch_edge_market_snapshot
 from core.notifications import send_gap_check_alert
@@ -225,24 +227,25 @@ def run_base(venue: str):
     logger.info(f"{venue.upper()} 기준가 수집 {got}/{len(reports)}건 ({today})")
 
 
-def run_market_snap():
-    """market_snapshot 1행 upsert (F2 해외 동조·레짐의 눈).
+def run_market_snap(slot: str = SLOT_KRX):
+    """market_snapshot 한 슬롯 upsert — 그 시각에 알 수 있었던 시장 상태를 굽는다.
 
-    두 번 돈다 — **14:30**(매수 직전, `--market-snap`)과 **19:50**(`--base-nxt` 말미).
-    14:30 회차를 넣은 이유: 예전엔 19:50 에만 구워서 선정 시점(13~15시·19:00 회차)엔 당일
-    행이 아예 없었고, 그래서 `market.` 축을 쓰는 rule 은 통계와 무관하게 영구 승격 불가였다.
+    세 회차가 각자 자기 슬롯만 쓴다(서로 덮지 않는다):
+      1430 `--market-snap`      → KRX 종가매수(15:20) 축. closing_bet 주간 회차가 읽는다.
+      1935 `--market-snap-nxt`  → NXT 매수(19:50) 축. closing_bet 19:40 회차가 읽는다.
+                                  야간세션(18:00~)이 살아있는 유일한 선정 슬롯이다.
+      1950 `--base-nxt` 말미     → 확장 관측 기록(백필 적재 대상, rule 축으로 쓰지 않는다)
 
-    ⚠️ 저장은 `_FIELDS` **전체 덮어쓰기**라 최종 저장값은 언제나 19:50 회차 값이다
-    (= 채점이 보는 값). 그래서 선정 시점에 쓸 수 있는 축은 **두 시각 값이 같은 것뿐**이고,
-    그 판정은 core/edge_policy.SELECTION_TIME_MARKET_COLS 가 갖는다(미국 정규장 확정치 2종).
+    슬롯을 나눈 이유: 채점(rule_evaluator)과 선정이 **같은 행**을 읽어야 시각에 따라 값이
+    달라지는 축(선물·VIX·환율·지수)을 쓸 수 있다. 허용 축은 core/edge_policy 가 갖는다.
     """
     today = datetime.now().date().isoformat()
     try:
         snap = fetch_edge_market_snapshot()
-        save_market_snapshot({"snapshot_date": today, **snap})
-        logger.info(f"market_snapshot 저장 완료 ({today})")
+        save_market_snapshot({"snapshot_date": today, **snap}, slot=slot)
+        logger.info(f"market_snapshot[{slot}] 저장 완료 ({today})")
     except Exception as e:
-        logger.warning(f"market_snapshot 저장 실패: {e}")
+        logger.warning(f"market_snapshot[{slot}] 저장 실패: {e}")
 
 
 def run_base_nxt():
@@ -256,7 +259,7 @@ def run_base_nxt():
          08:03/09:03 체크는 top-10 코드만 조회하므로 무해).
       2) daily_stock_report — krx_close_price·nxt_price_1950·nxt_gap_pct·nxt_after_value·
          nxt_listed UPDATE(리포트 행이 이미 존재 → upsert 아님, F3의 눈).
-      3) market_snapshot — 당일 시장 지표 1행 upsert(F2·레짐의 눈).
+      3) market_snapshot — 관측 슬롯(1950) upsert. rule 축은 1430·1935 회차가 담당한다.
 
     조회 실패 종목은 NULL 유지(그날 그 종목만 F3 평가 제외) — 파이프라인은 계속 진행.
     """
@@ -307,7 +310,7 @@ def run_base_nxt():
     except Exception as e:
         logger.warning(f"NXT 스냅샷 DB 저장 실패: {e}")
 
-    run_market_snap()
+    run_market_snap(slot=SLOT_OBS)
 
 
 # ── 갭 확정 (08:03 NXT / 09:03 KRX) ──
@@ -521,12 +524,16 @@ def run_label_nxt():
 
 if __name__ == "__main__":
     from core.market_calendar import exit_if_outside_window
-    # cron: --market-snap 30 14 / --base-krx 20 15 / --base-nxt 50 19 / --check-nxt 3 8 /
+    # cron: --market-snap 30 14 / --market-snap-nxt 35 19 / --base-krx 20 15 /
+    #       --base-nxt 50 19 / --check-nxt 3 8 /
     #       --label-nxt 6 8 / --check-krx 3 9 (평일)
     # 휴장일·해당 시간대 밖(pm2 수동 재기동 등)이면 종료.
-    if "--market-snap" in sys.argv:
+    if "--market-snap-nxt" in sys.argv:
+        exit_if_outside_window(19, 19)
+        run_market_snap(slot=SLOT_NXT)
+    elif "--market-snap" in sys.argv:
         exit_if_outside_window(14, 14)
-        run_market_snap()
+        run_market_snap(slot=SLOT_KRX)
     elif "--base-krx" in sys.argv:
         exit_if_outside_window(15, 15)
         run_base("krx")

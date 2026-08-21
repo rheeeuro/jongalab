@@ -32,6 +32,12 @@ from core.edge_predicate import evaluate, PredicateError
 EXEC_FILLED_COLS: frozenset[str] = frozenset({"nxt_gap_pct", "nxt_price_1950"})
 
 
+def _needs_market(rule: dict) -> bool:
+    """predicate 가 시황 축(`market.*`)을 요구하는가 — 집행기가 공급할 수 없는 재료다."""
+    return any(str(c.get("col", "")).startswith("market.")
+               for c in (rule.get("predicate") or []) if isinstance(c, dict))
+
+
 def is_execution_layer_rule(rule: dict) -> bool:
     """이 live rule 을 집행 레이어에서 평가해야 하는가.
 
@@ -107,6 +113,14 @@ def decide(report_row: dict | None, live_rules: list[dict], nxt_gap_pct: float |
 
     matched = []
     for r in exec_rules:
+        if _needs_market(r):
+            # 시황 축(`market.*`)을 쓰는 rule — 집행기는 시장 스냅샷을 갖지 않는다(그 축은
+            # jongalab 선정 회차 19:40 이 슬롯 1935 로 평가한다). 여기서 평가하면 NULL 매칭
+            # 실패가 되고, 이 레이어는 미매칭이 곧 매수 스킵이라 **조용히 전건 거부**된다.
+            # 판정 불가는 매수 쪽으로 흘린다(모듈 fail-open 규약).
+            return {"buy": True, "in_scope": True, "matched": [], "evaluated": names,
+                    "reason": f"판정 불가(시황 축은 집행기가 못 읽는다: {r.get('name')}) "
+                              "— fail-open 매수"}
         try:
             if evaluate(r.get("predicate") or [], row, None):
                 matched.append(r.get("name"))

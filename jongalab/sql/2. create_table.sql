@@ -242,9 +242,15 @@ CREATE TABLE IF NOT EXISTS daily_stock_report (
     INDEX idx_stock_code (stock_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 시장 스냅샷 (일 단위 시장 피처, F2 해외 동조·레짐 연구용). gap_check --base-nxt(19:50)가 1행 upsert.
+-- 시장 스냅샷 (시장 피처, F2 해외 동조·레짐 연구용 + 시황 축 채점).
+-- **날짜 × 시각 슬롯 다행**이다(sql/66) — 슬롯 = 그 스냅샷을 굽는 시각. 선정과 채점이 같은 슬롯을
+-- 읽어 '채점 표본 = 선정에 쓴 값'을 구조로 보장한다.
+--   1430 = gap_check --market-snap. rule 이 쓰는 유일한 시황 축(선정·채점 공용)
+--   1950 = gap_check --base-nxt 말미. 확장 관측 + 소급 백필 적재(주문 뒤라 rule 축 아님)
 CREATE TABLE IF NOT EXISTS market_snapshot (
-    snapshot_date   DATE PRIMARY KEY,
+    snapshot_date   DATE NOT NULL,
+    slot            VARCHAR(8) NOT NULL DEFAULT '1950',  -- 굽는 시각(1430=rule 축 / 1950=관측)
+    source          VARCHAR(10) NOT NULL DEFAULT 'live', -- live / backfill / repaired
     captured_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     kospi_ret       FLOAT DEFAULT NULL,   -- 당일 코스피 등락률(%)
     kosdaq_ret      FLOAT DEFAULT NULL,   -- 당일 코스닥 등락률(%)
@@ -264,7 +270,8 @@ CREATE TABLE IF NOT EXISTS market_snapshot (
     news_macro_tone  FLOAT DEFAULT NULL,  -- 당일 거시 기사 sentiment 평균(0~100, 50=중립)
     news_macro_cnt   INT   DEFAULT NULL,  -- 위 평균의 표본 기사 수(0이면 tone NULL)
     news_sector_tone FLOAT DEFAULT NULL,  -- 당일 섹터 기사 sentiment 평균(0~100)
-    news_sector_cnt  INT   DEFAULT NULL   -- 위 평균의 표본 기사 수
+    news_sector_cnt  INT   DEFAULT NULL,  -- 위 평균의 표본 기사 수
+    PRIMARY KEY (snapshot_date, slot)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 전략 설정 (단일 행, JSON으로 관리)

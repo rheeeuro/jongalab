@@ -120,3 +120,22 @@ def test_gap_band_comes_from_predicate_not_constants():
     v = ee.decide(ROW, [wide], -2.5, 100_000, rule_names="f3_nxt_gap_quality",
                   rank_no=15, score_top_n=10)
     assert v["buy"] is True
+
+
+def test_market_axis_rule_fails_open_instead_of_rejecting_everything():
+    """시황 축(`market.*`)을 쓰는 rule 은 집행기가 판정하지 않고 **매수**로 흘린다.
+
+    집행기는 시장 스냅샷을 갖지 않는다(그 축은 jongalab 선정 회차 19:40 이 슬롯 1935 로
+    평가한다). 평가하면 NULL 매칭 실패가 되고, 이 레이어는 미매칭이 곧 매수 스킵이라
+    조용히 전건 거부된다 — 판정 불가는 매수 쪽으로 흘리는 게 모듈 규약이다.
+    """
+    rule = {**GAP_RULE, "name": "f3_gap_x_night_fut", "predicate": [
+        {"col": "nxt_gap_pct", "op": "between", "value": [1.0, 6.0]},
+        {"col": "nxt_listed", "op": "==", "value": 1},
+        {"col": "market.k200f_night_ret", "op": ">=", "value": -0.4},
+    ]}
+    v = ee.decide(ROW, [rule], 3.0, 100_000, rule_names="f3_gap_x_night_fut",
+                  rank_no=15, score_top_n=10)
+    assert v["buy"] is True
+    assert v["matched"] == []
+    assert "시황 축" in v["reason"]

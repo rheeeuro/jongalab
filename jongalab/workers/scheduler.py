@@ -112,12 +112,16 @@ JOBS = [
     Job("after_hours_risk_pre_buy",
         UV_RUN + ["workers/after_hours_labels.py", "--risk-only"],
         timeout=600, grace=1200, minute="30", hour="14", day_of_week="mon-fri"),
-    # 평일 14:30 시장 스냅샷 — 위와 같은 이유(매수 직전에 당일 행이 있어야 market.* 축을 쓴다).
-    # 19:50(gap_check --base-nxt)이 같은 행을 전체 덮어쓰므로 **채점이 보는 값은 19:50 것**이고,
-    # 그래서 선정에 허용되는 축은 두 시각 값이 같은 미국 정규장 확정치뿐이다(edge_policy).
+    # 평일 14:30 시장 스냅샷(슬롯 1430) — KRX 종가매수(15:20) 축.
     Job("market_snapshot_pre_buy",
         UV_RUN + ["workers/gap_check.py", "--market-snap"],
         timeout=300, grace=1200, minute="30", hour="14", day_of_week="mon-fri"),
+    # 평일 19:35 시장 스냅샷(슬롯 1935) — NXT 매수 회차(closing_bet 19:40)가 읽는 축.
+    # 야간세션이 18:00 에 시작하므로 **야간선물이 살아있는 유일한 선정 슬롯**이다(1430 에선
+    # 전일 야간 종가다). 유예 4분 — 19:40 회차를 넘겨 지각 실행하면 선정이 못 읽으므로 스킵.
+    Job("market_snapshot_pre_nxt",
+        UV_RUN + ["workers/gap_check.py", "--market-snap-nxt"],
+        timeout=240, grace=240, minute="35", hour="19", day_of_week="mon-fri"),
     # 토요일 08:00 주간 가중치 튜너(GPT 호출 포함). 유예 6h.
     Job("weight_tuner", UV_RUN + ["workers/weight_tuner.py"],
         timeout=2400, grace=21600, minute="0", hour="8", day_of_week="sat"),

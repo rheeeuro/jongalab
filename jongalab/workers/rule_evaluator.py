@@ -43,9 +43,11 @@ from core.edge_policy import (
     decide_transition,
     decision_due,
     decision_stage,
+    rule_layer,
     rule_role,
 )
 from core.notifications import send_edge_rule_alert
+from core.repository.market_snapshot import SLOT_KRX, SLOT_NXT, SLOT_OBS
 from core.repository import (
     list_rules,
     get_stock_reports_by_date,
@@ -404,19 +406,34 @@ def run():
         logger.info("채점 후보 날짜 없음 — 종료")
         return
 
-    # 유니버스·시장 스냅샷은 날짜별 1회 로드 후 rule 간 공유(캐시)
+    # 유니버스·시장 스냅샷은 날짜별 1회 로드 후 rule 간 공유(캐시). 시장은 (슬롯, 날짜) 키다.
     uni_cache: dict[str, list[dict]] = {}
-    mkt_cache: dict[str, dict | None] = {}
+    mkt_cache: dict[tuple[str, str], dict | None] = {}
 
     def _universe(d: str) -> list[dict]:
         if d not in uni_cache:
             uni_cache[d] = get_stock_reports_by_date(d, include_unselected=True)
         return uni_cache[d]
 
-    def _market(d: str) -> dict | None:
-        if d not in mkt_cache:
-            mkt_cache[d] = get_market_snapshots([d]).get(d)
-        return mkt_cache[d]
+    def _market(d: str, slot: str) -> dict | None:
+        if (slot, d) not in mkt_cache:
+            mkt_cache[(slot, d)] = get_market_snapshots([d], slot=slot).get(d)
+        return mkt_cache[(slot, d)]
+
+    def _slot_for(rule: dict) -> str:
+        """이 rule 을 채점할 시장 슬롯 — **선정이 실제로 읽은 슬롯**과 같아야 한다.
+
+        'selection'(주간 회차)  → 1430 / 'execution'(NXT 회차 19:40) → 1935 로,
+        closing_bet 이 그 시각에 읽는 슬롯과 짝을 맞춘다. 어느 레이어도 아닌 페이퍼 rule 은
+        관측 슬롯(1950)을 본다(집행이 없으니 정합 제약도 없다).
+        해당 슬롯 행이 없는 날은 market 이 None → NULL 매칭 실패다(사후 값으로 메우지 않는다).
+        """
+        layer = rule_layer(rule.get("predicate") or [])
+        if layer == "selection":
+            return SLOT_KRX
+        if layer == "execution":
+            return SLOT_NXT
+        return SLOT_OBS
 
     # 초과수익 기준선 — exit_label 별 날짜별 (유니버스 합계, 종목 수)를 1회 로드해 rule 간
     # 공유한다. rule 마다 빼야 할 매칭 종목이 달라 평균이 아니라 합계·개수로 들고 있어야
@@ -439,7 +456,7 @@ def run():
         pending = [d for d in all_dates if d >= str(rule["registered_at"]) and d not in scored]
         new_scored = expired = 0
         for d in pending:
-            result = _score_rule_date(rule, _universe(d), _market(d))
+            result = _score_rule_date(rule, _universe(d), _market(d, _slot_for(rule)))
             if result is None:
                 if _past_deadline(d):
                     # 라벨 영구 미도래 — sentinel(n=0, matched=[])로 종결. 통계엔 무영향.

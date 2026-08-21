@@ -690,12 +690,103 @@ def _overlay_extended(grouped: dict) -> None:
 
 # ── 엣지 연구용 시장 스냅샷 (market_snapshot 테이블 1행) ──
 
+# 같은 미국 정규장 세션을 공유하는 심볼들 — 한국시간 오후엔 전부 '직전 미국 세션' 봉이 마지막이다.
+# 이 성질로 신선도를 서로 검증한다(_drop_stale_us_bars).
+_US_SESSION_SYMBOLS = frozenset({"^GSPC", "^SOX", "^VIX", "EWY", "KORU", "SKHY"})
+
+# 야간선물 값을 연구 스냅샷에 쓸 수 있는 최대 경과초 — trading futures_gate 의 신선도 기준과 같은 눈금.
+# 야간세션(18:00~) 중에는 WS 워커가 초 단위로 갱신하므로 이 폭을 넘으면 스트림이 끊긴 것이다.
+_NIGHT_FUT_STALE_SEC = 900
+
+
+def night_ret_if_fresh(row: dict | None) -> float | None:
+    """야간선물 행에서 등락률을 꺼낸다 — **신선할 때만**(연구 스냅샷 규약, 순수 함수).
+
+    **기준가는 그날 KRX 주간 정산가**다(세션 시작 18:00 에 갈아탄다). 값의 뜻은 '오늘 국장 종가
+    이후 새로 들어온 정보'이고, 그래서 NXT 매수(19:50) 판단의 순방향 축이 된다.
+
+    표시용 `_kospi200_night_future()` 와 달리 경과 시간을 본다. 세션 밖·스트림 단절 시 그 행은
+    직전 세션 종가를 그대로 들고 있어, 저장하면 **기준가가 다른 값**(전일 정산가 대비)이 같은
+    컬럼에 섞인다 — 채점 표본이 조용히 오염된다. 틀린 값보다 NULL 이 낫다.
+    """
+    if not row or row.get("change_percent") is None:
+        return None
+    age = int(row.get("age_sec") or 0)
+    if age > _NIGHT_FUT_STALE_SEC:
+        logger.warning("야간선물이 %ds 전 값(세션 밖/스트림 단절) — 연구 스냅샷에서 제외", age)
+        return None
+    return float(row["change_percent"])
+
+
+def _night_future_ret_fresh() -> float | None:
+    """야간선물 행을 읽어 `night_ret_if_fresh` 규약을 적용. 조회 실패는 None."""
+    try:
+        from core.repository.kis_night_future import get_night_future
+        row = get_night_future()
+    except Exception as e:
+        logger.warning("야간선물 조회 실패 — 연구 스냅샷에서 제외: %s", e)
+        return None
+    return night_ret_if_fresh(row)
+
+
+def _fetch_quote_dated(item: dict) -> dict:
+    """연구 스냅샷용 조회 — 값 정의는 `_fetch_quote` 와 같고 **쓰인 마지막 일봉 날짜**를 함께 준다.
+
+    날짜를 함께 주는 이유: 등락률만 받으면 호출부가 그 값이 '언제 세션'의 것인지 알 수 없다.
+    스파크라인은 만들지 않는다(표시용이 아니므로).
+    """
+    out = {"symbol": item["symbol"], "price": None, "change_percent": None, "bar_date": None}
+    try:
+        hist = yf.Ticker(item["symbol"]).history(period="1mo")
+        if hist.empty:
+            return out
+        closes = hist["Close"].dropna()
+        if closes.empty:
+            return out
+        current = _safe_float(closes.iloc[-1])
+        if current is None:
+            return out
+        out["price"] = current
+        out["bar_date"] = closes.index[-1].date()
+        prev = _safe_float(closes.iloc[-2]) if len(closes) >= 2 else None
+        if prev:
+            out["change_percent"] = round((current - prev) / prev * 100, 2)
+    except Exception:
+        return out
+    return out
+
+
+def _drop_stale_us_bars(quotes: dict[str, dict]) -> None:
+    """미국 정규장 심볼 중 **마지막 봉 날짜가 최빈값보다 뒤처진** 것의 값을 버린다(제자리 수정).
+
+    yfinance 가 최근 봉을 빠뜨린 시리즈를 돌려주면 마지막 두 봉은 '며칠 전 세션'이 되는데,
+    등락률만 보면 정상값과 구분되지 않아 **옛 세션 값이 당일 값으로 저장된다**. 같은 세션을
+    공유하는 심볼들이라 최빈 날짜가 그날의 기준이고, 그보다 오래된 심볼은 결함이다.
+    연구 스냅샷은 채점 표본으로 들어가므로 **틀린 값보다 NULL 이 낫다**(빈 응답이 NULL 로
+    떨어지는 것과 같은 취급). 기준보다 **앞선** 심볼은 버리지 않는다 — ^VIX 는 미국 확장
+    세션에 당일 봉이 먼저 생긴다.
+    경위·실측: docs/history/infra-incidents.md
+    """
+    dates = [q["bar_date"] for s, q in quotes.items()
+             if s in _US_SESSION_SYMBOLS and q.get("bar_date")]
+    if len(dates) < 3:
+        return  # 최빈값을 신뢰할 표본이 없으면 미개입(판정 불가는 그대로 둔다)
+    mode = max(set(dates), key=dates.count)
+    for sym, q in quotes.items():
+        if sym in _US_SESSION_SYMBOLS and q.get("bar_date") and q["bar_date"] < mode:
+            logger.warning("%s 일봉이 %s 로 뒤처짐(기준 %s) — 연구 스냅샷에서 제외",
+                           sym, q["bar_date"], mode)
+            q["price"] = None
+            q["change_percent"] = None
+
+
 def fetch_edge_market_snapshot() -> dict:
     """일 단위 시장 피처 한 세트 조회 — market_snapshot 컬럼과 1:1 대응(F2·레짐 연구용).
 
-    기존 표시용 조회 경로를 그대로 재사용한다: 미국·환율은 yfinance(_fetch_quote),
+    기존 표시용 조회 경로와 값 정의가 같다: 미국·환율은 yfinance 일봉 마지막 두 종가,
     국내 지수는 KIS(inquire_index_price), 코스피200 선물은 주간/야간 헬퍼.
     개별 실패 항목은 None(그 지표만 제외, 나머지는 계속). vix 는 등락률이 아닌 지수 값.
+    미국 정규장 심볼은 `_drop_stale_us_bars` 로 서로 신선도를 검증한 뒤 쓴다.
     """
     yf_items = [
         {"symbol": "NQ=F", "name": "NQ"},
@@ -709,8 +800,9 @@ def fetch_edge_market_snapshot() -> dict:
         {"symbol": "SKHY", "name": "SKHY"},
     ]
     with ThreadPoolExecutor(max_workers=9) as executor:
-        q = list(executor.map(_fetch_quote, yf_items))
-    nq, spx, sox, vix, usdkrw, wti, ewy, koru, skhy = q
+        q = {r["symbol"]: r for r in executor.map(_fetch_quote_dated, yf_items)}
+    _drop_stale_us_bars(q)
+    nq, spx, sox, vix, usdkrw, wti, ewy, koru, skhy = (q[i["symbol"]] for i in yf_items)
 
     def _kis_index_pct(index_code: str) -> float | None:
         try:
@@ -732,7 +824,7 @@ def fetch_edge_market_snapshot() -> dict:
         "koru_ret": koru.get("change_percent"),
         "skhy_ret": skhy.get("change_percent"),
         "k200f_day_ret": _kospi200_day_future().get("change_percent"),
-        "k200f_night_ret": _kospi200_night_future().get("change_percent"),
+        "k200f_night_ret": _night_future_ret_fresh(),
         **_news_tone_today(),
     }
 

@@ -9,6 +9,7 @@ from core.edge_policy import (
     ROLES,
     FAMILIES,
     rule_role,
+    rule_layer,
     selection_executable,
     check_promotion,
     check_demotion,
@@ -90,26 +91,64 @@ def test_selection_executable_ok_for_selection_time_cols():
     assert ok and missing == []
 
 
-def test_selection_executable_rejects_1950_and_realtime_market_cols():
+def test_selection_executable_rejects_1950_cols():
     ok, missing = selection_executable([
         {"col": "change_pct", "op": ">=", "value": 15},
         {"col": "nxt_gap_pct", "op": ">=", "value": 5},    # 19:50 수집
-        {"col": "market.vix", "op": ">", "value": 20},     # 시각에 따라 값이 달라지는 축
     ])
     assert not ok
-    assert missing == ["nxt_gap_pct", "market.vix"]
+    assert missing == ["nxt_gap_pct"]
 
 
-def test_selection_executable_allows_settled_us_market_cols():
-    """미국 정규장 확정치(SOX·SPX)는 선정 시점에 쓸 수 있다 (2026-08-13).
+def test_selection_executable_allows_time_varying_market_cols():
+    """시각에 따라 값이 달라지는 시황 축도 선정 시점에 쓸 수 있다 (sql/66 슬롯 분리).
 
-    market_snapshot 을 매수 직전 14:30 에도 굽게 하면서 열렸다. 판정 기준은 '접두사'가 아니라
-    **14:30 값과 19:50(채점이 보는) 값이 같은가**다 — 미국장은 한국시간 06:00 에 끝나 그날
-    안에는 더 변하지 않는다. 실시간 축은 위 테스트대로 계속 막힌다.
+    선정(closing_bet)과 채점(rule_evaluator)이 **같은 슬롯(1430)** 을 읽으므로 '채점 표본 =
+    선정에 쓴 값'이 구조로 보장된다 — 값이 하루 중 변한다는 사실 자체는 문제가 아니다.
     """
     ok, missing = selection_executable([
+        {"col": "market.vix", "op": ">", "value": 20},
+        {"col": "market.nq_fut_ret", "op": "<=", "value": -0.5},
+        {"col": "market.k200f_day_ret", "op": "<=", "value": -1.0},
         {"col": "market.sox_ret", "op": ">=", "value": 1.5},
         {"col": "sector_rel_ret", "op": "<=", "value": 0},
+    ])
+    assert ok and missing == []
+
+
+def test_selection_rejects_market_cols_outside_the_snapshot_axes():
+    """관측 전용 시장 컬럼은 축이 아니다 — 시간외 breadth·뉴스 톤은 선정 시점에 없거나 누적값."""
+    ok, missing = selection_executable([
+        {"col": "market.ah_up3_cnt", "op": ">=", "value": 10},
+        {"col": "market.news_macro_tone", "op": "<=", "value": 40},
+    ])
+    assert not ok
+    assert missing == ["market.ah_up3_cnt", "market.news_macro_tone"]
+
+
+def test_night_future_axis_is_nxt_only():
+    """야간선물은 **주간 회차 축이 아니다** — 야간세션은 18:00 시작이라 14:30 엔 전일 야간 종가다.
+
+    같은 이름의 다른 변수이므로 주간 축으로 열면 rule 작성자가 모르고 후행 값을 쓴다.
+    NXT 회차(슬롯 1935)에서는 실시간 값이라 허용되고, 그 rule 은 'execution' 레이어가 된다
+    (채점도 같은 슬롯) — 즉 측정만 되는 페이퍼가 아니라 그대로 승격 가능한 형태다.
+    """
+    ok, missing = selection_executable([{"col": "market.k200f_night_ret", "op": "<", "value": -0.4}])
+    assert not ok and missing == ["market.k200f_night_ret"]
+    assert rule_layer([{"col": "nxt_listed", "op": "==", "value": 1},
+                       {"col": "market.k200f_night_ret", "op": "<", "value": -0.4}]) == "execution"
+
+
+def test_execution_layer_allows_market_cols_including_night_future():
+    """NXT 회차(19:40 선정 / 19:50 집행)는 시황 축을 쓸 수 있다 — 야간선물까지 포함.
+
+    그 시각 슬롯(1935)을 closing_bet NXT 회차와 채점이 같이 읽으므로 정합이 보장된다.
+    """
+    from core.edge_policy import execution_executable
+    ok, missing = execution_executable([
+        {"col": "nxt_listed", "op": "==", "value": 1},
+        {"col": "market.k200f_night_ret", "op": "<", "value": -0.4},
+        {"col": "market.vix", "op": ">", "value": 20},
     ])
     assert ok and missing == []
 
@@ -231,11 +270,10 @@ def test_rule_layer_prefers_selection_over_execution():
     # 당일 세션(ah_*·exec_str)·익일 수집은 어느 레이어에서도 불가
     assert rule_layer([{"col": "ah_react", "op": "<=", "value": -1.5}]) is None
     assert rule_layer([{"col": "next_open_ret", "op": ">", "value": 0}]) is None
-    # T-1 확정 리스크 라벨·미국 정규장 확정치는 선정 레이어 (2026-08-13)
+    # T-1 확정 리스크 라벨·시황 축은 선정 레이어 (시황 축은 슬롯 1430 을 선정·채점이 공유)
     assert rule_layer([{"col": "short_wght", "op": ">=", "value": 15}]) == "selection"
     assert rule_layer([{"col": "market.sox_ret", "op": ">=", "value": 1.5}]) == "selection"
-    # 시각에 따라 값이 달라지는 시장 축은 계속 불가 — 채점(19:50)과 집행(14:30) 값이 어긋난다
-    assert rule_layer([{"col": "market.vix", "op": ">", "value": 20}]) is None
+    assert rule_layer([{"col": "market.vix", "op": ">", "value": 20}]) == "selection"
 
 
 # ── 승격 게이트: veto / benchmark ──

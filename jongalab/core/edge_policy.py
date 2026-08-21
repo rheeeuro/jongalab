@@ -39,7 +39,7 @@ def rule_role(rule: dict) -> str | None:
 
 # ── 선정 시점(closing_bet 13~15시) 실행 가능성 ──
 # closing_bet 이 select_signals 에 넘기는 reports dict 에 실제로 존재하는 predicate 대상 컬럼.
-# 19:50 수집(NXT 스냅샷·market_snapshot)·익일 수집(결과 라벨) 피처는 선정 시점에 아직 없어
+# 19:50 수집(NXT 스냅샷)·익일 수집(결과 라벨) 피처는 선정 시점에 아직 없어
 # NULL→매칭실패가 되므로, 그 피처를 쓰는 rule 은 live 여도 선정/veto 에서 영원히 무음 no-op 다.
 # → live(실탄) 승격은 이 목록 안의 컬럼만 쓰는 rule 에만 허용한다(benchmark 제외).
 # 선정 시점을 19:50 이후로 옮기는 등 집행 설계가 바뀌면 이 목록에 해당 컬럼을 추가한다.
@@ -103,21 +103,51 @@ SELECTION_TIME_COLS: frozenset[str] = frozenset({
 
 _MARKET_PREFIX = "market."
 
-# 선정 시점에 쓸 수 있는 **시장 스냅샷 컬럼** (2026-08-13).
-# 스냅샷은 매수 직전 14:30(scheduler `market_snapshot_pre_buy`)과 19:50(gap_check --base-nxt)
-# 두 번 구워진다. **모든 축을 열면 안 된다** — 채점은 19:50 저장값으로 하는데 집행은 14:30 값을
-# 보게 되어, 두 시점 값이 다른 축은 '채점 표본 ≠ 집행 값'이 된다. 그래서 판정 기준은 하나다:
-#   **미국 정규장이 이미 끝나 그날 안에는 더 변하지 않는 확정치인가.**
-# SOX·SPX 는 한국시간 06:00 에 마감된 값이라 14:30 에 읽든 19:50 에 읽든 같다.
-# 제외: nq_fut/vix/usdkrw/wti(24시간 움직임) · kospi/kosdaq(14:30 은 장중, 19:50 은 마감) ·
-#       k200f_day/night(세션 자체가 다름) · ewy/koru/skhy(미국 프리마켓~정규장) ·
-#       news_*_tone(그 시점까지 라벨된 것만 세는 누적값).
-SELECTION_TIME_MARKET_COLS: frozenset[str] = frozenset({"sox_ret", "spx_ret"})
+# 선정 시점에 쓸 수 있는 **시황 축**(market_snapshot 컬럼). 판정 기준은 하나다:
+#   **채점이 보는 값과 선정이 쓴 값이 같은가.**
+# market_snapshot 이 시각 슬롯 다행(sql/66)이 된 뒤 그 조건은 슬롯이 구조로 보장한다 —
+# closing_bet 은 회차 시각의 슬롯을 읽고(주간 1430 / NXT 회차 1935), rule_evaluator 도 그 rule 이
+# 동작하는 레이어의 같은 슬롯으로 채점한다. **같은 행**이라 어긋날 수 없으므로 시각에 따라 값이
+# 달라지는 축(선물·VIX·환율·지수)도 열려 있다.
+#
+# ⚠️ 이 목록의 축은 '**14:30 시점의 시장 상태**'다(슬롯 1430). NXT 회차 전용 축은 아래
+#    EXECUTION_TIME_MARKET_COLS 로 따로 둔다 — 두 회차에서 뜻이 다른 축을 한 목록에 담으면
+#    rule 작성자가 어느 시각 값을 쓰는지 알 수 없다.
+#
+# ⛔ 여기 열려 있다는 건 '**측정 가능**'이라는 뜻일 뿐 승격 근거가 아니다 — 시황 축은 하루에
+#    표본 1개라 종목 축보다 수십 배 느리게 쌓인다. 승격은 평소 게이트(PROMO_*)가 판정한다.
+#    이 계열 미검증 축의 기각 이력: docs/history/gates-sizing.md
+#
+# 제외 축과 그 이유:
+#   k200f_night_ret — 야간세션이 18:00 에 시작하므로 주간 회차(1430)에서는 **전일 야간 종가**
+#                     (9시간 전)다. 같은 이름의 다른 변수라 주간 축으로 열면 rule 작성자가
+#                     모르고 후행 값을 쓴다. → 아래 EXECUTION_TIME_MARKET_COLS(NXT 회차 전용).
+#   ah_up3_cnt·ah_dn3_cnt — 17:50 수집(관측 슬롯 전용)이라 선정 시점에 없다.
+#   news_*_tone/_cnt      — '그 시각까지 라벨된 것만' 세는 누적값이라 슬롯마다 표본 수가 다르다.
+SELECTION_TIME_MARKET_COLS: frozenset[str] = frozenset({
+    "kospi_ret", "kosdaq_ret", "nq_fut_ret", "spx_ret", "sox_ret", "vix",
+    "usdkrw_ret", "wti_ret", "ewy_ret", "koru_ret", "skhy_ret",
+    "k200f_day_ret",
+})
+
+
+# NXT 회차(closing_bet 19:40, 슬롯 1935)에서 추가로 쓸 수 있는 시황 축.
+# 야간선물은 그 시각 야간세션이 살아 있어 **실시간 값**이다 — 주간 회차에선 전일 종가라 뜻이 다르다.
+# 이 축을 쓰는 rule 은 자연히 NXT 컬럼(`nxt_listed`·`nxt_gap_pct`)도 함께 쓰게 되므로
+# rule_layer 가 'execution' 으로 분류하고, 채점도 그 슬롯(1935)으로 이뤄진다.
+EXECUTION_TIME_MARKET_COLS: frozenset[str] = SELECTION_TIME_MARKET_COLS | frozenset({
+    "k200f_night_ret",
+})
 
 
 def _market_col_ok(col: str) -> bool:
-    """`market.` 컬럼이 선정 시점에 쓸 수 있는 축인지."""
+    """`market.` 컬럼이 **주간 선정 시점에** 쓸 수 있는 축인지."""
     return col[len(_MARKET_PREFIX):] in SELECTION_TIME_MARKET_COLS
+
+
+def _market_col_ok_exec(col: str) -> bool:
+    """`market.` 컬럼이 **NXT 회차에** 쓸 수 있는 축인지(야간선물 포함)."""
+    return col[len(_MARKET_PREFIX):] in EXECUTION_TIME_MARKET_COLS
 
 
 def selection_executable(predicate: list) -> tuple[bool, list[str]]:
@@ -155,11 +185,17 @@ EXECUTION_TIME_COLS: frozenset[str] = SELECTION_TIME_COLS | frozenset({
 
 
 def execution_executable(predicate: list) -> tuple[bool, list[str]]:
-    """predicate 가 **집행 시점(NXT 19:50)** 에 실행 가능한지. 반환: (가능 여부, 불가 컬럼 목록)."""
+    """predicate 가 **NXT 회차(선정 19:40 / 집행 19:50)** 에 실행 가능한지.
+
+    반환: (가능 여부, 불가 컬럼 목록). 시황 축은 `EXECUTION_TIME_MARKET_COLS`(야간선물 포함)를
+    허용한다 — 그 시각 슬롯(1935)이 closing_bet NXT 회차와 채점에 같은 값을 준다.
+    집행기(trading `edge_execution`)는 시장 스냅샷을 못 넘기므로 `market.` 축을 쓰는 rule 을
+    만나면 **판정 불가로 보고 매수**한다(그 모듈의 fail-open 규약).
+    """
     missing = []
     for cond in predicate or []:
         col = cond.get("col", "") if isinstance(cond, dict) else ""
-        ok = _market_col_ok(col) if col.startswith(_MARKET_PREFIX) else col in EXECUTION_TIME_COLS
+        ok = _market_col_ok_exec(col) if col.startswith(_MARKET_PREFIX) else col in EXECUTION_TIME_COLS
         if not ok:
             missing.append(col)
     return (not missing, missing)
