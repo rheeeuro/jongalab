@@ -1,8 +1,9 @@
 """Edge Ledger 텔레그램 알림(core/notifications.send_edge_rule_alert) 계약 고정.
 
-알림은 **두 축이 섞인 화면**이다 — 승격은 '승인해 달라', 운용 전이(live↔paused)는 '이미
-바꿨다'. 이 둘이 한 메시지에서 구분되지 않으면 자동 전이가 승인 대기로 읽혀(반대도 마찬가지)
-사람이 잘못 판단한다. 전송은 하지 않고 조립된 본문만 검사한다.
+알림에는 성격이 다른 줄이 섞인다 — **이미 바꿨다**(자동 승격 · live↔paused 전이)와
+**승인해 달라**(누적 게이트가 막은 승격 승인 대기 · 집행 설계 필요). 이 둘이 한 메시지에서
+구분되지 않으면 사후 보고가 승인 대기로 읽혀(반대도 마찬가지) 사람이 잘못 판단한다.
+전송은 하지 않고 조립된 본문만 검사한다.
 """
 import core.notifications as N
 
@@ -54,19 +55,52 @@ def test_transition_is_reported_not_requested(monkeypatch):
     msg = box["msg"]
     assert "자동 반영된 결과 보고" in msg and "승인 불필요" in msg
     assert "후보일 뿐입니다" not in msg
-    # 영구 종결과 헷갈리지 않게 못 박는다
-    assert "retired" in msg and "관리자만 결정" in msg
+    # 영구 종결과 헷갈리지 않게 못 박는다. 판정 탈락은 2026-08-21 부터 자동이므로 문구가
+    # 그 범위를 좁혀서 말한다 — '전부 사람이 결정한다'로 남으면 자동 종결과 모순된다.
+    assert "판정 탈락 **외의** 종결" in msg and "관리자만 결정" in msg
 
 
-def test_promotion_keeps_its_approval_wording(monkeypatch):
-    # 반대 방향 — 승격만 온 날에 전이 안내가 붙으면 '이미 승격됐다'로 읽힌다.
+def _promo(name, **kw):
+    return {"name": name, "family": "f1_news", "role": "selector", "n": 30,
+            "mean_net": 1.2, "ci_low": 0.3, "stage": "discovery", **kw}
+
+
+def test_pending_promotion_keeps_its_approval_wording(monkeypatch):
+    """누적 게이트가 막은 승격은 **승인 대기**다 — 사후 보고 문구가 붙으면 이미 올라간 것으로 읽힌다."""
     box = _capture(monkeypatch)
-    N.send_edge_rule_alert(
-        [{"name": "p", "family": "f1_news", "role": "selector", "n": 30,
-          "mean_net": 1.2, "ci_low": 0.3, "stage": "discovery"}], [], [])
+    N.send_edge_rule_alert([_promo("p", reason="신뢰구간 하한 미충족: ci_low=-0.02")], [], [])
     msg = box["msg"]
-    assert "승격은 관리자 승인이 필요합니다" in msg
-    assert "자동 반영된 결과 보고" not in msg
+    assert "승격 승인 대기" in msg and "관리자 승인이 필요합니다" in msg
+    assert "이미 반영된 결과 보고" not in msg
+
+
+def test_auto_promotion_is_reported_not_requested(monkeypatch):
+    """자동 승격은 승인 요청이 아니다 — '승인이 필요합니다'가 붙으면 버튼을 찾게 된다."""
+    box = _capture(monkeypatch)
+    N.send_edge_rule_alert([], [], [], [_promo("auto")])
+    msg = box["msg"]
+    assert "자동 승격" in msg and "이미 반영됨" in msg
+    assert "이미 반영된 결과 보고" in msg and "승인 불필요" in msg
+    assert "승인이 필요합니다" not in msg
+    # 승격이 자동이 된 뒤에도 (판정 탈락 외의) 종결은 사람 몫이라는 걸 못 박는다
+    assert "판정 탈락 **외의** 종결" in msg and "관리자만 결정" in msg
+
+
+def test_auto_promotion_alone_still_sends(monkeypatch):
+    # 자동 승격만 있는 날에도 알림이 나가야 한다(사후 보고라도 사람이 알아야 한다).
+    box = _capture(monkeypatch)
+    N.send_edge_rule_alert([], [], [], [_promo("auto")])
+    assert "auto" in box["msg"]
+
+
+def test_auto_and_pending_promotions_are_separate_sections(monkeypatch):
+    """올라간 줄과 막힌 줄이 한 섹션에 섞이면 무엇을 승인해야 하는지 알 수 없다."""
+    box = _capture(monkeypatch)
+    N.send_edge_rule_alert([_promo("held", reason="ci_low 미충족")], [], [], [_promo("up")])
+    msg = box["msg"]
+    auto_sec, pending_sec = msg.split("🟢")
+    assert "up" in auto_sec and "held" not in auto_sec
+    assert "held" in pending_sec and "up" not in pending_sec
 
 
 def test_reason_carries_the_streak_confirmation(monkeypatch):
@@ -93,3 +127,45 @@ def test_veto_line_marks_that_negative_is_normal(monkeypatch):
     tr["role"] = "veto"
     N.send_edge_rule_alert([], [tr], [])
     assert "제외 종목" in box["msg"] and "음수=정상" in box["msg"]
+
+
+def _ret(name, verdict="discovery_failed"):
+    return {"name": name, "family": "f5_supply", "role": "selector", "n": 24,
+            "mean_net": 1.349, "ci_low": -0.301, "verdict": verdict,
+            "reason": "발견창(첫 10거래일) 성적이 실전 투입 기준에 못 미쳐 종결했습니다"
+                      "(신뢰구간 하한 미충족). 다시 도전하려면 '재검증'으로 되돌리세요"}
+
+
+def test_auto_retirement_is_reported_with_the_way_back(monkeypatch):
+    """자동 종결은 사후 보고이고, **재도전 경로**가 줄에 없으면 화면에 '왜 죽었나'만 남는다."""
+    box = _capture(monkeypatch)
+    N.send_edge_rule_alert([], [], [], [], [_ret("r")])
+    msg = box["msg"]
+    assert "자동 종결" in msg and "이미 반영됨" in msg
+    assert "재검증" in msg and "표본 리셋" in msg
+    # 승인 요청이 아니다
+    assert "관리자 승인이 필요합니다" not in msg
+
+
+def test_auto_retirement_alone_still_sends(monkeypatch):
+    box = _capture(monkeypatch)
+    N.send_edge_rule_alert([], [], [], [], [_ret("only")])
+    assert "only" in box["msg"]
+
+
+def test_manual_retire_scope_is_narrowed_not_dropped(monkeypatch):
+    """판정 탈락은 자동이지만 그 **외의** 종결은 여전히 사람 몫 — 문구가 둘을 갈라야 한다."""
+    box = _capture(monkeypatch)
+    N.send_edge_rule_alert([], [_tr("t", "paused", -0.3)], [], [], [_ret("r")])
+    msg = box["msg"]
+    assert "판정 탈락 **외의** 종결" in msg and "관리자만 결정" in msg
+    # 옛 문구("영구 종결은 여전히 관리자만")가 남아 있으면 자동 종결과 모순된다
+    assert "영구 종결(retired)은 여전히 관리자만" not in msg
+
+
+def test_retirement_and_transition_are_separate_sections(monkeypatch):
+    box = _capture(monkeypatch)
+    N.send_edge_rule_alert([], [_tr("paused_one", "paused", -0.3)], [], [], [_ret("retired_one")])
+    pause_sec, retire_sec = box["msg"].split("🔴")
+    assert "paused_one" in pause_sec and "retired_one" not in pause_sec
+    assert "retired_one" in retire_sec and "paused_one" not in retire_sec

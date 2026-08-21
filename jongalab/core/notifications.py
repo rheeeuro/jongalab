@@ -302,17 +302,26 @@ def build_gap_check_message(
 
 
 def send_edge_rule_alert(
-    promotions: list[dict], transitions: list[dict], exec_pending: list[dict] | None = None
+    promotions: list[dict], transitions: list[dict], exec_pending: list[dict] | None = None,
+    promoted: list[dict] | None = None, retirements: list[dict] | None = None,
 ):
-    """Edge Ledger 알림 — 관리자(ADMIN)에게만. **두 축이 섞여 있으니 줄의 성격이 다르다.**
+    """Edge Ledger 알림 — 관리자(ADMIN)에게만. **줄마다 성격이 다르니 섹션을 섞지 않는다.**
 
-    promotions:   승격 후보(원장 축) — 승격 게이트를 통과한 candidate. **아직 승격 안 됐고
-                  사람이 승인해야 한다.** 매일 뜨지 않고 판정일에 1회만 온다(sql/39). 어느
-                  판정일인지는 `stage` 가 알려준다: `confirm` 은 발견 구간과 겹치지 않는 새
-                  표본에서 평균수익이 재현됐다는 뜻이고, `discovery` 는 확인창이 면제되는
-                  experimental 정책에서 발견 판정만으로 승격 가능해진 건이다.
+    promoted:     자동 승격(원장 축) — 판정일 게이트와 누적 게이트를 둘 다 통과해 평가기가
+                  **이미 candidate → live 로 올린** 건이다. 승인 요청이 아니라 사후 보고다.
+                  판정일에 1회만 온다(sql/39). 어느 판정일인지는 `stage` 가 알려준다:
+                  `confirm` 은 발견 구간과 겹치지 않는 새 표본에서 평균수익이 재현됐다는 뜻이고,
+                  `discovery` 는 확인창이 면제되는 experimental 정책에서 발견 판정만으로 승격
+                  가능해진 건이다.
+    promotions:   승격 **승인 대기** — 판정일 게이트는 통과했지만 누적 게이트가 미달이라 자동
+                  승격이 보류된 candidate. 종결이 아니고, 라우터로 수동 승격할 수 있다.
+                  무엇이 막고 있는지는 `reason` 에 실린다.
     exec_pending: 집행 설계 필요 — 통계는 확증됐지만 선정 시점(13~15시) 실행 불가 피처를 써서
                   승격이 막힌 candidate(집행 시점 재설계 후보). 통계 탈락이 아니므로 종결이 아니다.
+    retirements:  자동 종결(원장 축) — 판정(발견창/확인창)에서 탈락해 **이미 retired 로 내려간**
+                  건이다. 사후 보고이며, 재도전 경로는 `unretire`(표본 리셋) 하나뿐이라
+                  줄에 그 안내를 함께 싣는다. 판정 탈락이 아닌 종결(성적 붕괴·실행 불가 등)은
+                  여전히 관리자만 결정한다.
     transitions:  운용 전이(운용 축) — live ↔ paused 가 **이미 자동으로 바뀐** 사후 보고다.
                   승인 요청이 아니다. 판정 자는 **시장 조정 alpha**(절대 수익은 시장과
                   동기화되고, 초과수익은 beta=1 을 강제해 저beta 방어형 룰을 죽인다 —
@@ -324,7 +333,9 @@ def send_edge_rule_alert(
     전부 비면 전송하지 않는다.
     """
     exec_pending = exec_pending or []
-    if not promotions and not transitions and not exec_pending:
+    promoted = promoted or []
+    retirements = retirements or []
+    if not (promoted or promotions or transitions or exec_pending or retirements):
         return
 
     def _pct(v) -> str:
@@ -381,9 +392,14 @@ def send_edge_rule_alert(
 
     try:
         sections = []
+        if promoted:
+            sections.append(
+                "✅ *자동 승격 (candidate→live · 이미 반영됨)* — 판정 근거는 각 줄의 [ ] 표기\n"
+                + "\n".join(_rule_line(r) for r in promoted)
+            )
         if promotions:
             sections.append(
-                "🟢 *승격 후보 (candidate→live 검토)* — 판정 근거는 각 줄의 [ ] 표기\n"
+                "🟢 *승격 승인 대기 (판정일 통과, 누적 게이트 미달)*\n"
                 + "\n".join(_rule_line(r) for r in promotions)
             )
         if exec_pending:
@@ -405,14 +421,27 @@ def send_edge_rule_alert(
                 "▶️ *자동 복귀 (paused→live · 이미 반영됨)*\n"
                 + "\n".join(_rule_line(r, prefix="최근 평균순수익") for r in resumed)
             )
+        if retirements:
+            sections.append(
+                "🔴 *자동 종결 (판정 탈락 → retired · 이미 반영됨)*\n"
+                + "\n".join(_rule_line(r, prefix="판정 평균순수익") for r in retirements)
+            )
         # 안내는 실린 섹션에만 붙인다 — 승격만 온 날 전이 안내가 함께 붙으면 반대로 읽힌다.
         notes = []
-        if promotions or exec_pending:
-            notes.append("_승격은 관리자 승인이 필요합니다 — 아래는 후보일 뿐입니다._")
+        if promoted:
+            notes.append("_자동 승격은 **이미 반영된 결과 보고**입니다(승인 불필요 — "
+                         "성적이 꺾이면 자동 일시중지로 빠집니다)._")
+        if promotions:
+            notes.append("_승격 승인 대기는 관리자 승인이 필요합니다 — 누적 게이트가 막고 있습니다._")
+        if promoted or promotions or exec_pending:
             notes.append("_승격/집행설계는 판정일 1회만 옵니다(매일 재평가 폐지, sql/39)._")
         if transitions:
             notes.append("_일시중지·복귀는 **자동 반영된 결과 보고**입니다(승인 불필요, 되돌릴 수 있음)._")
-            notes.append("_영구 종결(retired)은 여전히 관리자만 결정합니다._")
+        if retirements:
+            notes.append("_판정 탈락은 **자동 종결**됩니다 — 되살리려면 '재검증'(표본 리셋)뿐이고, "
+                         "오늘부터의 새 표본으로 처음부터 판정합니다._")
+        if promoted or transitions or retirements:
+            notes.append("_판정 탈락 **외의** 종결(성적 붕괴·실행 불가 등)은 관리자만 결정합니다._")
         message = (
             "🧪 *[Edge Ledger] 상태 전이 알림*\n"
             + "\n".join(notes) + "\n"
@@ -421,8 +450,9 @@ def send_edge_rule_alert(
         )
         count = _send_telegram_admin(message)
         logging.info(
-            f"📨 Edge Ledger 알림 전송 -> {count}개 (승격후보 {len(promotions)} / "
-            f"집행설계필요 {len(exec_pending)} / 운용전이 {len(transitions)})"
+            f"📨 Edge Ledger 알림 전송 -> {count}개 (자동승격 {len(promoted)} / "
+            f"승격승인대기 {len(promotions)} / 집행설계필요 {len(exec_pending)} / "
+            f"운용전이 {len(transitions)} / 자동종결 {len(retirements)})"
         )
     except Exception as e:
         logging.error(f"❌ Edge Ledger 알림 실패: {e}")

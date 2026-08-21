@@ -3,10 +3,15 @@
 GET 은 대시보드 스코어보드가 쓰므로 공개, 변경(POST)만 개별 require_admin.
 
 상태 축이 **둘**이다(섞으면 안 된다):
-  · 원장(사람) — `candidate → live`(승격) / `→ retired`(종결) / `retired → candidate`(복귀).
-    승격은 코드가 정량 게이트(평균수익·거래일 수·신뢰구간 하한)를 강제하며 미충족 시 409 +
-    사유로 거부한다(force 없음 — 사전 등록 규율). **게이트를 통과하면 그대로 승격한다** —
-    통과 건수를 사람이 다시 줄이는 장치는 두지 않는다(아래 promote_edge_rule 주석).
+  · 원장 — `candidate → live`(승격) / `→ retired`(종결) / `retired → candidate`(복귀).
+    **승격은 `workers/rule_evaluator` 가 판정일에 자동으로 한다**(판정일 게이트 + 누적 게이트).
+    여기 두는 promote 는 자동 경로가 누적 게이트 때문에 보류한 건과 수동 개입용이고, 같은
+    정량 게이트(평균수익·거래일 수·신뢰구간 하한)를 강제하며 미충족 시 409 + 사유로 거부한다
+    (force 없음 — 사전 등록 규율). **게이트를 통과하면 그대로 승격한다** — 통과 건수를 사람이
+    다시 줄이는 장치는 두지 않는다(아래 promote_edge_rule 주석).
+    **판정 탈락(`discovery_failed`/`confirm_failed`)은 평가기가 자동으로 retired 로 내린다**
+    (2026-08-21) — 그래야 재도전 경로가 `unretire`(표본 리셋) 하나로 모인다. 아래 retire 는
+    **판정 탈락이 아닌 종결**(성적 붕괴·실행 불가 등) 전용이다.
     복귀는 `registered_at` 을 밀어 **표본을 리셋**한다(같은 표본 재시험 금지).
   · 운용(자동) — `live ↔ paused`. 되돌릴 수 있는 온오프라 `workers/rule_evaluator` 가 승인
     없이 굴린다. 여기 두는 pause/resume 은 **사람이 끼어들 때만** 쓰는 수동 경로이고,
@@ -139,7 +144,12 @@ def post_edge_rule(body: RuleCreate):
 
 @router.post("/{rule_id}/promote", dependencies=[Depends(require_admin)])
 def promote_edge_rule(rule_id: int):
-    """candidate → live 승격. 정량 게이트 미충족 시 409(force 불가).
+    """candidate → live 승격(**수동 경로**). 정량 게이트 미충족 시 409(force 불가).
+
+    ⚠️ 평소 승격은 `workers/rule_evaluator` 가 **판정일에 자동으로** 한다(판정일 게이트 +
+    아래와 같은 누적 게이트를 둘 다 통과하면 승격, 사후 보고). 이 엔드포인트는 그때 누적
+    게이트가 막아 '승인 대기'로 남은 건과 관리자 수동 개입용으로 남는다 — 조건이 같으므로
+    자동 경로가 수동 경로보다 느슨해지는 일은 없다.
 
     게이트 판정은 core.edge_policy.check_promotion **단일 소스**(라우터·평가기·프론트 공유):
     (selector) 평균수익>0 · 거래일 수 · ci_low>0 · 일 클러스터 t(t분포 임계값).
@@ -259,7 +269,12 @@ def unretire_edge_rule(rule_id: int):
 
 @router.post("/{rule_id}/retire", dependencies=[Depends(require_admin)])
 def retire_edge_rule(rule_id: int):
-    """live/paused/candidate → retired (가설 폐기·판정 종결). 원장 축이라 사람만 결정한다."""
+    """live/paused/candidate → retired (가설 폐기).
+
+    **판정 탈락은 여기 오지 않는다** — `workers/rule_evaluator._auto_retire` 가 판정일에 자동으로
+    내린다. 이 경로는 성적 붕괴·실행 불가처럼 **판정 밖의 사유**로 사람이 접을 때 쓴다.
+    되살리려면 `unretire`(표본 리셋)뿐이라 어느 경로로 내려왔든 재도전 조건은 같다.
+    """
     rule = get_rule(rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="rule 을 찾을 수 없습니다.")

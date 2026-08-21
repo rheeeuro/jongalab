@@ -11,12 +11,14 @@
      넘긴 날짜는 n=0 sentinel 로 종결한다(실시간 라벨은 소급 불가 — 영구 재시도 방지).
      이어서 rule 별 누적 통계(registered_at 이후 표본만, 사전 등록 원칙) 재계산.
   pass 2 (게이트·전이·알림): 모든 rule 의 통계가 신선해진 뒤 두 축을 따로 판정한다.
-     · **원장 축(사람)** — core.edge_policy.check_promotion(라우터 승격 게이트와 **동일 단일
+     · **원장 축** — core.edge_policy.check_promotion(라우터 승격 게이트와 **동일 단일
        소스**)으로 candidate 자격 판정 → stats.promo_eligible 저장(프론트 '승격후보' 배지가 이
-       값을 렌더링) → 알림: 승격 후보(게이트 전체 충족) / 집행 설계 필요(통계는 충족, 선정 시점
-       실행 불가 피처). 판정일 1회이며 **어느 판정일인지는 정책이 정한다** — strict 는 확인창
-       판정일, experimental 은 라우터 승격에서 판정 일정이 면제되므로 발견 판정일에 알린다
-       (두 경로가 어긋나면 화면만 '검증 통과'가 된다). 승격·retire 는 관리자 API 수동 승인.
+       값을 렌더링). 판정은 판정일 1회이며 **어느 판정일인지는 정책이 정한다** — strict 는
+       확인창 판정일, experimental 은 라우터 승격에서 판정 일정이 면제되므로 발견 판정일이다
+       (두 경로가 어긋나면 화면만 '검증 통과'가 된다). **판정일 게이트와 누적 게이트를 둘 다
+       통과하면 이 워커가 candidate → live 를 직접 승격시킨다**(승인 없음 · 사후 보고).
+       누적 게이트만 미달이면 승인 대기('승격 후보')로, 선정 시점 실행 불가 피처를 쓰면
+       '집행 설계 필요'로 남긴다. **retire(영구 종결)는 여전히 관리자만 결정한다.**
      · **운용 축(자동)** — live ↔ paused 를 core.edge_policy.decide_transition 으로 **이 워커가
        직접 전이시킨다**(승인 없음). 자는 시장 회귀 잔차 recent_alpha 이고 역할별 부호가 반대다
        (selector 는 매수 종목 alpha<0, veto 는 제외 종목 alpha>0 일 때 내린다). 절대 수익이
@@ -393,6 +395,74 @@ def _past_deadline(d: str) -> bool:
         return False
 
 
+def _retire_reason(window: str, reasons: list[str]) -> str:
+    """판정 탈락 종결 사유 — 프론트(`lib/edge.retireReason`)가 **그대로 보여주는** 문장이다.
+
+    게이트 사유 문자열은 콜론 뒤에 초심자용 설명이 붙어 있어 그대로 이으면 길다 → 앞부분만
+    쓰고, **재도전 경로**를 함께 적는다(그게 없으면 화면에 '왜 죽었나'만 남고 '어떻게
+    되살리나'가 없다 — 2026-08-21 에 정확히 그 상태였다).
+    """
+    detail = " / ".join(r.split("—")[0].strip() for r in reasons) or "기준 미충족"
+    return (f"{window} 성적이 실전 투입 기준에 못 미쳐 종결했습니다({detail}). "
+            "다시 도전하려면 '재검증'으로 되돌리세요 — 오늘부터 쌓이는 새 표본으로 처음부터 "
+            "판정합니다(같은 표본으로 다시 시험하지는 않습니다).")
+
+
+def _auto_retire(rule: dict, retirements: list) -> None:
+    """판정에서 탈락한 candidate 를 **retired 로 내린다**(자동, 2026-08-21 사용자 결정).
+
+    candidate 로 남겨 두면 `decision_stage` 가 영구히 `decided` 라 `decision_due` 가 None 이고,
+    **이후 표본이 아무리 쌓여도 자동 재판정 경로가 없다.** 그런데 누적 게이트(`check_promotion`)는
+    새 표본까지 포함해 계속 재계산되므로, 탈락한 룰이 화면 '검증 통과'와 수동 승격 버튼에는
+    올라온다 — 하루짜리 급등으로 뒤집히는 자(`ci_low`, 종목-일 iid)로 실탄에 오르는 경로만
+    열린 셈이다(실례: `f5_foreign_broker_top` 은 08-13 하루를 빼면 게이트가 그대로 탈락).
+    retired 로 내리면 `unretire`(= `registered_at` 을 오늘로 밀어 **표본 리셋**)가 유일한
+    재도전 경로가 되어, 같은 표본 재시험 없이 길이 열린다.
+    근거·경위: docs/history/edge-ledger.md 2026-08-21 항목.
+    """
+    set_rule_status(rule["id"], "retired")
+    rule["status"] = "retired"
+    stats = rule["stats"]
+    retirements.append({
+        "name": rule["name"], "family": rule["family"], "role": rule_role(rule),
+        "n": stats["n"], "mean_net": stats["mean_net"], "ci_low": stats["ci_low"],
+        "verdict": rule["decision"]["verdict"],
+        "reason": rule["decision"]["retire_reason"],
+    })
+    logger.info(f"[자동종결] {rule['name']} → retired "
+                f"({rule['decision']['verdict']}) — 재도전은 재검증(표본 리셋)뿐")
+
+
+def _promote_or_hold(row: dict, rule: dict, gate: dict,
+                    promoted: list, promotions: list) -> None:
+    """판정일을 통과한 candidate 를 **자동 승격**하거나, 누적 게이트 미달이면 승인 대기로 남긴다.
+
+    자동 승격 조건은 두 겹이다:
+      ① 판정일 게이트 — 호출부가 이미 확인했다(발견창/확인창의 **사전 등록된 1회 시험**).
+      ② 누적 게이트   — `check_promotion` 을 현재 stats 로 다시 통과해야 한다.
+    ②를 함께 요구하는 이유: 지금까지 사람이 누른 버튼이 그 조건을 봤다
+    (`routers/edge_rule.promote_edge_rule`). 자동화가 수동 경로보다 느슨해지면, 판정일엔
+    통과했지만 **지금은 게이트 미달인** rule 이 사람 손으로는 못 올라갈 경로로 올라간다.
+    ②만 미달이면 종결이 아니라 승인 대기다 — 라우터로 언제든 수동 승격할 수 있고, 화면의
+    `promo_eligible` 배지가 그 자격을 계속 렌더링한다.
+
+    매일 재검사하지 않는 것이 이 함수의 불변식이다 — 호출부가 판정일에만 부르므로
+    optional stopping 이 생기지 않는다(근거: docs/history/edge-ledger.md 판정 일정).
+    """
+    if not gate["eligible"]:
+        promotions.append({**row, "reason": " / ".join(gate["stat_reasons"]
+                                                      + gate["exec_reasons"])})
+        logger.info(f"[승격보류] {rule['name']} — 판정일 통과, 누적 게이트 미달: "
+                    f"{gate['stat_reasons'] + gate['exec_reasons']} (수동 승격 가능)")
+        return
+    set_rule_status(rule["id"], "live")
+    rule["status"] = "live"
+    promoted.append(row)
+    logger.info(f"[자동승격] {rule['name']} candidate→live — "
+                f"판정 {row.get('stage')}, 평균순수익 {row.get('mean_net')}%, "
+                f"CI하한 {row.get('ci_low')}%")
+
+
 def run():
     # retired 도 채점한다(2026-07-31 사용자 결정) — retire 는 '판정 종결'이고 관측은 계속이다.
     # pass 2 의 게이트 분기가 candidate/live 만 타므로 알림·승격·강등에는 올라오지 않는다.
@@ -491,7 +561,7 @@ def run():
 
     # ── pass 2: 승격/강등 게이트 (모든 rule 의 stats 가 신선해진 뒤 — 판정 시점 정합) ──
     controls = [r for r in rules if rule_role(r) == "benchmark" and r["status"] == "live"]
-    promotions, exec_pending, transitions = [], [], []
+    promoted, promotions, exec_pending, transitions, retirements = [], [], [], [], []
     for rule in rules:
         stats = rule["stats"]
         # 적용 중인 심사 정책은 **전역 설정**이라 상태와 무관하게 전 rule 에 남긴다 — candidate
@@ -538,10 +608,15 @@ def run():
                     },
                 }
                 if not d_pass:
-                    # 발견 탈락 = 종결. 자동 retire 는 하지 않는다(전이는 관리자 수동).
+                    # 발견 탈락 = 종결. **retired 로 내린다**(_auto_retire 주석 참고) —
+                    # candidate 로 남기면 자동 재판정 경로가 없는데 수동 승격 경로만 열린다.
                     rule["decision"]["decided_at"] = str(date.today())
                     rule["decision"]["verdict"] = "discovery_failed"
+                    rule["decision"]["retire_reason"] = _retire_reason(
+                        "발견창(첫 10거래일)", d_gate["stat_reasons"])
                 update_rule_decision(rule["id"], rule["decision"])
+                if not d_pass:
+                    _auto_retire(rule, retirements)
                 logger.info(
                     f"[판정:발견] {rule['name']} — {'통과→확인창 대기' if d_pass else '탈락(종결)'}"
                     f"{' (단 선정 시점 실행 불가)' if d_gate['exec_reasons'] else ''}"
@@ -549,16 +624,17 @@ def run():
                     f"t {d_stats.get('t_days')}, 참고 초과 {d_stats.get('mean_exc')}%)"
                 )
                 # experimental 은 라우터 승격에서 **판정 일정이 면제**되므로(routers/edge_rule.py)
-                # 발견 통과 시점에 이미 승격 가능하다. 확인창까지 기다려 알리면 화면은 '검증 통과'
-                # 인데 알림만 없는 구간이 최대 CONFIRM_DAYS 거래일 생긴다 → 두 경로를 맞춘다.
-                # strict 에서는 그대로 확인창 판정까지 알리지 않는다.
+                # 발견 통과 시점이 곧 승격 시점이다. 확인창까지 기다리면 화면은 '검증 통과'인데
+                # 아무 일도 안 일어나는 구간이 최대 CONFIRM_DAYS 거래일 생긴다 → 두 경로를 맞춘다.
+                # strict 에서는 그대로 확인창 판정일까지 승격하지 않는다.
                 if d_pass and EDGE_PROMO_POLICY == "experimental":
                     if d_gate["exec_reasons"]:
                         exec_pending.append(
                             {**row, "reason": d_gate["exec_reasons"][0], "stage": "discovery"})
                     else:
-                        promotions.append(
-                            {**row, "mean_exc": d_stats.get("mean_exc"), "stage": "discovery"})
+                        _promote_or_hold(
+                            {**row, "mean_exc": d_stats.get("mean_exc"), "stage": "discovery"},
+                            rule, gate, promoted, promotions)
             elif due == "confirm":
                 c_stats = _recompute_stats(
                     _slice_sample_days(rule["_daily_rows"], DISCOVERY_DAYS,
@@ -574,6 +650,8 @@ def run():
                 }
                 dec["decided_at"] = str(date.today())
                 dec["verdict"] = "confirmed" if conf["pass"] else "confirm_failed"
+                if not conf["pass"]:
+                    dec["retire_reason"] = _retire_reason("확인창", conf["reasons"])
                 rule["decision"] = dec
                 update_rule_decision(rule["id"], dec)
                 logger.info(
@@ -581,19 +659,21 @@ def run():
                     f" (확인창 거래일 {conf['n_days']}, 평균수익 {conf.get('mean_net')}%, "
                     f"참고 초과 {conf['mean_exc']}%)"
                 )
+                if not conf["pass"]:
+                    _auto_retire(rule, retirements)
                 if conf["pass"]:
-                    # 확인창까지 통과 — 이때만 알린다. 실행 가능성은 여기서 다시 확인한다
+                    # 확인창까지 통과 — 이때만 승격한다. 실행 가능성은 여기서 다시 확인한다
                     # (통계는 확증됐는데 선정 시점 실행 불가면 '집행 설계 필요' 분기).
                     if gate["exec_reasons"]:
                         exec_pending.append(
                             {**row, "reason": gate["exec_reasons"][0], "stage": "confirm"})
                     else:
-                        promotions.append({
+                        _promote_or_hold({
                             **row,
                             "confirm_mean_net": c_stats.get("mean_net"),   # 판정에 쓴 값
                             "mean_exc": c_stats.get("mean_exc"),           # 참고 표기
                             "stage": "confirm",
-                        })
+                        }, rule, gate, promoted, promotions)
         elif rule["status"] in ("live", "paused"):
             # ── 운용 전이(live ↔ paused) — 자동. 판정은 core.edge_policy.decide_transition ──
             # 새 표본이 없는 실행에서는 alpha 가 그대로라 **아무 것도 세지 않는다**(같은 값을
@@ -633,11 +713,12 @@ def run():
             f"최악저가={stats['worst_low_ret']}"
         )
 
-    if promotions or transitions or exec_pending:
-        send_edge_rule_alert(promotions, transitions, exec_pending)
+    if promoted or promotions or transitions or exec_pending or retirements:
+        send_edge_rule_alert(promotions, transitions, exec_pending, promoted, retirements)
     logger.info(
-        f"평가 완료 — 승격 후보 {len(promotions)} / 집행 설계 필요 {len(exec_pending)} / "
-        f"운용 전이 {len(transitions)}"
+        f"평가 완료 — 자동 승격 {len(promoted)} / 승격 승인대기 {len(promotions)} / "
+        f"집행 설계 필요 {len(exec_pending)} / 운용 전이 {len(transitions)} / "
+        f"자동 종결 {len(retirements)}"
     )
 
 

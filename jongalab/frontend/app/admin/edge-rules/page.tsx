@@ -137,6 +137,10 @@ export default function EdgeRulesAdminPage() {
           <b>서버가 검증</b>하며, 미충족 시 사유와 함께 거부됩니다(강제 불가). 각 카드의{" "}
           <b>&ldquo;남은 조건&rdquo;</b>이 서버가 판단한 미충족 항목입니다.
           <br />
+          조건을 모두 채운 전략은 <b>판정일에 서버가 자동으로 실전 투입</b>합니다(승인 불필요).
+          판정일은 전략마다 한 번뿐이라, 그 뒤에 조건을 채운 전략은 아래에서 기다립니다 —{" "}
+          <b>&ldquo;지금 투입&rdquo;</b>은 그걸 앞당겨 넣는 버튼입니다.
+          <br />
           적용 중인 전략은 매일 성적을 다시 재서, 시장 몫을 뺀 수익이 연달아 마이너스면{" "}
           <b>자동으로 잠시 쉬게</b> 하고 회복되면 <b>자동으로 다시 씁니다</b>(승인 불필요·되돌릴 수
           있음). 아래 버튼은 그 판단에 사람이 먼저 끼어들 때 씁니다. <b>종료</b>만 영구입니다.
@@ -155,15 +159,16 @@ export default function EdgeRulesAdminPage() {
         </p>
       )}
 
-      {/* ① 검증 통과 — 실전 투입 대기 */}
+      {/* ① 검증 통과 — 판정일이 지나 자동 투입을 못 받은 건(또는 판정일 전) 대기 목록.
+          자동 승격은 rule_evaluator 가 판정일에 하므로, 여기 남은 건은 '앞당겨 넣기'다. */}
       <Section
-        title="검증 통과 — 실전 투입 대기"
+        title="검증 통과 — 자동 투입 대기"
         icon={<ShieldCheck className="h-4 w-4 text-rose-500" />}
         empty="아직 검증을 통과한 전략이 없습니다. 검증 중 전략이 조건을 충족하면 텔레그램으로 알려드립니다."
         rules={ready}
         render={(r) => (
           <ActionButton
-            label="실전 투입"
+            label="지금 투입"
             icon={<Rocket className="h-3.5 w-3.5" />}
             busy={acting === r.id}
             onClick={() => act(r, "promote")}
